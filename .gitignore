@@ -1,0 +1,12 @@
+node_modules/
+out/
+release/
+dist-types-node/
+dist-types-web/
+coverage/
+*.log
+.env
+.env.local
+.DS_Store
+Thumbs.db
+cubex-data/

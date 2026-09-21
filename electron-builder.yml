@@ -1,0 +1,40 @@
+appId: dev.cubex.harness
+productName: Cubex
+copyright: Cubex — Intelligence. Open. Limitless.
+directories:
+  output: release
+  buildResources: resources
+files:
+  - out/**/*
+  - resources/**/*
+  - package.json
+asarUnpack:
+  - "**/*.node"
+npmRebuild: true
+# A single 1254×1254 PNG (the Cubex mark). electron-builder auto-generates the
+# platform icons (.ico / .icns) from it.
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: resources/icon.png
+  signAndEditExecutable: false
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Development
+  icon: resources/icon.png
+  maintainer: Cubex
+mac:
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+  category: public.app-category.developer-tools
+  icon: resources/icon.png
