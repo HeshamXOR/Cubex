@@ -111,6 +111,9 @@ interface CubexState {
 
   /** Per-conversation system prompt override set via /system. */
   sessionSystem?: string
+  /** Per-conversation goal set via /goal (kept in the system context each turn). */
+  sessionGoal?: string
+  setGoal: (goal: string | undefined) => void
 
   sendMessage: (text: string) => Promise<void>
   cancel: () => void
@@ -123,12 +126,26 @@ interface CubexState {
   settings?: AppSettings
   loadSettings: () => Promise<void>
   saveSettings: (patch: Partial<AppSettings>) => Promise<void>
+  pickWorkspace: () => Promise<void>
+  clearWorkspace: () => Promise<void>
 
   _initChatEvents: () => void
 }
 
 function emptyDebug(): DebugInfo {
   return { retryCount: 0, events: [], gatewayTrail: [] }
+}
+
+/** Compose the effective system prompt from base + workspace + goal context. */
+function composeSystem(
+  base: string | undefined,
+  ctx: { workspace?: string; goal?: string }
+): string | undefined {
+  const parts: string[] = []
+  if (base) parts.push(base)
+  if (ctx.workspace) parts.push(`The user's active workspace folder is: ${ctx.workspace}`)
+  if (ctx.goal) parts.push(`Current goal for this session — keep working toward it:\n${ctx.goal}`)
+  return parts.length ? parts.join('\n\n') : undefined
 }
 
 export const useStore = create<CubexState>((set, get) => ({
@@ -202,6 +219,7 @@ export const useStore = create<CubexState>((set, get) => ({
       debug: emptyDebug(),
       view: 'chat',
       sessionSystem: undefined,
+      sessionGoal: undefined,
       tabs: [...tabs, { id: conv.id, title: conv.title }],
       activeTabId: conv.id
     })
@@ -319,7 +337,10 @@ export const useStore = create<CubexState>((set, get) => ({
     }
 
     const preset = s.presets.find((p) => p.id === s.activePresetId)
-    const systemPrompt = s.sessionSystem ?? preset?.systemPrompt
+    const systemPrompt = composeSystem(s.sessionSystem ?? preset?.systemPrompt, {
+      workspace: s.settings?.general.workspacePath,
+      goal: s.sessionGoal
+    })
     const { streamId } = await api.startChat({
       conversationId: conv.id,
       policy,
@@ -379,8 +400,23 @@ export const useStore = create<CubexState>((set, get) => ({
       case 'system':
         set({ sessionSystem: parsed.rest || undefined })
         return true
+      case 'goal':
+        set({ sessionGoal: parsed.rest || undefined })
+        return true
+      case 'workspace':
+        await s.pickWorkspace()
+        return true
       case 'model':
         set({ panelOpen: true, panelTab: 'params' })
+        return true
+      case 'title':
+        if (parsed.rest && s.activeConversation) await s.renameActiveConversation(s.activeConversation.id, parsed.rest)
+        return true
+      case 'export':
+        if (s.activeConversation) {
+          const md = await api.exportConversation(s.activeConversation.id, 'markdown')
+          await navigator.clipboard.writeText(md).catch(() => undefined)
+        }
         return true
       case 'cost':
         set({ view: 'settings' })
@@ -395,6 +431,8 @@ export const useStore = create<CubexState>((set, get) => ({
         return false
     }
   },
+
+  setGoal: (goal) => set({ sessionGoal: goal }),
 
   cancel: () => {
     const id = get().streamId
@@ -422,6 +460,21 @@ export const useStore = create<CubexState>((set, get) => ({
     set({ settings, maxTokens: settings.ai.maxOutputTokens })
   },
   saveSettings: async (patch) => set({ settings: await api.updateSettings(patch) }),
+
+  pickWorkspace: async () => {
+    const path = await api.pickWorkspace()
+    if (!path) return
+    const s = get().settings
+    if (!s) return
+    await get().saveSettings({ general: { ...s.general, workspacePath: path } })
+  },
+  clearWorkspace: async () => {
+    const s = get().settings
+    if (!s) return
+    const { workspacePath, ...general } = s.general
+    void workspacePath
+    await get().saveSettings({ general })
+  },
 
   _initChatEvents: () => {
     api.onChatEvent((e: ChatEvent) => {

@@ -8,6 +8,18 @@ export interface AppSettings {
     theme: ThemeMode
     language: string
     startMaximized: boolean
+    /** The folder/project Cubex is scoped to (shown to the model as context). */
+    workspacePath?: string
+  }
+  appearance: {
+    /** Accent hex (drives --accent and the brand gradient). */
+    accent: string
+    /** UI font family key. */
+    font: 'inter' | 'system' | 'geist' | 'mono'
+    /** UI scale / density. */
+    density: 'comfortable' | 'compact'
+    /** Corner rounding. */
+    radius: 'sharp' | 'default' | 'round'
   }
   ai: {
     defaultProviderId?: string
@@ -42,6 +54,7 @@ export interface AppSettings {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   general: { theme: 'dark', language: 'en', startMaximized: false },
+  appearance: { accent: '#4f6cff', font: 'inter', density: 'comfortable', radius: 'default' },
   ai: {
     maxOutputTokens: 4096,
     retry: DEFAULT_RETRY_POLICY,

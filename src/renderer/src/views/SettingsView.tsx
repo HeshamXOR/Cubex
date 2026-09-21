@@ -1,9 +1,13 @@
 import { useStore } from '../state/store'
 import type { AppSettings } from '../../../shared/settings'
 
+const ACCENTS = ['#4f6cff', '#7b4dff', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899']
+
 export function SettingsView(): JSX.Element {
   const settings = useStore((s) => s.settings)
   const save = useStore((s) => s.saveSettings)
+  const pickWorkspace = useStore((s) => s.pickWorkspace)
+  const clearWorkspace = useStore((s) => s.clearWorkspace)
   if (!settings) return <div className="view"><div className="view__inner">Loading…</div></div>
 
   const patch = <K extends keyof AppSettings>(section: K, value: Partial<AppSettings[K]>): void => {
@@ -23,6 +27,43 @@ export function SettingsView(): JSX.Element {
         <Group title="General">
           <SelectRow label="Theme" value={settings.general.theme} options={[['dark', 'Dark'], ['light', 'Light'], ['system', 'System']]} onChange={(v) => patch('general', { theme: v as AppSettings['general']['theme'] })} />
           <ToggleRow label="Start maximized" on={settings.general.startMaximized} onChange={(v) => patch('general', { startMaximized: v })} />
+        </Group>
+
+        <Group title="Appearance">
+          <RowShell label="Accent color" hint="Drives the accent and brand gradient">
+            <div className="row" style={{ gap: 8 }}>
+              {ACCENTS.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => patch('appearance', { accent: c })}
+                  title={c}
+                  className="swatch"
+                  style={{ background: c, outline: settings.appearance.accent.toLowerCase() === c ? '2px solid var(--text-0)' : 'none' }}
+                />
+              ))}
+              <input
+                type="color"
+                className="swatch swatch--input"
+                value={settings.appearance.accent}
+                onChange={(e) => patch('appearance', { accent: e.target.value })}
+                title="Custom color"
+              />
+            </div>
+          </RowShell>
+          <SelectRow label="Font" value={settings.appearance.font} options={[['inter', 'Inter'], ['system', 'System'], ['geist', 'Geist'], ['mono', 'Monospace']]} onChange={(v) => patch('appearance', { font: v as AppSettings['appearance']['font'] })} />
+          <SelectRow label="Density" value={settings.appearance.density} options={[['comfortable', 'Comfortable'], ['compact', 'Compact']]} onChange={(v) => patch('appearance', { density: v as AppSettings['appearance']['density'] })} />
+          <SelectRow label="Corners" value={settings.appearance.radius} options={[['sharp', 'Sharp'], ['default', 'Default'], ['round', 'Rounded']]} onChange={(v) => patch('appearance', { radius: v as AppSettings['appearance']['radius'] })} />
+        </Group>
+
+        <Group title="Workspace">
+          <RowShell label="Working folder" hint={settings.general.workspacePath ?? 'No folder selected — the model is told your workspace path as context'}>
+            <div className="row" style={{ gap: 8 }}>
+              <button className="btn" onClick={() => void pickWorkspace()}>Choose folder</button>
+              {settings.general.workspacePath && (
+                <button className="btn btn--ghost" onClick={() => void clearWorkspace()}>Clear</button>
+              )}
+            </div>
+          </RowShell>
         </Group>
 
         <Group title="AI defaults">

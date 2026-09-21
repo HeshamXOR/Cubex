@@ -78,7 +78,8 @@ function browserStub(): CubexAPI {
     windowMinimize: noop,
     windowToggleMaximize: async () => false,
     windowClose: noop,
-    windowIsMaximized: async () => false
+    windowIsMaximized: async () => false,
+    pickWorkspace: async () => null
   }
 }
 

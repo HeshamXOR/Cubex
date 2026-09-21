@@ -79,7 +79,10 @@ const api: CubexAPI = {
   windowMinimize: () => invoke(IPC.windowMinimize),
   windowToggleMaximize: () => invoke(IPC.windowToggleMaximize),
   windowClose: () => invoke(IPC.windowClose),
-  windowIsMaximized: () => invoke(IPC.windowIsMaximized)
+  windowIsMaximized: () => invoke(IPC.windowIsMaximized),
+
+  // Workspace
+  pickWorkspace: () => invoke(IPC.pickWorkspace)
 }
 
 contextBridge.exposeInMainWorld('cubex', api)

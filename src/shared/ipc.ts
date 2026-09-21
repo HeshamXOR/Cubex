@@ -246,6 +246,9 @@ export interface CubexAPI {
   windowToggleMaximize(): Promise<boolean>
   windowClose(): Promise<void>
   windowIsMaximized(): Promise<boolean>
+
+  // Workspace
+  pickWorkspace(): Promise<string | null>
 }
 
 /** IPC channel names (invoke) — kept in one place for main + preload. */
@@ -292,5 +295,6 @@ export const IPC = {
   windowMinimize: 'win:minimize',
   windowToggleMaximize: 'win:toggle-maximize',
   windowClose: 'win:close',
-  windowIsMaximized: 'win:is-maximized'
+  windowIsMaximized: 'win:is-maximized',
+  pickWorkspace: 'workspace:pick'
 } as const

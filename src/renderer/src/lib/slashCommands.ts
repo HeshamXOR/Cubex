@@ -10,12 +10,16 @@ export interface SlashCommand {
 }
 
 export const SLASH_COMMANDS: SlashCommand[] = [
+  { name: 'goal', args: '<objective>', description: 'Set a goal the assistant keeps working toward' },
   { name: 'new', description: 'Start a new conversation' },
-  { name: 'clear', description: 'Clear the current conversation' },
-  { name: 'compact', description: 'Summarize older messages to save context' },
-  { name: 'model', args: '[provider]', description: 'Open the model picker' },
   { name: 'system', args: '<prompt>', description: 'Set a system prompt for this chat' },
+  { name: 'workspace', description: 'Choose the working folder for this session' },
+  { name: 'model', args: '[provider]', description: 'Open the model picker' },
+  { name: 'compact', description: 'Summarize older messages to save context' },
   { name: 'retry', description: 'Regenerate the last response' },
+  { name: 'title', args: '<name>', description: 'Rename this conversation' },
+  { name: 'export', description: 'Copy this conversation as Markdown' },
+  { name: 'clear', description: 'Clear the current conversation' },
   { name: 'cost', description: 'Show usage & cost' },
   { name: 'hardware', description: 'Open the Hardware Analyzer' },
   { name: 'settings', description: 'Open settings' }

@@ -1,22 +1,27 @@
-import { Brain, Loader2, PenLine, RotateCw, Sparkles, TriangleAlert, Wrench } from 'lucide-react'
 import type { HarnessState } from './StatusIndicator'
+import { AnimatedMark, type MarkMotion } from '../theme/AnimatedMark'
 import { formatElapsed, useElapsed } from '../lib/useElapsed'
 import './status.css'
 
-const VERB: Partial<Record<HarnessState, { label: string; icon: JSX.Element; spin?: boolean }>> = {
-  thinking: { label: 'Thinking', icon: <Brain size={15} /> },
-  working: { label: 'Working', icon: <Loader2 size={15} />, spin: true },
-  editing: { label: 'Editing', icon: <PenLine size={15} /> },
-  streaming: { label: 'Generating', icon: <Sparkles size={15} /> },
-  retrying: { label: 'Retrying', icon: <RotateCw size={15} />, spin: true },
-  falling_back: { label: 'Falling back', icon: <TriangleAlert size={15} /> },
-  running_tool: { label: 'Running tool', icon: <Wrench size={15} />, spin: true }
+const LABEL: Partial<Record<HarnessState, string>> = {
+  thinking: 'Thinking',
+  working: 'Working',
+  editing: 'Editing',
+  streaming: 'Generating',
+  retrying: 'Retrying',
+  falling_back: 'Falling back',
+  running_tool: 'Running tool'
+}
+
+function motionFor(state: HarnessState): MarkMotion {
+  if (state === 'streaming') return 'streaming'
+  if (state === 'working' || state === 'running_tool' || state === 'editing') return 'working'
+  return 'thinking'
 }
 
 /**
- * The in-thread harness activity block — the animated "Thinking… 4.2s" line
- * shown above the assistant's answer while it works, with a shimmering label,
- * a live elapsed timer, and an optional detail (tool name, fallback target).
+ * The in-thread harness activity block: the animated Cubex mark, a shimmering
+ * verb, an optional detail (tool name / fallback target), and a live timer.
  */
 export function ActivityRow({
   state,
@@ -27,14 +32,13 @@ export function ActivityRow({
   startedAt?: number
   detail?: string
 }): JSX.Element | null {
-  const active = state in VERB
-  const elapsed = useElapsed(startedAt, active)
-  const spec = VERB[state]
-  if (!spec) return null
+  const label = LABEL[state]
+  const elapsed = useElapsed(startedAt, !!label)
+  if (!label) return null
   return (
     <div className="activity">
-      <span className={spec.spin ? 'activity__icon activity__icon--spin' : 'activity__icon'}>{spec.icon}</span>
-      <span className="activity__label shimmer">{spec.label}</span>
+      <AnimatedMark size={20} state={motionFor(state)} />
+      <span className="activity__label shimmer">{label}</span>
       {detail && <span className="activity__detail">{detail}</span>}
       <span className="activity__time">{formatElapsed(elapsed)}</span>
     </div>

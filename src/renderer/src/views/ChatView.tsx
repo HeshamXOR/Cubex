@@ -10,18 +10,20 @@ import {
   ImageIcon,
   Lightbulb,
   Paperclip,
-  Plus,
   RefreshCw,
   ScanText,
   SendHorizontal,
   Square,
+  Target,
   Wrench,
+  X,
   Zap
 } from 'lucide-react'
 import { useStore } from '../state/store'
 import { effortOptionsFor } from '@core/providers'
 import { Markdown } from '../components/Markdown'
 import { ActivityRow } from '../status/ActivityRow'
+import { AnimatedMark } from '../theme/AnimatedMark'
 import { matchCommands } from '../lib/slashCommands'
 import { CubexMark, CubexWordmark } from '../theme/Logo'
 
@@ -53,14 +55,29 @@ export function ChatView(): JSX.Element {
   const setView = useStore((s) => s.setView)
   const runSlash = useStore((s) => s.runSlashCommand)
   const sessionSystem = useStore((s) => s.sessionSystem)
+  const sessionGoal = useStore((s) => s.sessionGoal)
+  const setGoal = useStore((s) => s.setGoal)
+  const activeModel = useStore((s) => s.activeModel)
+  const models = useStore((s) => s.models)
+  const setActive = useStore((s) => s.setActive)
+  const loadModels = useStore((s) => s.loadModels)
 
   const activeKind = providers.find((p) => p.id === activeProviderId)?.kind
   const effortOptions = activeKind ? effortOptionsFor(activeKind) : []
+  const activeModelName =
+    (activeProviderId && models[activeProviderId]?.find((m) => m.id === activeModel)?.displayName) ||
+    activeModel ||
+    'Select model'
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const [text, setText] = useState('')
   const [effortOpen, setEffortOpen] = useState(false)
+  const [modelOpen, setModelOpen] = useState(false)
+
+  useEffect(() => {
+    if (modelOpen && activeProviderId && !models[activeProviderId]) void loadModels(activeProviderId)
+  }, [modelOpen, activeProviderId, models, loadModels])
 
   const busy = BUSY.includes(status)
   const ready = !!activeProviderId && providers.some((p) => p.id === activeProviderId && p.enabled)
@@ -151,7 +168,13 @@ export function ChatView(): JSX.Element {
             {messages.map((m) => (
               <div className="msg" key={m.id}>
                 <div className={`msg__avatar msg__avatar--${m.role === 'user' ? 'user' : 'ai'}`}>
-                  {m.role === 'user' ? 'H' : <CubexMark size={15} />}
+                  {m.role === 'user' ? (
+                    'H'
+                  ) : m.streaming ? (
+                    <AnimatedMark size={17} state={m.text ? 'streaming' : 'thinking'} />
+                  ) : (
+                    <CubexMark size={15} />
+                  )}
                 </div>
                 <div className="msg__body">
                   <div className="msg__who">{m.role === 'user' ? 'You' : 'Cubex'}</div>
@@ -230,10 +253,24 @@ export function ChatView(): JSX.Element {
             ))}
           </div>
         )}
+        {sessionGoal && (
+          <div className="composer__banner composer__banner--goal">
+            <Target size={13} />
+            <span className="composer__banner-text">
+              <b>Goal:</b> {sessionGoal}
+            </span>
+            <button className="composer__banner-x" onClick={() => setGoal(undefined)} title="Clear goal">
+              <X size={13} />
+            </button>
+          </div>
+        )}
         {sessionSystem && (
-          <div className="composer__sysprompt" title={sessionSystem}>
-            <Wrench size={12} />
-            System prompt set for this chat · <span className="mono">{sessionSystem.slice(0, 60)}</span>
+          <div className="composer__banner" title={sessionSystem}>
+            <Wrench size={13} />
+            <span className="composer__banner-text">
+              <b>System:</b> {sessionSystem.slice(0, 80)}
+              {sessionSystem.length > 80 ? '…' : ''}
+            </span>
           </div>
         )}
         <div className="composer__box">
@@ -258,15 +295,64 @@ export function ChatView(): JSX.Element {
 
           <div className="composer__row">
             <div className="composer__left">
-              <button className="circbtn" title="Add context">
-                <Plus size={17} />
-              </button>
               <button className="circbtn" title="Attach file">
                 <Paperclip size={16} />
               </button>
               <button className="circbtn" title="Attach image">
                 <ImageIcon size={16} />
               </button>
+
+              {/* Provider + model picker, right in the chat. */}
+              <div style={{ position: 'relative' }}>
+                <button
+                  className={`pill ${modelOpen ? 'pill--open' : ''}`}
+                  onClick={() => setModelOpen((v) => !v)}
+                  title="Choose provider & model"
+                >
+                  <CubexMark size={13} />
+                  {activeModelName}
+                  <ChevronDown size={14} />
+                </button>
+                {modelOpen && (
+                  <>
+                    <div className="backdrop" onClick={() => setModelOpen(false)} />
+                    <div className="menu menu--models" style={{ bottom: 'calc(100% + 8px)', left: 0 }}>
+                      {providers.filter((p) => p.enabled).length === 0 && (
+                        <div className="menu__label">No providers — add one in Providers</div>
+                      )}
+                      {providers
+                        .filter((p) => p.enabled)
+                        .map((p) => (
+                          <div key={p.id}>
+                            <div className="menu__label">
+                              {p.name}
+                              <span className={`badge badge--${p.accessType === 'local' ? 'local' : 'cloud'}`} style={{ marginLeft: 6 }}>
+                                {p.accessType === 'local' ? 'LOCAL' : 'CLOUD'}
+                              </span>
+                            </div>
+                            {(models[p.id] ?? (p.defaultModel ? [{ id: p.defaultModel, displayName: p.defaultModel }] : [])).map(
+                              (m) => (
+                                <button
+                                  key={m.id}
+                                  className={`menu__item ${activeProviderId === p.id && activeModel === m.id ? 'menu__item--sel' : ''}`}
+                                  onClick={() => {
+                                    setActive(p.id, m.id)
+                                    setModelOpen(false)
+                                  }}
+                                >
+                                  <span className="menu__t">{m.displayName}</span>
+                                  {activeProviderId === p.id && activeModel === m.id && (
+                                    <Check size={15} className="menu__check" />
+                                  )}
+                                </button>
+                              )
+                            )}
+                          </div>
+                        ))}
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
 
             <div className="composer__right">

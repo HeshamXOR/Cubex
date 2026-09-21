@@ -1,8 +1,10 @@
 import {
   Archive,
   Blocks,
+  ChevronsUpDown,
   ChevronUp,
   Cpu,
+  FolderOpen,
   Gauge,
   type LucideIcon,
   MessageSquare,
@@ -34,6 +36,12 @@ const WORKSPACE: Array<{ id: ViewId; label: string; icon: LucideIcon }> = [
   { id: 'presets', label: 'Presets', icon: Star }
 ]
 
+/** Last path segment of a folder path (handles both / and \). */
+function basename(p: string): string {
+  const parts = p.split(/[\\/]/).filter(Boolean)
+  return parts[parts.length - 1] ?? p
+}
+
 /** Bucket conversations into Today / Yesterday / Last 7 Days / Older. */
 function groupByDate(items: ConversationSummary[]): Array<[string, ConversationSummary[]]> {
   const now = new Date()
@@ -64,6 +72,8 @@ export function Sidebar(): JSX.Element {
   const openConversation = useStore((s) => s.openConversation)
   const newConversation = useStore((s) => s.newConversation)
   const deleteConversation = useStore((s) => s.deleteConversation)
+  const workspace = useStore((s) => s.settings?.general.workspacePath)
+  const pickWorkspace = useStore((s) => s.pickWorkspace)
 
   const chatLike = view === 'chat' || view === 'pinned' || view === 'archive'
   const groups = groupByDate(conversations)
@@ -137,6 +147,14 @@ export function Sidebar(): JSX.Element {
       </div>
 
       <div className="sidebar__footer">
+        <button className="workspace" onClick={() => void pickWorkspace()} title={workspace ?? 'Choose a workspace folder'}>
+          <FolderOpen size={16} strokeWidth={1.9} />
+          <span className="workspace__label">
+            {workspace ? <span className="workspace__name">{basename(workspace)}</span> : 'Choose workspace'}
+            {workspace && <span className="workspace__path">{workspace}</span>}
+          </span>
+          <ChevronsUpDown size={13} style={{ marginLeft: 'auto', color: 'var(--text-3)', flexShrink: 0 }} />
+        </button>
         <button className={`nav ${view === 'settings' ? 'nav--active' : ''}`} onClick={() => setView('settings')}>
           <Settings size={17} strokeWidth={1.9} />
           Settings

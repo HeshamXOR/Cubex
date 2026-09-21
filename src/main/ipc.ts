@@ -1,4 +1,4 @@
-import { ipcMain, type BrowserWindow } from 'electron'
+import { dialog, ipcMain, type BrowserWindow } from 'electron'
 import { nanoid } from 'nanoid'
 import { IPC, type ChatEvent, type Conversation, type PullProgress } from '@shared/ipc'
 import type { ProviderConfig } from '@core/types'
@@ -142,6 +142,17 @@ export function registerIpc(getWindow: () => BrowserWindow | null): () => void {
     getWindow()?.close()
   })
   handle(IPC.windowIsMaximized, () => getWindow()?.isMaximized() ?? false)
+
+  // --- Workspace ---
+  handle(IPC.pickWorkspace, async () => {
+    const win = getWindow()
+    const result = await dialog.showOpenDialog(win ?? undefined!, {
+      title: 'Choose a workspace folder',
+      properties: ['openDirectory', 'createDirectory']
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    return result.filePaths[0]!
+  })
 
   // Cleanup on teardown.
   return () => {
