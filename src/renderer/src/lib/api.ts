@@ -29,6 +29,7 @@ function browserStub(): CubexAPI {
     startChat: async () => ({ streamId: 'browser' }),
     cancelChat: noop,
     onChatEvent: () => () => undefined,
+    resolvePermission: noop,
     listConversations: empty,
     getConversation: async () => null,
     createConversation: async (p) => ({

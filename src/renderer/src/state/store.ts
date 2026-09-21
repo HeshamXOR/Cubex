@@ -10,9 +10,17 @@ import type {
   Usage
 } from '@core/types'
 import { DEFAULT_RETRY_POLICY } from '@core/types'
-import type { ReasoningEffort } from '@core/types'
+import type { MessageContentPart, ReasoningEffort } from '@core/types'
 import { defaultEffortFor } from '@core/providers'
-import type { ChatEvent, Conversation, ConversationSummary, Preset, StoredMessage } from '../../../shared/ipc'
+import type {
+  ChatEvent,
+  Conversation,
+  ConversationSummary,
+  PermissionAsk,
+  Preset,
+  StoredMessage,
+  ToolActivity
+} from '../../../shared/ipc'
 import type { AppSettings } from '../../../shared/settings'
 import { api } from '../lib/api'
 import type { HarnessState } from '../status/StatusIndicator'
@@ -53,7 +61,7 @@ export interface DebugInfo {
 export interface LiveMessage extends StoredMessage {
   reasoning?: string
   streaming?: boolean
-  toolCalls?: Array<{ name: string; id: string }>
+  toolCalls?: ToolActivity[]
 }
 
 interface CubexState {
@@ -102,8 +110,17 @@ interface CubexState {
   toggleWebSearch: () => void
   subagents: boolean
   toggleSubagents: () => void
+  fileTools: boolean
+  toggleFileTools: () => void
   longContext: boolean
   toggleLongContext: () => void
+  /** Pending tool-permission request awaiting the user's decision. */
+  pendingPermission?: PermissionAsk
+  resolvePermission: (id: string, decision: 'allow' | 'deny') => void
+  /** Composer attachments (image/file content parts) for the next message. */
+  attachments: MessageContentPart[]
+  addAttachment: (part: MessageContentPart) => void
+  clearAttachments: () => void
   effort?: ReasoningEffort
   setEffort: (e: ReasoningEffort) => void
   maxTokens: number
@@ -288,8 +305,18 @@ export const useStore = create<CubexState>((set, get) => ({
   toggleWebSearch: () => set((s) => ({ webSearch: !s.webSearch })),
   subagents: false,
   toggleSubagents: () => set((s) => ({ subagents: !s.subagents })),
+  fileTools: false,
+  toggleFileTools: () => set((s) => ({ fileTools: !s.fileTools })),
   longContext: false,
   toggleLongContext: () => set((s) => ({ longContext: !s.longContext })),
+  pendingPermission: undefined,
+  resolvePermission: (id, decision) => {
+    void api.resolvePermission(id, decision)
+    set({ pendingPermission: undefined })
+  },
+  attachments: [],
+  addAttachment: (part) => set((s) => ({ attachments: [...s.attachments, part] })),
+  clearAttachments: () => set({ attachments: [] }),
   effort: undefined,
   setEffort: (e) => set({ effort: e }),
   maxTokens: 4096,
@@ -346,10 +373,12 @@ export const useStore = create<CubexState>((set, get) => ({
       policy,
       userText: text,
       subagentEnabled: s.subagents,
+      fileToolsEnabled: s.fileTools,
       longContext: s.longContext,
+      ...(s.attachments.length ? { attachments: s.attachments } : {}),
       ...(systemPrompt ? { systemPrompt } : {})
     })
-    set({ streamId })
+    set({ streamId, attachments: [] })
   },
 
   clearActive: async () => {
@@ -480,10 +509,34 @@ export const useStore = create<CubexState>((set, get) => ({
     api.onChatEvent((e: ChatEvent) => {
       if (e.streamId !== get().streamId) return
       if (e.kind === 'gateway') applyGatewayEvent(set, get, e.event)
-      else applyStreamEvent(set, get, e.event)
+      else if (e.kind === 'stream') applyStreamEvent(set, get, e.event)
+      else if (e.kind === 'tool') applyToolEvent(set, e.tool)
+      else if (e.kind === 'permission') set({ pendingPermission: e.ask })
     })
   }
 }))
+
+/** Merge a tool-activity update into the latest assistant message. */
+function applyToolEvent(set: SetFn, tool: ToolActivity): void {
+  const editing = tool.name === 'write_file' && tool.phase === 'running'
+  set((s) => {
+    const msgs = [...s.liveMessages]
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i]!.role === 'assistant') {
+        const existing = msgs[i]!.toolCalls ?? []
+        const idx = existing.findIndex((t) => t.id === tool.id)
+        const next = idx >= 0 ? existing.map((t, j) => (j === idx ? { ...t, ...tool } : t)) : [...existing, tool]
+        msgs[i] = { ...msgs[i]!, toolCalls: next }
+        break
+      }
+    }
+    return {
+      liveMessages: msgs,
+      status: editing ? 'editing' : tool.phase === 'running' ? 'running_tool' : s.status,
+      statusDetail: tool.phase === 'running' ? tool.title : undefined
+    }
+  })
+}
 
 type SetFn = (partial: Partial<CubexState> | ((s: CubexState) => Partial<CubexState>)) => void
 type GetFn = () => CubexState
@@ -519,15 +572,9 @@ function applyStreamEvent(set: SetFn, get: GetFn, ev: AIStreamEvent): void {
       updateAssistant(set, (m) => ({ ...m, text: m.text + ev.text }))
       break
     case 'tool_call':
-      set({
-        status: 'running_tool',
-        statusDetail: ev.toolCall.name,
-        debug: { ...dbg, events: [...dbg.events, `tool_call:${ev.toolCall.name}`] }
-      })
-      updateAssistant(set, (m) => ({
-        ...m,
-        toolCalls: [...(m.toolCalls ?? []), { name: ev.toolCall.name, id: ev.toolCall.id }]
-      }))
+      // Tool cards are driven by the richer `tool` ChatEvents from the main
+      // process (with permission + diff stats); just note it in the debug trail.
+      set({ debug: { ...dbg, events: [...dbg.events, `tool_call:${ev.toolCall.name}`] } })
       break
     case 'usage':
       set({ debug: { ...get().debug, usage: ev.usage } })

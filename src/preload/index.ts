@@ -27,6 +27,7 @@ const api: CubexAPI = {
   startChat: (req) => invoke(IPC.startChat, req),
   cancelChat: (streamId) => invoke(IPC.cancelChat, streamId),
   onChatEvent: (cb) => subscribe(IPC.chatEvent, cb),
+  resolvePermission: (id, decision) => invoke(IPC.resolvePermission, id, decision),
 
   // Conversations
   listConversations: () => invoke(IPC.listConversations),

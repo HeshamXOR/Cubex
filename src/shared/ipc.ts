@@ -4,6 +4,7 @@ import type {
   BenchmarkResult,
   CompatibilityResult,
   GatewayEvent,
+  MessageContentPart,
   ModelInfo,
   NormalizedAIErrorData,
   ProviderConfig,
@@ -157,13 +158,41 @@ export interface ChatStartRequest {
   attachmentIds?: string[]
   /** Register the built-in subagent delegation tool for this turn. */
   subagentEnabled?: boolean
+  /** Register workspace-scoped file tools (read/list/search/write). */
+  fileToolsEnabled?: boolean
   /** Opt into a provider's 1M-context beta (for gated long-context models). */
   longContext?: boolean
+  /** Attachments (image/file content parts) to include with the user message. */
+  attachments?: MessageContentPart[]
+}
+
+/** Lifecycle of a single tool invocation, for the in-thread activity cards. */
+export interface ToolActivity {
+  id: string
+  name: string
+  phase: 'running' | 'done' | 'error'
+  /** Short human title, e.g. "Edit src/app.ts" or "Read README.md". */
+  title?: string
+  /** One-line detail / result summary. */
+  detail?: string
+  /** Diff stats for edit/write tools. */
+  added?: number
+  removed?: number
+}
+
+/** A permission request surfaced to the user before a tool runs. */
+export interface PermissionAsk {
+  id: string
+  toolName: string
+  title: string
+  detail?: string
 }
 
 export type ChatEvent =
   | { streamId: string; kind: 'stream'; event: AIStreamEvent }
   | { streamId: string; kind: 'gateway'; event: GatewayEvent }
+  | { streamId: string; kind: 'tool'; tool: ToolActivity }
+  | { streamId: string; kind: 'permission'; ask: PermissionAsk }
 
 export interface PullRequest {
   runtime: string
@@ -191,6 +220,8 @@ export interface CubexAPI {
   startChat(req: ChatStartRequest): Promise<{ streamId: string }>
   cancelChat(streamId: string): Promise<void>
   onChatEvent(cb: (e: ChatEvent) => void): () => void
+  /** Resolve a tool permission request raised during a chat turn. */
+  resolvePermission(id: string, decision: 'allow' | 'deny'): Promise<void>
 
   // Conversations
   listConversations(): Promise<ConversationSummary[]>
@@ -261,6 +292,7 @@ export const IPC = {
   startChat: 'chat:start',
   cancelChat: 'chat:cancel',
   chatEvent: 'chat:event',
+  resolvePermission: 'chat:resolve-permission',
   listConversations: 'conv:list',
   getConversation: 'conv:get',
   createConversation: 'conv:create',

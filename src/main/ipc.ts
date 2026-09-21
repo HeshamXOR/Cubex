@@ -59,6 +59,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): () => void {
   // --- Chat ---
   handle(IPC.startChat, (req: Parameters<ChatService['start']>[0]) => chat.start(req))
   handle(IPC.cancelChat, (streamId: string) => chat.cancel(streamId))
+  handle(IPC.resolvePermission, (id: string, decision: 'allow' | 'deny') => chat.resolvePermission(id, decision))
 
   // --- Conversations ---
   handle(IPC.listConversations, () => conversationRepo.listSummaries())

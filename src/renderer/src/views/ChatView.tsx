@@ -6,6 +6,7 @@ import {
   Code2,
   Copy,
   FileText,
+  FolderCog,
   Globe,
   ImageIcon,
   Lightbulb,
@@ -13,6 +14,7 @@ import {
   RefreshCw,
   ScanText,
   SendHorizontal,
+  ShieldAlert,
   Square,
   Target,
   Wrench,
@@ -22,6 +24,7 @@ import {
 import { useStore } from '../state/store'
 import { effortOptionsFor } from '@core/providers'
 import { Markdown } from '../components/Markdown'
+import { ToolCard } from '../components/ToolCard'
 import { ActivityRow } from '../status/ActivityRow'
 import { AnimatedMark } from '../theme/AnimatedMark'
 import { matchCommands } from '../lib/slashCommands'
@@ -50,6 +53,14 @@ export function ChatView(): JSX.Element {
   const toggleWebSearch = useStore((s) => s.toggleWebSearch)
   const subagents = useStore((s) => s.subagents)
   const toggleSubagents = useStore((s) => s.toggleSubagents)
+  const fileTools = useStore((s) => s.fileTools)
+  const toggleFileTools = useStore((s) => s.toggleFileTools)
+  const workspace = useStore((s) => s.settings?.general.workspacePath)
+  const pendingPermission = useStore((s) => s.pendingPermission)
+  const resolvePermission = useStore((s) => s.resolvePermission)
+  const attachments = useStore((s) => s.attachments)
+  const addAttachment = useStore((s) => s.addAttachment)
+  const clearAttachments = useStore((s) => s.clearAttachments)
   const effort = useStore((s) => s.effort)
   const setEffort = useStore((s) => s.setEffort)
   const setView = useStore((s) => s.setView)
@@ -71,9 +82,28 @@ export function ChatView(): JSX.Element {
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
+  const imgInputRef = useRef<HTMLInputElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [text, setText] = useState('')
   const [effortOpen, setEffortOpen] = useState(false)
   const [modelOpen, setModelOpen] = useState(false)
+
+  const onFiles = (files: FileList | null, asImage: boolean): void => {
+    if (!files) return
+    for (const file of Array.from(files)) {
+      const reader = new FileReader()
+      reader.onload = () => {
+        const dataUrl = String(reader.result)
+        const base64 = dataUrl.split(',')[1] ?? ''
+        if (asImage) {
+          addAttachment({ type: 'image', source: { kind: 'base64', mediaType: file.type || 'image/png', data: base64 } })
+        } else {
+          addAttachment({ type: 'file', source: { kind: 'base64', mediaType: file.type || 'application/octet-stream', data: base64 }, filename: file.name })
+        }
+      }
+      reader.readAsDataURL(file)
+    }
+  }
 
   useEffect(() => {
     if (modelOpen && activeProviderId && !models[activeProviderId]) void loadModels(activeProviderId)
@@ -193,10 +223,7 @@ export function ChatView(): JSX.Element {
                   )}
 
                   {m.toolCalls?.map((tc) => (
-                    <div className="toolcall" key={tc.id}>
-                      <Wrench size={13} />
-                      {tc.name}
-                    </div>
+                    <ToolCard key={tc.id} tool={tc} />
                   ))}
 
                   {m.error ? (
@@ -273,6 +300,46 @@ export function ChatView(): JSX.Element {
             </span>
           </div>
         )}
+
+        {pendingPermission && (
+          <div className="permbar">
+            <ShieldAlert size={16} style={{ color: 'var(--warn)', flexShrink: 0 }} />
+            <div className="permbar__body">
+              <div className="permbar__title">Allow {pendingPermission.title}?</div>
+              {pendingPermission.detail && <div className="permbar__detail">{pendingPermission.detail}</div>}
+            </div>
+            <div className="permbar__actions">
+              <button className="btn btn--ghost" onClick={() => resolvePermission(pendingPermission.id, 'deny')}>
+                Deny
+              </button>
+              <button className="btn btn--primary" onClick={() => resolvePermission(pendingPermission.id, 'allow')}>
+                Allow
+              </button>
+            </div>
+          </div>
+        )}
+
+        {attachments.length > 0 && (
+          <div className="attachrow">
+            {attachments.map((a, i) => (
+              <span className="attachchip" key={i}>
+                {a.type === 'image' && a.source.kind === 'base64' ? (
+                  <img src={`data:${a.source.mediaType};base64,${a.source.data}`} alt="" />
+                ) : (
+                  <FileText size={14} />
+                )}
+                {a.type === 'file' ? a.filename ?? 'file' : a.type === 'image' ? 'image' : a.type}
+                <button className="attachchip__x" onClick={clearAttachments} title="Remove all">
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
+        <input ref={imgInputRef} type="file" accept="image/*" multiple hidden onChange={(e) => { onFiles(e.target.files, true); e.target.value = '' }} />
+        <input ref={fileInputRef} type="file" multiple hidden onChange={(e) => { onFiles(e.target.files, false); e.target.value = '' }} />
+
         <div className="composer__box">
           <textarea
             ref={taRef}
@@ -295,10 +362,10 @@ export function ChatView(): JSX.Element {
 
           <div className="composer__row">
             <div className="composer__left">
-              <button className="circbtn" title="Attach file">
+              <button className="circbtn" title="Attach file" onClick={() => fileInputRef.current?.click()}>
                 <Paperclip size={16} />
               </button>
-              <button className="circbtn" title="Attach image">
+              <button className="circbtn" title="Attach image" onClick={() => imgInputRef.current?.click()}>
                 <ImageIcon size={16} />
               </button>
 
@@ -373,6 +440,17 @@ export function ChatView(): JSX.Element {
                 <Boxes size={14} />
                 Subagents {subagents ? 'on' : 'off'}
               </button>
+
+              {workspace && (
+                <button
+                  className={`pill ${fileTools ? 'pill--on' : ''}`}
+                  onClick={toggleFileTools}
+                  title="Give the model read/list/search/edit tools scoped to your workspace folder"
+                >
+                  <FolderCog size={14} />
+                  Files {fileTools ? 'on' : 'off'}
+                </button>
+              )}
 
               {effortOptions.length > 0 && (
                 <div style={{ position: 'relative' }}>
