@@ -1,4 +1,5 @@
-import type { CubexAPI } from '../../../shared/ipc'
+import type { ChatEvent, CubexAPI, PullProgress } from '../../../shared/ipc'
+import { seededApi } from './seeds'
 
 /**
  * Typed accessor for the preload-exposed API. The bridge attaches `window.cubex`
@@ -30,6 +31,31 @@ function browserStub(): CubexAPI {
     cancelChat: noop,
     onChatEvent: () => () => undefined,
     resolvePermission: noop,
+    listPermissionRules: empty,
+    removePermissionRule: noop,
+    getSessionChanges: empty,
+    revertSessionChanges: async () => ({ restored: [], skipped: [] }),
+    getGitStatus: async () => null,
+    gitCommit: async () => ({ ok: false, error: unavailable.message }),
+    gitSuggestMessage: async () => '',
+    rewindFiles: async () => ({ restored: [] }),
+    getDiagnostics: empty,
+    getDiagnosticsStatus: async () => ({ available: false, reason: unavailable.message }),
+    getReview: empty,
+    revertHunks: async () => ({ applied: [], conflicts: [], newHeadHash: null }),
+    markReviewed: noop,
+    undoRevert: async () => ({ restored: [] }),
+    sendReviewComments: async () => { throw new Error(unavailable.message) },
+    restoreCheckpoint: async () => ({ restored: [], skipped: [], failed: [] }),
+    previewRestore: async () => ({ checkpoint: false, files: [], blocked: [] }),
+    undoRestore: async () => { throw new Error(unavailable.message) },
+    resolveQuestion: noop,
+    resolvePlan: noop,
+    listPlans: empty,
+    getPlan: async () => null,
+    revealPlan: noop,
+    readCommandOutput: async () => { throw new Error('Saved command output is not available in browser preview.') },
+    revealCommandOutput: noop,
     listConversations: empty,
     getConversation: async () => null,
     createConversation: async (p) => ({
@@ -41,6 +67,7 @@ function browserStub(): CubexAPI {
       messages: []
     }),
     updateConversation: noop,
+    compactConversation: async () => ({ ok: false, error: 'Not available in browser preview.' }),
     deleteConversation: noop,
     searchConversations: empty,
     exportConversation: async () => '',
@@ -50,6 +77,8 @@ function browserStub(): CubexAPI {
     deletePreset: noop,
     getSettings: async () => (await import('../../../shared/settings')).DEFAULT_SETTINGS,
     updateSettings: async () => (await import('../../../shared/settings')).DEFAULT_SETTINGS,
+    listSkills: empty,
+    readSkill: async () => { throw new Error('Skill instructions are available in the Electron app.') },
     scanHardware: async () => ({
       cpu: { model: 'Browser preview', architecture: 'n/a', physicalCores: 0, logicalThreads: 0 },
       memory: { totalBytes: 0, availableBytes: 0 },
@@ -80,12 +109,152 @@ function browserStub(): CubexAPI {
     windowToggleMaximize: async () => false,
     windowClose: noop,
     windowIsMaximized: async () => false,
-    pickWorkspace: async () => null
+    pickWorkspace: async () => null,
+    readWorkspaceDir: empty,
+    searchWorkspaceFiles: empty,
+    revealPath: noop,
+    readWorkspaceFile: async () => { throw new Error('Files can be opened in the Electron app.') },
+    listWorkspaceDir: async () => ({ entries: [], omitted: 0 }),
+    findWorkspaceFiles: empty,
+    statWorkspacePaths: async (paths) => paths.map(() => ({ kind: 'missing' as const })),
+    setActiveConversation: noop,
+    onOpenConversation: () => () => undefined,
+    sendTestNotification: async () => ({ shown: false, reason: unavailable.message }),
+    listShells: empty,
+    listTasks: empty,
+    stopTask: async () => ({ ok: true }),
+    sendTaskInput: async () => ({ ok: true }),
+    testMcpServer: async () => ({ ok: false, durationMs: 0, tools: [], toolCount: 0, error: unavailable.message }),
+    getMcpStatus: empty,
+    testHook: async () => { throw new Error(unavailable.message) },
+    getUsageReport: async () => {
+      const none = { costUsd: 0, requests: 0, tokens: 0, byProvider: [], byModel: [] }
+      return { generatedAt: Date.now(), today: none, week: none, month: none, budget: { action: 'warn' as const, meters: [], spent: { daily: 0 } } }
+    },
+    refreshModels: async () => ({ ok: false, count: 0, message: unavailable.message }),
+    appInfo: async () => ({ version: '0.0.0', packaged: false, electron: '', chrome: '', node: '', platform: 'browser', arch: '', osRelease: '', dataDir: '', logsDir: '' }),
+    openAppFolder: async () => unavailable.message,
+    saveMcpSecret: async () => ({ ok: false, message: unavailable.message }),
+    forgetMcpSecrets: noop
   }
 }
 
-export const api: CubexAPI = window.cubex ?? browserStub()
+/**
+ * Layer representative mock data over the stub for design review, activated by
+ * `?seed` on the preview URL. Dev-only: `window.cubex` is always present in the
+ * packaged app, so this branch never runs there.
+ */
+function seededStub(): CubexAPI {
+  const base = browserStub()
+  // Preview scripts push chat events through `window.__emit`, the way main would.
+  const listeners = new Set<(e: ChatEvent) => void>()
+  ;(window as unknown as { __emit: (e: ChatEvent) => void }).__emit = (e) => listeners.forEach((listener) => listener(e))
+  // Downloads are simulated so the progress, cancel and failure states can be reviewed:
+  // `pull=hold` stops partway, `pull=fail` reports Ollama unreachable.
+  type PullEvent = PullProgress & { pullId: string }
+  const pullListeners = new Set<(p: PullEvent) => void>()
+  const pullTimers = new Map<string, number>()
+  const pullModels = new Map<string, string>()
+  const emitPull = (p: PullEvent): void => pullListeners.forEach((listener) => listener(p))
+  const runtimeDown = (): boolean => /[?&]runtime=down\b/.test(location.search)
+  const stub: CubexAPI = {
+    ...base,
+    onChatEvent: (cb) => {
+      listeners.add(cb)
+      return () => { listeners.delete(cb) }
+    },
+    scanHardware: async () => (await import('./previewSeed')).seedHardware,
+    analyzeModels: async () => (await import('./previewSeed')).seedCompatibility(),
+    listRuntimes: async () => (await import('./previewSeed')).seedRuntimes(runtimeDown()),
+    listLocalModels: async () => (runtimeDown() ? [] : [...(await import('./previewSeed')).seedLocalModels]),
+    deleteLocalModel: async (_runtime, modelId) => {
+      const { seedLocalModels } = await import('./previewSeed')
+      const index = seedLocalModels.findIndex((entry) => entry.id === modelId)
+      if (index >= 0) seedLocalModels.splice(index, 1)
+    },
+    onPullProgress: (cb) => {
+      pullListeners.add(cb)
+      return () => { pullListeners.delete(cb) }
+    },
+    pullModel: async (req) => {
+      const pullId = `seed-${Math.random().toString(36).slice(2, 8)}`
+      pullModels.set(pullId, req.modelId)
+      const flag = new URLSearchParams(location.search).get('pull')
+      const total = 4.9 * 1024 ** 3
+      const send = (p: Omit<PullProgress, 'modelId'>): void => emitPull({ pullId, modelId: req.modelId, ...p })
+      if (flag === 'fail') {
+        pullTimers.set(pullId, window.setTimeout(() => send({ status: 'error', done: true, error: 'Could not reach Ollama at http://127.0.0.1:11434. Make sure Ollama is running. (fetch failed)' }), 500))
+        return { pullId }
+      }
+      send({ status: 'pulling manifest', done: false })
+      let completed = 0
+      const tick = (): void => {
+        completed = Math.min(total, completed + total * (flag === 'hold' ? 0.38 : 0.12))
+        send({ status: 'downloading', completedBytes: completed, totalBytes: total, speedBps: 38.5 * 1024 ** 2, etaSeconds: Math.round((total - completed) / (38.5 * 1024 ** 2)), done: false })
+        if (flag === 'hold') return
+        if (completed < total) pullTimers.set(pullId, window.setTimeout(tick, 450))
+        else {
+          send({ status: 'verifying', done: false })
+          pullTimers.set(pullId, window.setTimeout(() => send({ status: 'success', done: true }), 600))
+        }
+      }
+      pullTimers.set(pullId, window.setTimeout(tick, 500))
+      return { pullId }
+    },
+    cancelPull: async (pullId) => {
+      window.clearTimeout(pullTimers.get(pullId))
+      emitPull({ pullId, modelId: pullModels.get(pullId) ?? '', status: 'cancelled', done: true })
+    },
+    listProviders: async () => (await import('./previewSeed')).seedProviders,
+    listModels: async (id) => (await import('./previewSeed')).seedModels[id] ?? [],
+    listConversations: async () => (await import('./previewSeed')).seedConversations,
+    getConversation: async (id) => (await import('./previewSeed')).seedConversation(id),
+    getSessionChanges: async () => (await import('./previewSeed')).seedChanges(),
+    revertSessionChanges: async (_id, paths) => (await import('./previewSeed')).seedRevert(paths),
+    getGitStatus: async () => ({ ...(await import('./previewSeed')).seedGit }),
+    // `suggest=slow` and `commit=fail` hold the commit sheet in its loading and error states for review.
+    gitSuggestMessage: async () => {
+      if (/[?&]suggest=slow\b/.test(location.search)) await new Promise((resolve) => setTimeout(resolve, 8000))
+      return 'Retry uploads on 429 and 5xx with backoff'
+    },
+    gitCommit: async (_id, request) => {
+      await new Promise((resolve) => setTimeout(resolve, 700))
+      const seed = await import('./previewSeed')
+      if (/[?&]commit=fail\b/.test(location.search)) return { ok: false, error: seed.seedCommitFailure }
+      seed.seedCommitted(request.paths.length)
+      const subject = request.message.split('\n')[0] ?? ''
+      return { ok: true, commit: 'e4f7a21', summary: `${subject}\n${request.paths.length} ${request.paths.length === 1 ? 'file' : 'files'} changed, 55 insertions(+), 3 deletions(-)` }
+    },
+    getUsage: async () => ({ today: 4.12, week: 18.4, month: 61.9, currency: 'USD', byProvider: {}, byModel: {} }),
+    searchWorkspaceFiles: async (query, limit = 50) => {
+      const { seedFiles } = await import('./previewSeed')
+      const q = (query ?? '').toLowerCase()
+      return seedFiles
+        .filter((f) => !q || f.path.toLowerCase().includes(q))
+        .slice(0, limit)
+        .map((f) => ({ name: f.path.split('/').pop() ?? f.path, path: f.path, isDirectory: false }))
+    },
+    getSettings: async () => {
+      const { DEFAULT_SETTINGS } = await import('../../../shared/settings')
+      const { SEED_WORKSPACE } = await import('./previewSeed')
+      return {
+        ...DEFAULT_SETTINGS,
+        general: {
+          ...DEFAULT_SETTINGS.general,
+          workspacePath: SEED_WORKSPACE,
+          recentWorkspaces: [SEED_WORKSPACE, 'C:\\Users\\dev\\code\\aurora-site']
+        }
+      }
+    }
+  }
+  // Feature seeds (lib/seeds/*.ts) win over the defaults above.
+  return { ...stub, ...seededApi(new URLSearchParams(location.search)) }
+}
+
+// `import.meta.env.DEV` is replaced at build time, which lets the bundler drop the seeded stub and every seed with it from the packaged app.
+const isSeed = import.meta.env.DEV && typeof location !== 'undefined' && /[?&]seed\b/.test(location.search)
 export const isBrowserPreview = !window.cubex
+export const api: CubexAPI = window.cubex ?? (isSeed ? seededStub() : browserStub())
 
 export function formatBytes(bytes: number | undefined): string {
   if (bytes === undefined || bytes <= 0) return '—'

@@ -1,4 +1,5 @@
 import { nanoid } from 'nanoid'
+import { assistantTurn } from '../builders'
 import type { AIMessage } from '../types/message'
 import type { AIRequest } from '../types/request'
 import type { AIResponse } from '../types/response'
@@ -9,7 +10,7 @@ import type {
   ToolExecutionContext,
   ToolResult
 } from '../types/tools'
-import type { ToolResultPart, ToolUsePart } from '../types/content'
+import type { ToolResultPart } from '../types/content'
 import type { AIGateway, GatewayCallOptions } from './AIGateway'
 
 export interface ToolRunResult {
@@ -48,14 +49,8 @@ export class ToolRunner {
         return { finalResponse: response, turns, toolInvocations }
       }
 
-      // Record the assistant's tool_use turn.
-      const assistantParts: ToolUsePart[] = response.toolCalls.map((tc) => ({
-        type: 'tool_use',
-        id: tc.id,
-        name: tc.name,
-        input: tc.input
-      }))
-      messages.push({ role: 'assistant', content: assistantParts })
+      // Record the assistant's tool_use turn as the model produced it.
+      messages.push(assistantTurn(response))
 
       // Execute each tool call under the permission gate.
       const resultParts: ToolResultPart[] = []

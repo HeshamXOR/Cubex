@@ -26,3 +26,12 @@ export type AIStreamEvent =
   | { type: 'error'; error: NormalizedAIError }
 
 export type AIStreamEventType = AIStreamEvent['type']
+
+/**
+ * Whether an event carries something the model produced (text, reasoning, a tool call), as opposed to bookkeeping
+ * such as the start, usage and stop events. Once any has been shown a request cannot be replayed, and a response
+ * that is producing output is no longer "waiting to begin".
+ */
+export function isOutputEvent(event: AIStreamEvent): boolean {
+  return event.type === 'text_delta' || event.type === 'reasoning_delta' || event.type === 'tool_call' || event.type === 'tool_call_delta'
+}

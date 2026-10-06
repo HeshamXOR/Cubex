@@ -1,16 +1,17 @@
 import { useEffect, useState } from 'react'
 
 /**
- * Live-updating elapsed seconds since `startedAt` (ms). Ticks ~10/s while
- * `active`, then freezes. Used by the harness activity indicators.
+ * Live-updating elapsed seconds since `startedAt` (ms). Ticks every `interval` ms
+ * while `active`, then freezes. Used by the harness activity indicators.
  */
-export function useElapsed(startedAt: number | undefined, active: boolean): number {
+export function useElapsed(startedAt: number | undefined, active: boolean, interval = 100): number {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     if (!active || startedAt === undefined) return
-    const id = setInterval(() => setNow(Date.now()), 100)
+    setNow(Date.now())
+    const id = setInterval(() => setNow(Date.now()), interval)
     return () => clearInterval(id)
-  }, [active, startedAt])
+  }, [active, startedAt, interval])
   if (startedAt === undefined) return 0
   return Math.max(0, (now - startedAt) / 1000)
 }

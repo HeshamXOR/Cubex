@@ -2,16 +2,17 @@ import { NormalizedAIError } from '../types/errors'
 import type { AIProvider } from '../types/provider'
 import type { AIRequest, RequestOptions } from '../types/request'
 import type { AIResponse } from '../types/response'
-import type { AIStreamEvent } from '../types/stream'
+import { isOutputEvent, type AIStreamEvent } from '../types/stream'
+import { resolveTimeouts, type ResolvedTimeouts } from '../types/timeout'
 import type {
-  GatewayEvent,
   GatewayEventHandler,
   RoutingPolicy,
   RoutingTarget
 } from '../types/routing'
-import { withRetry, type RetryHooks } from '../retry/RetryEngine'
+import { defaultSleep, isRetryable, nextDelay, withRetry, type RetryHooks } from '../retry/RetryEngine'
 import { normalizeUnknownError } from '../errors/normalize'
 import { StreamAccumulator } from '../streaming/accumulator'
+import { RequestWatchdog, isOverallTimeout, isWaitTimeout, timeoutError } from '../util/timeout'
 
 /** Resolves a providerId to a live AIProvider instance. */
 export type ProviderResolver = (providerId: string) => AIProvider | undefined
@@ -22,11 +23,19 @@ export interface GatewayCallOptions extends RequestOptions {
   retryHooks?: Partial<RetryHooks>
 }
 
+/** The limits one gateway call runs under, and the overall deadline that every attempt of that call shares. */
+interface CallLimits {
+  limits: ResolvedTimeouts
+  deadline?: number
+}
+
 /**
  * The single entry point the application uses. It:
  *  - resolves the primary target (and fallbacks, only if explicitly enabled)
  *  - wraps each provider call in the RetryEngine
  *  - emits lifecycle events (attempt / retry / fallback / final) for the UI
+ *  - owns every clock: the wait for a response to begin, the silence limit while it streams, and the optional
+ *    overall limit (see RequestWatchdog). A request that is still sending is cut by nothing but the overall limit
  *
  * The rest of the app never touches provider adapters directly.
  */
@@ -59,6 +68,26 @@ export class AIGateway {
     }
   }
 
+  /** The three limits for one call, from the policy and any per-call override, and when its overall limit runs out. */
+  private limitsFor(policy: RoutingPolicy, opts: GatewayCallOptions): CallLimits {
+    const limits = resolveTimeouts({ ...policy.timeout, ...opts.timeout })
+    return { limits, ...(limits.overallMs > 0 ? { deadline: Date.now() + limits.overallMs } : {}) }
+  }
+
+  /** The overall limit's error once its deadline has passed, so a retry or a fallback never starts a request with no time left. */
+  private pastDeadline(call: CallLimits, target: RoutingTarget): NormalizedAIError | undefined {
+    if (call.deadline === undefined || call.deadline > Date.now()) return undefined
+    return timeoutError({ kind: 'overall', ms: call.limits.overallMs }, target.providerId, this.resolve(target.providerId)?.name)
+  }
+
+  private newWatchdog(call: CallLimits, opts: GatewayCallOptions): RequestWatchdog {
+    return new RequestWatchdog({
+      limits: call.limits,
+      ...(call.deadline !== undefined ? { deadline: call.deadline } : {}),
+      ...(opts.signal ? { signal: opts.signal } : {})
+    })
+  }
+
   private retryHooksFor(
     target: RoutingTarget,
     policy: RoutingPolicy,
@@ -88,6 +117,7 @@ export class AIGateway {
   ): Promise<AIResponse> {
     const targets = this.buildTargets(policy)
     const emit = opts.onEvent
+    const call = this.limitsFor(policy, opts)
     let lastError: NormalizedAIError | undefined
 
     for (let i = 0; i < targets.length; i++) {
@@ -102,19 +132,38 @@ export class AIGateway {
       }
 
       try {
-        const provider = this.requireProvider(target)
         const req = this.mergeRequest(request, target)
+        // A wait that already took minutes is retried once, whatever the retry policy allows.
+        let waits = 0
         const response = await withRetry(
           async (attempt) => {
             emit?.({ type: 'attempt_start', target, attempt })
+            const expired = this.pastDeadline(call, target)
+            if (expired) throw expired
+            const watchdog = this.newWatchdog(call, opts)
+            let providerName = target.providerId
             try {
-              return await provider.sendMessage(req, this.callOptions(policy, opts))
+              // Resolve each attempt so changed routing permissions also apply
+              // to retries of a previously cached provider.
+              const provider = this.requireProvider(target)
+              providerName = provider.name || providerName
+              const result = await provider.sendMessage(req, this.callOptions(opts, call, watchdog))
+              // An adapter whose stream ends quietly when aborted returns what it had: a cut-off answer, not a response.
+              if (watchdog.reached && !opts.signal?.aborted) throw timeoutError(watchdog.reached, target.providerId, providerName)
+              return result
             } catch (err) {
-              throw err instanceof NormalizedAIError ? err : normalizeUnknownError(provider.id, err)
+              const reached = opts.signal?.aborted ? undefined : watchdog.reached
+              const error = reached
+                ? timeoutError(reached, target.providerId, providerName)
+                : err instanceof NormalizedAIError ? err : normalizeUnknownError(target.providerId, err)
+              if (isWaitTimeout(error)) waits++
+              throw error
+            } finally {
+              watchdog.dispose()
             }
           },
           policy.retry,
-          this.retryHooksFor(target, policy, opts)
+          { ...this.retryHooksFor(target, policy, opts), allowRetry: (error) => !isWaitTimeout(error) || waits <= 1 }
         )
         emit?.({ type: 'final', target, success: true })
         return response
@@ -124,9 +173,11 @@ export class AIGateway {
         // in a way the user didn't ask for — but the user opted into fallback,
         // so we do try the next target for any error except explicit cancel.
         if (lastError.category === 'CANCELLED') break
-        const hasNext = i < targets.length - 1
+        // The overall limit is a ceiling on the whole call: a fallback would start with no time left.
+        const hasNext = i < targets.length - 1 && !isOverallTimeout(lastError)
         if (!hasNext) {
           emit?.({ type: 'final', target, success: false })
+          break
         }
       }
     }
@@ -139,10 +190,16 @@ export class AIGateway {
     })
   }
 
-  private callOptions(policy: RoutingPolicy, opts: GatewayCallOptions): RequestOptions {
+  /**
+   * What a provider is called with. The gateway enforces every limit itself, with the watchdog's signal; the provider
+   * only learns the two limits an SDK client needs to size its own timeout, and tells the watchdog when it hears from
+   * the server (keep-alive comments that never become stream events included).
+   */
+  private callOptions(opts: GatewayCallOptions, call: CallLimits, watchdog: RequestWatchdog): RequestOptions {
     return {
-      ...(opts.signal ? { signal: opts.signal } : {}),
-      timeout: { ...policy.timeout, ...opts.timeout },
+      signal: watchdog.signal,
+      timeout: { requestMs: call.limits.firstResponseMs, streamIdleMs: call.limits.silenceMs },
+      onActivity: (kind) => watchdog.activity(kind === 'output'),
       ...(opts.headers ? { headers: opts.headers } : {})
     }
   }
@@ -160,6 +217,7 @@ export class AIGateway {
   ): AsyncGenerator<AIStreamEvent> {
     const targets = this.buildTargets(policy)
     const emit = opts.onEvent
+    const call = this.limitsFor(policy, opts)
     let lastError: NormalizedAIError | undefined
 
     for (let i = 0; i < targets.length; i++) {
@@ -173,26 +231,16 @@ export class AIGateway {
         })
       }
 
-      const provider = this.resolve(target.providerId)
-      if (!provider) {
-        lastError = new NormalizedAIError({
-          provider: target.providerId,
-          category: 'INVALID_REQUEST',
-          message: `Provider "${target.providerId}" is not configured.`,
-          classification: 'permanent',
-          retryable: false
-        })
-        continue
-      }
-
       const req = this.mergeRequest(request, target)
-      const attemptResult = yield* this.streamOneTarget(provider, req, policy, target, opts)
+      const attemptResult = yield* this.streamOneTarget(req, policy, target, opts, call)
       if (attemptResult.ok) {
         emit?.({ type: 'final', target, success: true })
         return
       }
       lastError = attemptResult.error
-      if (lastError.category === 'CANCELLED') {
+      // The overall limit is a ceiling on the whole call: a fallback would start with no time left.
+      if (attemptResult.partial || lastError.category === 'CANCELLED' || isOverallTimeout(lastError)) {
+        emit?.({ type: 'final', target, success: false })
         yield { type: 'error', error: lastError }
         return
       }
@@ -209,21 +257,23 @@ export class AIGateway {
    * decide about fallback.
    */
   private async *streamOneTarget(
-    provider: AIProvider,
     req: AIRequest,
     policy: RoutingPolicy,
     target: RoutingTarget,
-    opts: GatewayCallOptions
-  ): AsyncGenerator<AIStreamEvent, { ok: true } | { ok: false; error: NormalizedAIError }> {
+    opts: GatewayCallOptions,
+    call: CallLimits
+  ): AsyncGenerator<AIStreamEvent, { ok: true } | { ok: false; error: NormalizedAIError; partial?: true }> {
     const emit = opts.onEvent
     const maxAttempts = policy.retry.enabled ? policy.retry.maxAttempts : 1
+    // A wait that already took minutes is retried once, whatever the retry policy allows.
+    let waits = 0
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       if (opts.signal?.aborted) {
         return {
           ok: false,
           error: new NormalizedAIError({
-            provider: provider.id,
+            provider: target.providerId,
             category: 'CANCELLED',
             message: 'Request cancelled',
             classification: 'permanent',
@@ -232,50 +282,94 @@ export class AIGateway {
         }
       }
       emit?.({ type: 'attempt_start', target, attempt })
-      const acc = new StreamAccumulator(provider.id, req.model)
+      const expired = this.pastDeadline(call, target)
+      if (expired) {
+        emit?.({ type: 'attempt_error', target, attempt, error: expired, willRetry: false })
+        return { ok: false, error: expired }
+      }
+      const acc = new StreamAccumulator(target.providerId, req.model)
       let produced = false
+      let completed = false
+      // The clocks for this attempt. Its signal aborts the provider's own request, not just the iterator.
+      const watchdog = this.newWatchdog(call, opts)
+      let providerName = target.providerId
       try {
-        const iterable = provider.streamMessage(req, this.callOptions(policy, opts))
+        // Resolver policy failures are normal attempt failures: surface them
+        // through error events and only try another explicitly enabled target.
+        const provider = this.requireProvider(target)
+        providerName = provider.name || providerName
+        const iterable = provider.streamMessage(req, this.callOptions(opts, call, watchdog))
         for await (const ev of iterable) {
-          if (ev.type === 'text_delta' || ev.type === 'reasoning_delta' || ev.type === 'tool_call') {
-            produced = true
+          // Until the next read the consumer holds this event; its time is not the provider's silence.
+          watchdog.pause()
+          const output = isOutputEvent(ev)
+          watchdog.activity(output)
+          if (ev.type === 'completed') {
+            // The adapter's final response is authoritative. It may contain
+            // text, tool calls, and usage that never appeared as stream deltas.
+            // End the adapter iterator here instead of replacing its response
+            // with a second, partially accumulated completion.
+            completed = true
+            yield ev
+            return { ok: true }
           }
+          // Tool argument deltas are visible activity too. Retrying after a
+          // partial plan/call would append the next attempt to stale deltas.
+          if (output) produced = true
           if (ev.type === 'error') {
             throw ev.error
           }
           acc.push(ev)
           yield ev
+          watchdog.resume()
         }
+        // An adapter whose stream ends quietly when aborted must not pass for a finished answer.
+        if (watchdog.reached && !opts.signal?.aborted) throw timeoutError(watchdog.reached, target.providerId, providerName)
         // Synthesize a completed event if the adapter didn't emit one.
         yield { type: 'completed', response: acc.finalize() }
         return { ok: true }
       } catch (err) {
-        const error =
-          err instanceof NormalizedAIError ? err : normalizeUnknownError(provider.id, err)
+        // Iterator cleanup can throw while closing after a terminal completion.
+        // A response already delivered to the caller cannot be retracted or retried.
+        if (completed) return { ok: true }
+        const reached = opts.signal?.aborted ? undefined : watchdog.reached
+        const error = opts.signal?.aborted
+          ? new NormalizedAIError({ provider: target.providerId, category: 'CANCELLED', message: 'Request cancelled', classification: 'permanent', retryable: false })
+          : reached ? timeoutError(reached, target.providerId, providerName)
+            : err instanceof NormalizedAIError ? err : normalizeUnknownError(target.providerId, err)
+        if (isWaitTimeout(error)) waits++
 
         // If we already streamed content, we cannot safely retry/fallback.
         if (produced) {
           emit?.({ type: 'attempt_error', target, attempt, error, willRetry: false })
-          yield { type: 'error', error }
-          return { ok: true } // consumed on this target; don't fall back mid-stream
+          // The outer loop reports failure without replaying a partially shown
+          // response or treating the terminal error as a successful completion.
+          return { ok: false, error, partial: true }
         }
 
         const canRetry =
-          attempt < maxAttempts && policy.retry.enabled && this.retryableStream(error, policy)
+          attempt < maxAttempts && policy.retry.enabled && this.retryableStream(error, policy) && (!isWaitTimeout(error) || waits <= 1)
         emit?.({ type: 'attempt_error', target, attempt, error, willRetry: canRetry })
         if (!canRetry) {
           return { ok: false, error }
         }
         const delayMs = this.streamDelay(error, policy, attempt, opts)
         emit?.({ type: 'retry_wait', target, attempt, delayMs })
-        const sleepFn = opts.retryHooks?.sleep ?? this.sleep.bind(this)
-        await sleepFn(delayMs, opts.signal)
+        const sleepFn = opts.retryHooks?.sleep ?? defaultSleep
+        try {
+          await sleepFn(delayMs, opts.signal)
+        } catch {
+          // Stop pressed during back-off: a cancellation, never a raw AbortError.
+          return { ok: false, error: new NormalizedAIError({ provider: target.providerId, category: 'CANCELLED', message: 'Request cancelled', classification: 'permanent', retryable: false }) }
+        }
+      } finally {
+        watchdog.dispose()
       }
     }
     return {
       ok: false,
       error: new NormalizedAIError({
-        provider: provider.id,
+        provider: target.providerId,
         category: 'UNKNOWN',
         message: 'Stream retries exhausted',
         classification: 'unknown',
@@ -284,10 +378,9 @@ export class AIGateway {
     }
   }
 
+  /** Same per-condition rules (retryOn429, retryOn5xx, …) as non-streaming send(). */
   private retryableStream(error: NormalizedAIError, policy: RoutingPolicy): boolean {
-    if (error.classification === 'permanent' || error.category === 'CANCELLED') return false
-    if (error.classification === 'unknown') return policy.retry.unknownErrorBehavior === 'retry'
-    return true
+    return isRetryable(error, policy.retry)
   }
 
   private streamDelay(
@@ -296,24 +389,6 @@ export class AIGateway {
     attempt: number,
     opts: GatewayCallOptions
   ): number {
-    const rand = opts.retryHooks?.rand ?? Math.random
-    if (policy.retry.respectRetryAfter && typeof error.retryAfterMs === 'number') {
-      return Math.min(error.retryAfterMs, policy.retry.maxDelayMs)
-    }
-    const exp =
-      policy.retry.initialDelayMs * Math.pow(policy.retry.backoffMultiplier, Math.max(0, attempt - 1))
-    const capped = Math.min(exp, policy.retry.maxDelayMs)
-    return policy.retry.jitter === 'none' ? capped : Math.round(rand() * capped)
-  }
-
-  private sleep(ms: number, signal?: AbortSignal): Promise<void> {
-    return new Promise((resolve, reject) => {
-      if (signal?.aborted) return reject(new DOMException('Aborted', 'AbortError'))
-      const t = setTimeout(resolve, ms)
-      signal?.addEventListener('abort', () => {
-        clearTimeout(t)
-        reject(new DOMException('Aborted', 'AbortError'))
-      }, { once: true })
-    })
+    return nextDelay(error, policy.retry, attempt, opts.retryHooks?.rand ?? Math.random)
   }
 }

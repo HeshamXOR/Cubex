@@ -27,7 +27,9 @@ const SENSITIVE_VALUE_PATTERNS: RegExp[] = [
   /\bsk-ant-[A-Za-z0-9_-]{16,}\b/g, // Anthropic-style
   /\bBearer\s+[A-Za-z0-9._-]{12,}\b/gi,
   /\bghp_[A-Za-z0-9]{20,}\b/g, // GitHub PAT
-  /\bhf_[A-Za-z0-9]{16,}\b/g // Hugging Face token
+  /\bhf_[A-Za-z0-9]{16,}\b/g, // Hugging Face token
+  // Google API key (Gemini). Lookarounds rather than \b: the key may start or end with "-" or "_".
+  /(?<![A-Za-z0-9_-])AIza[0-9A-Za-z_-]{35}(?![A-Za-z0-9_-])/g
 ]
 
 export const REDACTED = '«redacted»'

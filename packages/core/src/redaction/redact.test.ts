@@ -14,6 +14,12 @@ describe('redactString', () => {
     expect(redactString('hf_ABCDEFGHIJKLMNOPQRST')).toContain(REDACTED)
     expect(redactString('ghp_ABCDEFGHIJKLMNOPQRSTUVWX')).toContain(REDACTED)
   })
+  it('redacts Google API keys, including ones that start or end with - or _', () => {
+    const body = 'SyA12345678901234567890123456789012'
+    expect(redactString(`key AIza${body} used`)).toBe(`key ${REDACTED} used`)
+    expect(redactString(`?key=AIza${body.slice(0, -1)}-`)).toBe(`?key=${REDACTED}`)
+    expect(redactString('AIza_too_short')).toBe('AIza_too_short')
+  })
   it('leaves innocuous text intact', () => {
     expect(redactString('hello world')).toBe('hello world')
   })

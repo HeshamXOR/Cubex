@@ -1,0 +1,2 @@
+data: {"candidates": [{"finishReason": "SAFETY","index": 0,"safetyRatings": [{"category": "HARM_CATEGORY_HARASSMENT","probability": "MEDIUM","blocked": true},{"category": "HARM_CATEGORY_DANGEROUS_CONTENT","probability": "NEGLIGIBLE"}]}],"usageMetadata": {"promptTokenCount": 11,"totalTokenCount": 11},"modelVersion": "gemini-2.5-flash","responseId": "Wb5CaK2rGoGtz7IPhfmyqQw"}
+

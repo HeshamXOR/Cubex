@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Check,
   CircleAlert,
@@ -13,49 +13,76 @@ import {
   Zap
 } from 'lucide-react'
 import { api, formatBytes } from '../lib/api'
+import { compactTokens } from '../lib/format'
+import { acceleratorLabel, acceleratorSummary, basisLabel, platformLabel, plainError } from '../lib/localModels'
 import type { ModelCompatibility } from '../../../shared/ipc'
 import type { CompatibilityStatus, SystemProfile } from '@core/types'
 
 const GOALS = [
-  { id: 'general', label: 'General Chat' },
+  { id: 'general', label: 'General chat' },
   { id: 'coding', label: 'Coding' },
   { id: 'reasoning', label: 'Reasoning' },
-  { id: 'fast', label: 'Fast Responses' },
-  { id: 'long_context', label: 'Long Context' },
+  { id: 'fast', label: 'Fast responses' },
+  { id: 'long_context', label: 'Long context' },
   { id: 'vision', label: 'Vision' },
-  { id: 'low_memory', label: 'Low Memory' },
-  { id: 'quality', label: 'Maximum Quality' }
+  { id: 'low_memory', label: 'Low memory' },
+  { id: 'quality', label: 'Maximum quality' }
 ]
 
-const STATUS: Record<CompatibilityStatus, { icon: JSX.Element; label: string; color: string }> = {
-  fits_vram: { icon: <Check size={14} />, label: 'Fits in VRAM', color: 'var(--ok)' },
-  offload_required: { icon: <TriangleAlert size={14} />, label: 'CPU/RAM offload', color: 'var(--warn)' },
-  may_be_slow: { icon: <CircleAlert size={14} />, label: 'May be slow', color: 'var(--warn)' },
-  insufficient_memory: { icon: <X size={14} />, label: 'Insufficient memory', color: 'var(--err)' },
-  unsupported_runtime: { icon: <X size={14} />, label: 'No compatible runtime', color: 'var(--err)' }
+const goalLabel = (id: string): string => GOALS.find((g) => g.id === id)?.label ?? id
+
+const STATUS: Record<CompatibilityStatus, { icon: JSX.Element; label: string; tone: 'ok' | 'warn' | 'err' }> = {
+  fits_vram: { icon: <Check size={14} aria-hidden="true" />, label: 'Fits in VRAM', tone: 'ok' },
+  offload_required: { icon: <TriangleAlert size={14} aria-hidden="true" />, label: 'Needs CPU and RAM offload', tone: 'warn' },
+  may_be_slow: { icon: <CircleAlert size={14} aria-hidden="true" />, label: 'May be slow', tone: 'warn' },
+  insufficient_memory: { icon: <X size={14} aria-hidden="true" />, label: 'Not enough memory', tone: 'err' },
+  unsupported_runtime: { icon: <X size={14} aria-hidden="true" />, label: 'No compatible runtime', tone: 'err' }
 }
 
 export function HardwareView(): JSX.Element {
   const [profile, setProfile] = useState<SystemProfile | null>(null)
   const [scanning, setScanning] = useState(false)
+  const [scanError, setScanError] = useState<string | null>(null)
   const [goal, setGoal] = useState('general')
-  const [models, setModels] = useState<ModelCompatibility[]>([])
+  const [models, setModels] = useState<ModelCompatibility[] | null>(null)
+  const [checkedGoal, setCheckedGoal] = useState<string | null>(null)
   const [analyzing, setAnalyzing] = useState(false)
+  const [analyzeError, setAnalyzeError] = useState<string | null>(null)
+  const mounted = useRef(true)
 
   const scan = async (force = false): Promise<void> => {
     setScanning(true)
-    setProfile(await api.scanHardware(force))
-    setScanning(false)
+    setScanError(null)
+    try {
+      const next = await api.scanHardware(force)
+      if (mounted.current) setProfile(next)
+    } catch (err) {
+      if (mounted.current) setScanError(`Could not read this PC's hardware. ${plainError(err)}`)
+    } finally {
+      if (mounted.current) setScanning(false)
+    }
   }
 
   const analyze = async (): Promise<void> => {
     setAnalyzing(true)
-    setModels(await api.analyzeModels(goal))
-    setAnalyzing(false)
+    setAnalyzeError(null)
+    try {
+      const next = await api.analyzeModels(goal)
+      if (mounted.current) {
+        setModels(next)
+        setCheckedGoal(goal)
+      }
+    } catch (err) {
+      if (mounted.current) setAnalyzeError(`Could not check which models fit. ${plainError(err)}`)
+    } finally {
+      if (mounted.current) setAnalyzing(false)
+    }
   }
 
   useEffect(() => {
+    mounted.current = true
     void scan()
+    return () => { mounted.current = false }
   }, [])
 
   const gpu = profile?.gpus[0]
@@ -63,85 +90,115 @@ export function HardwareView(): JSX.Element {
   return (
     <div className="view">
       <div className="view__inner">
-        <div className="view__title">Hardware Analyzer</div>
-        <div className="view__sub">
-          Your detected hardware and which local models it can realistically run. Every performance figure is an
-          explicit estimate shown as a range and labelled with its basis — never presented as a guarantee.
-        </div>
+        <h1 className="view__title">Hardware</h1>
+        <p className="view__sub">
+          Your PC and the local models it can run. Memory and speed are estimates shown as ranges, each labelled with
+          where it comes from.
+        </p>
 
-        <div className="row" style={{ justifyContent: 'space-between' }}>
-          <div className="h2" style={{ margin: 0 }}>Your system</div>
+        <div className="view__bar">
+          <h2 className="h2">Your system</h2>
           <button className="btn btn--ghost" onClick={() => void scan(true)} disabled={scanning}>
-            <RefreshCw size={14} className={scanning ? 'spin' : ''} /> {scanning ? 'Scanning…' : 'Re-scan'}
+            <RefreshCw size={14} aria-hidden="true" /> {scanning ? 'Scanning…' : 'Re-scan'}
           </button>
         </div>
 
+        {scanError && (
+          <div className="callout callout--error" role="alert">
+            <div className="callout__body">{scanError}</div>
+            <button className="callout__action" onClick={() => void scan(true)} disabled={scanning}>Try again</button>
+          </div>
+        )}
+        {!profile && !scanError && <p className="view__note">Scanning your hardware…</p>}
+
         {profile && (
-          <div className="grid grid--auto" style={{ marginTop: 12, marginBottom: 12 }}>
-            <Spec icon={<Cpu size={15} />} title="CPU" main={profile.cpu.model} lines={[
-              `${profile.cpu.physicalCores} cores · ${profile.cpu.logicalThreads} threads`,
-              profile.cpu.simd?.length ? profile.cpu.simd.join(', ') : profile.cpu.architecture
+          <div className="grid grid--auto specs">
+            <Spec icon={<Cpu size={15} aria-hidden="true" />} title="CPU" main={profile.cpu.model} lines={[
+              profile.cpu.physicalCores > 0 ? `${profile.cpu.physicalCores} cores, ${profile.cpu.logicalThreads} threads` : '',
+              profile.cpu.simd?.length ? profile.cpu.simd.map((flag) => flag.toUpperCase()).join(', ') : profile.cpu.architecture
             ]} />
-            <Spec icon={<MemoryStick size={15} />} title="Memory" main={formatBytes(profile.memory.totalBytes)} lines={[
-              `${formatBytes(profile.memory.availableBytes)} available`
+            <Spec icon={<MemoryStick size={15} aria-hidden="true" />} title="Memory" main={formatBytes(profile.memory.totalBytes)} lines={[
+              profile.memory.availableBytes > 0 ? `${formatBytes(profile.memory.availableBytes)} available` : ''
             ]} />
-            <Spec icon={<MonitorCog size={15} />} title="GPU" main={gpu?.model ?? 'None detected'} lines={
-              gpu ? [gpu.vramBytes ? `${formatBytes(gpu.vramBytes)} VRAM` : 'VRAM unknown', gpu.backends.join(', ')] : ['CPU inference only']
+            <Spec icon={<MonitorCog size={15} aria-hidden="true" />} title="GPU" main={gpu?.model ?? 'None detected'} lines={
+              gpu
+                ? [gpu.vramBytes ? `${formatBytes(gpu.vramBytes)} VRAM` : 'VRAM unknown', gpu.backends.map(acceleratorLabel).join(', ')]
+                : ['Models will run on the CPU']
             } />
-            <Spec icon={<HardDrive size={15} />} title="Storage" main={`${formatBytes(profile.storage.freeBytes)} free`} lines={[
-              profile.storage.isSSD === true ? 'SSD' : profile.storage.isSSD === false ? 'HDD' : 'Type unknown',
+            <Spec icon={<HardDrive size={15} aria-hidden="true" />} title="Storage" main={`${formatBytes(profile.storage.freeBytes)} free`} lines={[
+              profile.storage.isSSD === true ? 'SSD' : profile.storage.isSSD === false ? 'HDD' : '',
               profile.storage.modelsDir ?? ''
             ]} />
-            <Spec icon={<MonitorCog size={15} />} title="OS" main={`${profile.os.distro ?? profile.os.platform}`} lines={[
-              `${profile.os.release ?? ''} ${profile.os.arch}`.trim()
+            <Spec icon={<MonitorCog size={15} aria-hidden="true" />} title="System" main={profile.os.distro ?? platformLabel(profile.os.platform)} lines={[
+              [profile.os.release, profile.os.arch].filter(Boolean).join(', ')
             ]} />
-            <Spec icon={<Zap size={15} />} title="Acceleration" main={profile.accelerators.join(', ')} lines={[]} />
+            <Spec icon={<Zap size={15} aria-hidden="true" />} title="Acceleration" main={acceleratorSummary(profile.accelerators)} lines={[]} />
           </div>
         )}
 
-        <div className="h2">What can I run?</div>
-        <div className="row" style={{ marginBottom: 18 }}>
-          <select className="select" value={goal} onChange={(e) => setGoal(e.target.value)}>
+        <h2 className="h2">What can I run?</h2>
+        <div className="row view__controls">
+          <select className="select" value={goal} onChange={(e) => setGoal(e.target.value)} aria-label="What you want to run models for">
             {GOALS.map((g) => (
               <option key={g.id} value={g.id}>{g.label}</option>
             ))}
           </select>
           <button className="btn btn--primary" onClick={() => void analyze()} disabled={analyzing}>
-            <Search size={15} /> {analyzing ? 'Analyzing…' : 'Analyze My PC'}
+            <Search size={15} aria-hidden="true" /> {analyzing ? 'Checking your PC…' : 'Check my PC'}
           </button>
         </div>
 
+        {analyzeError && (
+          <div className="callout callout--error" role="alert">
+            <div className="callout__body">{analyzeError}</div>
+            <button className="callout__action" onClick={() => void analyze()} disabled={analyzing}>Try again</button>
+          </div>
+        )}
+        {models !== null && checkedGoal !== null && checkedGoal !== goal && !analyzing && (
+          <p className="view__note">These results are for {goalLabel(checkedGoal)}. Select Check my PC to update them.</p>
+        )}
+
         <div className="grid">
-          {models.map((m) => {
+          {(models ?? []).map((m) => {
             const meta = STATUS[m.status]
             const tps = m.speed.tokensPerSecond
+            const memory = m.memory.totalBytes
+            const speedKnown = m.status !== 'insufficient_memory' && m.status !== 'unsupported_runtime' && tps.high > 0
             return (
-              <div key={m.model.id} className="card">
-                <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div className="row">
-                      <span style={{ fontWeight: 600 }}>{m.model.displayName}</span>
-                      <span className="badge">{m.model.parameterCount}B · {m.model.quantization}</span>
-                    </div>
-                    <div className="muted" style={{ fontSize: 12.5, marginTop: 6, lineHeight: 1.55 }}>{m.reason}</div>
+              <article key={m.model.id} className="card fitcard" aria-label={m.model.displayName}>
+                <div className="fitcard__head">
+                  <div className="fitcard__name">
+                    <h3>{m.model.displayName}</h3>
+                    {m.model.parameterCount !== undefined && <span className="badge">{m.model.parameterCount}B</span>}
+                    {m.model.quantization && <span className="badge">{m.model.quantization}</span>}
                   </div>
-                  <span className="row" style={{ color: meta.color, fontWeight: 600, fontSize: 12.5, whiteSpace: 'nowrap', gap: 6 }}>
-                    {meta.icon} {meta.label}
+                  <span className="fit" data-tone={meta.tone}>
+                    {meta.icon}
+                    {meta.label}
+                    {m.tight && <span className="badge">Tight fit</span>}
                   </span>
                 </div>
-                <div className="row" style={{ marginTop: 14, gap: 24, flexWrap: 'wrap', fontSize: 12.5 }}>
-                  <Metric label="Est. memory" value={`${formatBytes(m.memory.totalBytes.low)} – ${formatBytes(m.memory.totalBytes.high)}`} />
-                  <Metric
-                    label={`Est. speed · ${m.speed.basis} · ${m.speed.confidence} confidence`}
-                    value={`${tps.low} – ${tps.high} tok/s`}
-                  />
-                  <Metric label="Fits on GPU" value={`${Math.round(m.gpuFraction * 100)}%`} />
-                </div>
-              </div>
+                <p className="fitcard__reason">{m.reason}</p>
+                <dl className="metrics">
+                  <Metric label="Estimated memory" value={`${formatBytes(memory.low)} to ${formatBytes(memory.high)}`} note={basisLabel(m.memory.basis)} />
+                  {speedKnown && (
+                    <Metric
+                      label="Estimated speed"
+                      value={`${tps.low} to ${tps.high} tok/s`}
+                      note={`${m.speed.confidence} confidence, ${basisLabel(m.speed.basis)}`}
+                    />
+                  )}
+                  <Metric label="Share on GPU" value={`${Math.round(m.gpuFraction * 100)}%`} />
+                  {m.recommendedContext !== undefined && <Metric label="Context with headroom" value={`${compactTokens(m.recommendedContext)} tokens`} />}
+                </dl>
+              </article>
             )
           })}
-          {models.length === 0 && !analyzing && (
-            <div className="empty">Pick a goal and click “Analyze My PC” to see what your hardware can run.</div>
+          {models !== null && models.length === 0 && !analyzing && (
+            <p className="view__empty">No models matched this goal. Choose another goal and check again.</p>
+          )}
+          {models === null && !analyzing && !analyzeError && (
+            <p className="view__empty">Choose what you want to run, then select Check my PC to see which models fit.</p>
           )}
         </div>
       </div>
@@ -151,24 +208,25 @@ export function HardwareView(): JSX.Element {
 
 function Spec({ icon, title, main, lines }: { icon: JSX.Element; title: string; main: string; lines: string[] }): JSX.Element {
   return (
-    <div className="card">
-      <div className="row muted" style={{ fontSize: 11.5, gap: 6 }}>
+    <div className="card spec">
+      <div className="spec__title">
         {icon}
         {title}
       </div>
-      <div style={{ fontWeight: 600, marginTop: 8, fontSize: 13.5 }}>{main}</div>
-      {lines.filter(Boolean).map((l, i) => (
-        <div key={i} className="muted" style={{ fontSize: 12, marginTop: 3 }}>{l}</div>
+      <div className="spec__main">{main}</div>
+      {lines.filter(Boolean).map((line, index) => (
+        <div key={index} className="spec__line">{line}</div>
       ))}
     </div>
   )
 }
 
-function Metric({ label, value }: { label: string; value: string }): JSX.Element {
+function Metric({ label, value, note }: { label: string; value: string; note?: string }): JSX.Element {
   return (
-    <div>
-      <div className="muted" style={{ fontSize: 11 }}>{label}</div>
-      <div style={{ fontWeight: 600, marginTop: 2 }}>{value}</div>
+    <div className="metric">
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+      {note && <dd className="metric__note">{note}</dd>}
     </div>
   )
 }

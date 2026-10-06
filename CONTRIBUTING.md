@@ -1,46 +1,52 @@
 # Contributing to Cubex
 
-Thanks for your interest in improving Cubex! This project is a provider-agnostic desktop AI
-harness, and contributions of all sizes are welcome.
+Thank you for your interest in improving Cubex. It is a desktop harness that lets one app work with many model providers and local runtimes, and contributions of any size are welcome.
 
 ## Getting started
 
+You need Node.js 20 or 22 and npm. See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the full setup.
+
 ```bash
-npm install      # installs deps + rebuilds native modules for Electron
-npm run dev      # launch the app
-npm test         # run the test suite (no credentials or GPU needed)
+npm install        # dependencies, then a native rebuild for Electron
+npm run dev        # start the app
+npm test           # run the test suite (no credentials or GPU needed)
 npm run typecheck
+npm run lint
 ```
 
-The **Mock provider** (built in, no API key) lets you develop and test the entire streaming /
-retry / tool pipeline offline.
+The built-in **Offline demo** provider needs no key, so you can work on the streaming, retry and tool pipeline without an account. `npm run dev:web` serves the renderer in a browser with sample data for quick interface work (see [docs/TESTING.md](docs/TESTING.md#visual-checks)).
+
+Cubex is developed and tested on Windows. The Linux and macOS builds are configured but not verified, and help checking them is welcome.
 
 ## Ground rules
 
-- **Type-safety first.** The codebase is strict TypeScript with `noUncheckedIndexedAccess`. Run
-  `npm run typecheck` before opening a PR.
-- **Keep the core pure.** `packages/core` must not import Electron or DOM APIs — that's what keeps
-  it testable with mocks. Node/Electron code lives in `src/main`; UI in `src/renderer`.
-- **Add tests.** New adapters, gateway behavior, or estimation logic should come with Vitest
-  coverage. See [docs/TESTING.md](docs/TESTING.md).
-- **Never present estimates as guarantees.** Performance numbers are ranges labeled
-  Theoretical / Runtime / Measured. Keep it that way.
-- **Official APIs only.** No web scraping, no subscription/rate-limit bypass, no reverse-engineered
-  private endpoints. See [docs/SECURITY.md](docs/SECURITY.md).
+- **Type safety.** The code is strict TypeScript with `noUncheckedIndexedAccess`. Run `npm run typecheck` before you open a pull request.
+- **Keep the core pure.** `packages/core` must not import Electron or DOM APIs. That is what keeps it testable with mocks. Node and Electron code lives in `src/main`, and the interface in `src/renderer`.
+- **Add tests.** New adapters, gateway behavior, tools and estimation logic come with Vitest coverage. See [docs/TESTING.md](docs/TESTING.md).
+- **Do not present estimates as guarantees.** Memory and speed figures are ranges with a stated basis. Keep it that way.
+- **Provider adapters use official APIs.** No scraping of web interfaces, no getting around rate limits or subscription terms, and no private endpoints. See [docs/SECURITY.md](docs/SECURITY.md).
 - **Never log or display secrets.** Route new sensitive fields through the redaction helpers.
+- **Treat renderer input as untrusted.** Validate ids, paths and sizes in the main-process handler.
 
 ## Adding a provider
 
-See [docs/PROVIDERS.md](docs/PROVIDERS.md). In short: implement the `AIProvider` interface (or
-extend `BaseProvider`), register it in `packages/core/src/providers/factory.ts`, and add
-translation + streaming tests.
+See [docs/PROVIDERS.md](docs/PROVIDERS.md). In short: implement the `AIProvider` interface (or extend `BaseProvider`), register the kind in `packages/core/src/providers/factory.ts`, and add translation and streaming tests. If the service speaks the OpenAI Chat Completions format, a preset in `src/shared/providerPresets.ts` is usually all it needs.
 
-## Commit & PR
+## Adding a feature
 
-- Branch from `main`; keep PRs focused.
-- Describe what changed, what you tested, and any known limitations.
-- CI runs typecheck + tests on Linux/macOS/Windows and must pass.
+New IPC handlers, settings sections, panel tabs and preview sample data are each a new file in a scanned folder, not an edit to a central list. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#extension-points) lists the folders. A new IPC channel also needs an entry in `src/shared/ipc.ts` and a bridge in `src/preload/index.ts`, and `src/main/ipcContract.test.ts` checks both.
 
-## Code of Conduct
+## Pull requests
 
-Be respectful and constructive. Harassment or discrimination of any kind is not tolerated.
+- Branch from `main` and keep each pull request focused.
+- Run `npm run lint`, `npm run typecheck`, `npm test` and `npm run build` before you push. CI runs the same four commands on Windows for every push and pull request to `main`, and they must pass.
+- Describe what changed, how you tested it, and any known limitations.
+- The repository normalizes line endings to LF (`.gitattributes`), so you do not need to convert files by hand.
+
+## Security issues
+
+Please do not open a public issue for a vulnerability. [docs/SECURITY.md](docs/SECURITY.md) explains how to report one privately.
+
+## Code of conduct
+
+Be respectful and constructive. Harassment and discrimination of any kind are not tolerated.

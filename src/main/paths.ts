@@ -4,8 +4,8 @@ import { existsSync, mkdirSync } from 'node:fs'
 
 /**
  * Centralized data paths. Everything lives under a single app data directory so
- * conversations, config, logs and models are easy to find and back up.
- * CUBEX_DATA_DIR / CUBEX_MODELS_DIR env vars override the defaults (dev use).
+ * conversations, config and logs are easy to find and back up.
+ * The CUBEX_DATA_DIR env var overrides the default (dev use).
  */
 function ensureDir(dir: string): string {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
@@ -28,10 +28,4 @@ export function configPath(): string {
 
 export function logsDir(): string {
   return ensureDir(join(dataDir(), 'logs'))
-}
-
-export function defaultModelsDir(): string {
-  const override = process.env.CUBEX_MODELS_DIR
-  const base = override && override.trim() ? override : join(dataDir(), 'models')
-  return ensureDir(base)
 }

@@ -18,7 +18,13 @@ export default defineConfig({
     resolve: { alias },
     build: {
       rollupOptions: {
-        input: { index: resolve(root, 'src/main/index.ts') }
+        // The diagnostics checker is its own chunk: DiagnosticsManager starts
+        // out/main/tsWorker.js as a worker thread.
+        input: {
+          index: resolve(root, 'src/main/index.ts'),
+          tsWorker: resolve(root, 'src/main/diagnostics/tsWorker.ts')
+        },
+        output: { entryFileNames: '[name].js' }
       }
     }
   },
@@ -39,7 +45,10 @@ export default defineConfig({
     plugins: [react()],
     build: {
       rollupOptions: {
-        input: { index: resolve(root, 'src/renderer/index.html') }
+        input: { index: resolve(root, 'src/renderer/index.html') },
+        // Preview seeds are sample data for the browser preview. Nothing in the packaged app reaches them, so they
+        // count as free of side effects, which lets the bundler leave them out instead of keeping their setup code.
+        treeshake: { moduleSideEffects: (id) => !/[\\/]renderer[\\/]src[\\/]lib[\\/](seeds[\\/]|previewSeed|previewStream)/.test(id) }
       }
     }
   }

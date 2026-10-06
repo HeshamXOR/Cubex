@@ -2,7 +2,7 @@ import type { Capability } from '../types/capabilities'
 import type { AIProvider, ProviderConfig, ProviderKind, ValidationResult } from '../types/provider'
 import type { AIRequest, RequestOptions } from '../types/request'
 import type { AIResponse } from '../types/response'
-import type { AIStreamEvent } from '../types/stream'
+import { isOutputEvent, type AIStreamEvent } from '../types/stream'
 import type { ModelInfo } from '../types/model'
 import { StreamAccumulator } from '../streaming/accumulator'
 
@@ -34,6 +34,8 @@ export abstract class BaseProvider implements AIProvider {
   async sendMessage(request: AIRequest, options?: RequestOptions): Promise<AIResponse> {
     const acc = new StreamAccumulator(this.id, request.model)
     for await (const ev of this.streamMessage({ ...request, stream: true }, options)) {
+      // The caller sees only the final response, so this is how it learns that the server is still answering.
+      options?.onActivity?.(isOutputEvent(ev) ? 'output' : 'data')
       if (ev.type === 'completed') return ev.response
       if (ev.type === 'error') throw ev.error
       acc.push(ev)

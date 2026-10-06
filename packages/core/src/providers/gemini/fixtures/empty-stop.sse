@@ -1,0 +1,2 @@
+data: {"candidates": [{"content": {"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 30,"totalTokenCount": 30},"modelVersion": "gemini-2.5-flash","responseId": "Yb5CaNPIMdOcz7IPlNPUyQE"}
+

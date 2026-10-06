@@ -1,0 +1,231 @@
+/* ============================================================================
+   Cubex, Atelier: what the assistant writes and does. Prose, reasoning, the
+   quiet work rows, and the plan card. Rows have no borders and no fills: structure
+   comes from alignment, and the Cubex star marks work in progress.
+   ============================================================================ */
+
+:root,
+:root[data-theme='dark'] { --code-chip: rgba(255, 255, 255, 0.06); --code-chip-fg: #e4e4ea; }
+:root[data-theme='light'] { --code-chip: rgba(20, 20, 30, 0.06); --code-chip-fg: #2a2a2f; }
+
+.assistant-transcript { min-width: 0; }
+.transcript-block { min-width: 0; }
+.transcript-block--text { margin-bottom: 14px; }
+.transcript-block--reasoning { margin-bottom: 8px; }
+.transcript-block--tool { margin-bottom: 4px; }
+.transcript-block--tool + .transcript-block--text,
+.transcript-block--tool + .transcript-block:not(.transcript-block--tool) { margin-top: 10px; }
+.assistant-transcript > :last-child { margin-bottom: 0; }
+
+/* ---------- Prose ---------- */
+
+.prose { min-width: 0; overflow-wrap: break-word; font-size: var(--chat-font-size); line-height: var(--chat-line-height); }
+.prose > :first-child { margin-top: 0; }
+.prose > :last-child { margin-bottom: 0; }
+.prose p { margin: 0 0 14px; }
+.prose strong { font-weight: 600; color: var(--color-foreground); }
+.prose ul,
+.prose ol { margin: 0 0 14px; padding-left: 22px; }
+.prose li { margin: 0 0 6px; padding-left: 2px; }
+.prose li > p { margin-bottom: 6px; }
+.prose li > ul,
+.prose li > ol { margin: 6px 0 0; }
+.prose li::marker { color: var(--color-foreground-subtlest); }
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4 { margin: 22px 0 10px; font-family: var(--display); font-weight: 600; line-height: 1.4; color: var(--color-foreground); }
+.prose h1 { font-size: 1.25em; }
+.prose h2 { font-size: 1.15em; }
+.prose h3 { font-size: 1.05em; }
+.prose h4 { font-size: 1em; }
+.prose a { color: var(--color-accent-foreground); text-decoration: underline; text-decoration-color: var(--color-accent-border); text-underline-offset: 3px; }
+.prose a:hover { text-decoration-color: currentColor; }
+.prose :not(pre) > code { padding: 1px 5px; border-radius: 5px; background: var(--code-chip); color: var(--code-chip-fg); font-size: 12.5px; }
+.prose blockquote { margin: 0 0 14px; padding: 1px 0 1px 14px; border-left: 2px solid var(--color-border-hover); color: var(--color-foreground-subtle); }
+.prose hr { margin: 20px 0; border: 0; border-top: 1px solid var(--color-border); }
+.prose table { display: block; max-width: 100%; margin: 0 0 14px; overflow-x: auto; border-collapse: collapse; font-size: 13px; line-height: 1.5; }
+.prose th,
+.prose td { padding: 7px 12px; border-bottom: 1px solid var(--color-border); text-align: left; vertical-align: top; }
+.prose th { font-weight: 600; color: var(--color-foreground); background: var(--color-surface); }
+.prose img { max-width: 100%; height: auto; border-radius: 8px; }
+/* A task list is read-only status, so its boxes are drawn here instead of left to the
+   browser, which greys out disabled ones. Done is a green check, open is an empty box.
+   Text starts at the same 24px as an ordinary list item. */
+.prose .contains-task-list { padding-left: 0; list-style: none; }
+.prose .task-list-item { padding-left: 0; }
+.prose .task-list-item > .contains-task-list { padding-left: 24px; }
+.prose .task-list-item > input[type='checkbox'] {
+  position: relative;
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0 10px 0 0;
+  vertical-align: -3px;
+  border: 1.5px solid var(--color-foreground-faint);
+  border-radius: 4px;
+  background: transparent;
+  opacity: 1;
+}
+.prose .task-list-item > input[type='checkbox']:checked { border-color: var(--color-success); }
+.prose .task-list-item > input[type='checkbox']:checked::after {
+  content: '';
+  position: absolute;
+  inset: -1.5px;
+  background: var(--color-success);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cpath d='M3.6 7.2l2.3 2.3 4.5-5' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 14px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cpath d='M3.6 7.2l2.3 2.3 4.5-5' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 14px no-repeat;
+}
+
+/* New words fade in as they are revealed. Opacity only: nothing moves, so the
+   line never shifts under the reader, and there is no cursor to blink. */
+.ink { animation: cx-ink 340ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+@keyframes cx-ink { from { opacity: 0; } to { opacity: 1; } }
+
+/* ---------- Reasoning ---------- */
+
+.reasoning summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--color-foreground-subtlest);
+  user-select: none;
+  transition: color 0.12s;
+}
+.reasoning summary::-webkit-details-marker { display: none; }
+.reasoning summary:hover { color: var(--color-foreground-subtle); }
+.reasoning__icon { flex: none; color: inherit; }
+.reasoning__time { font-variant-numeric: tabular-nums; }
+.reasoning__chev { flex: none; opacity: 0; transition: opacity 0.12s, transform 0.15s; }
+.reasoning summary:hover .reasoning__chev,
+.reasoning summary:focus-visible .reasoning__chev { opacity: 1; }
+.reasoning[open] .reasoning__chev { opacity: 1; transform: rotate(90deg); }
+.reasoning__body {
+  max-height: 240px;
+  margin: 6px 0 12px 7px;
+  padding-left: 14px;
+  overflow: auto;
+  border-left: 1px solid var(--color-border);
+  font-size: 13px;
+  line-height: 21px;
+  color: var(--color-foreground-subtlest);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.reasoning.is-live .reasoning__icon { color: var(--color-accent-foreground); }
+
+/* The live label gets a quick bright sweep while the model is thinking. */
+.reasoning__label.is-shimmer,
+.activity__label.is-shimmer {
+  background: linear-gradient(100deg, var(--color-foreground-subtle) 38%, var(--color-foreground) 50%, var(--color-foreground-subtle) 62%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: label-sweep 1.4s linear infinite;
+}
+@keyframes label-sweep { 0% { background-position: 160% 0; } 100% { background-position: -160% 0; } }
+
+/* ---------- Work rows ---------- */
+
+.work { min-width: 0; }
+.wrow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--color-foreground-subtle);
+  text-align: left;
+}
+button.wrow:hover { color: var(--color-foreground); }
+.wrow > svg,
+.wrow__lead { flex: none; color: var(--color-foreground-subtlest); }
+.wrow__lead.is-active { color: var(--color-accent-foreground); }
+.wrow b { flex: none; font-weight: 600; color: var(--color-foreground); }
+.wrow .sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-foreground-subtlest); }
+.wrow .stat { margin-left: auto; }
+.wrow__chev { margin-left: auto; flex: none; opacity: 0.55; transition: transform 0.15s, opacity 0.12s; }
+.wrow:hover .wrow__chev { opacity: 1; }
+.wrow__chev.is-open { opacity: 1; transform: rotate(90deg); }
+.wrow__state { flex: none; margin-left: auto; font-size: 12.5px; }
+.wrow__state--error { color: var(--color-destructive); }
+.wrow__state--wait { color: var(--color-warning); }
+.wrow__wait { flex: none; color: var(--color-warning); }
+.wrow__state + .stat,
+.wrow__state + .wrow__chev { margin-left: 8px; }
+
+.files { margin-left: 7px; padding-left: 18px; border-left: 1px solid var(--color-border); }
+.file {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: calc(100% + 8px);
+  min-width: 0;
+  height: 30px;
+  margin-left: -8px;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 13px;
+  color: var(--color-foreground-subtle);
+  text-align: left;
+}
+.file:hover { background: var(--color-hover); color: var(--color-foreground); }
+.file.sel { background: var(--color-selected); color: var(--color-foreground); }
+.file > svg { flex: none; color: var(--color-foreground-subtlest); }
+.file__path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file .stat { flex: none; margin-left: auto; }
+.file .wrow__state { margin-left: auto; }
+.file .wrow__state + .stat { margin-left: 8px; }
+.work--edit > .file { margin-left: -8px; }
+
+/* ---------- Plan ---------- */
+
+.plan { margin: 6px 0 16px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--raise); }
+.plan header { display: flex; align-items: center; gap: 8px; padding: 9px 14px; border-bottom: 1px solid var(--color-border); font-size: 12.5px; line-height: 1.4; color: var(--color-foreground-subtle); }
+.plan header b { font-weight: 600; color: var(--color-foreground); }
+.plan__open { display: inline-flex; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; border-radius: 4px; }
+.plan__open b { text-decoration: underline transparent; text-underline-offset: 3px; transition: text-decoration-color 120ms ease; }
+.plan__open:hover b { text-decoration-color: var(--color-foreground-subtlest); }
+.plan__open:focus-visible { outline: 2px solid var(--color-input-border-focused); outline-offset: 2px; }
+.plan header .prog { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--color-foreground-subtlest); font-variant-numeric: tabular-nums; }
+.plan .bar { width: 64px; margin: 0; }
+.plan ol { margin: 0; padding: 8px 14px 10px; display: grid; gap: 2px; list-style: none; counter-reset: step; }
+.plan li { position: relative; padding-left: 28px; font-size: 13px; line-height: 22px; color: var(--color-foreground-subtle); }
+.plan li::before {
+  counter-increment: step;
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 18px;
+  font-size: 12px;
+  text-align: right;
+  color: var(--color-foreground-subtlest);
+  font-variant-numeric: tabular-nums;
+}
+.plan li.done { color: var(--color-foreground-subtlest); }
+.plan li.cur { color: var(--color-foreground); }
+.plan li.done::before,
+.plan li.cur::before { content: none; }
+.plan code { padding: 1px 5px; border-radius: 5px; background: var(--code-chip); color: var(--code-chip-fg); font-size: 12.5px; }
+.plan li.done code { background: var(--color-surface); color: var(--color-foreground-subtlest); }
+.li-mark { position: absolute; left: 3px; top: 5px; }
+.li-mark--done { color: var(--color-success); top: 5px; }
+.li-mark--cur { color: var(--color-accent-foreground); left: 2px; top: 5px; }
+.li-mark--wait { color: var(--color-warning); left: 2px; top: 4px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ink { animation: none; }
+  .reasoning__label.is-shimmer,
+  .activity__label.is-shimmer { animation: none; -webkit-text-fill-color: var(--color-foreground-subtle); }
+}

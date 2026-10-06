@@ -1,0 +1,13 @@
+/* The About settings group: version, runtime and where Cubex keeps its files. */
+.about__facts { margin: 0 0 6px; padding: 0; border-top: 1px solid var(--color-border); }
+.about__row { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; align-items: center; min-height: 36px; padding: 5px 0; border-bottom: 1px solid var(--color-border); font-size: 12.5px; }
+.about__row dt { color: var(--color-foreground); }
+.about__row dd { margin: 0; min-width: 0; font-size: 12.5px; color: var(--color-foreground-body); overflow-wrap: anywhere; }
+.about__build { margin-left: 10px; font-size: 12px; color: var(--color-foreground-subtle); }
+.about__where { display: flex; align-items: center; gap: 10px; }
+.about__path { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--color-foreground-subtle); }
+.about__where .btn { flex: 0 0 auto; }
+.about .callout { margin: 8px 0 0; }
+@container settings (max-width: 520px) {
+  .about__row { grid-template-columns: minmax(0, 1fr); gap: 2px; align-items: start; }
+}

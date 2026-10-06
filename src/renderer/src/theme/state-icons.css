@@ -1,0 +1,4 @@
+/* Movement stays inside the glyph: text, rows and chrome around it hold still. */
+.activity-glyph { display: block; flex-shrink: 0; transform-origin: 50% 50%; }
+.activity-glyph.is-active.cxmark { color: var(--color-accent-foreground); }
+.activity-glyph--waiting { color: var(--color-warning); }

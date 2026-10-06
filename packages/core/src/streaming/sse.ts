@@ -4,17 +4,28 @@
  * don't use an official SDK use this to consume streaming HTTP responses.
  */
 
+import type { ActivityKind } from '../types/request'
+
 export interface SSEMessage {
   event?: string
   data: string
   id?: string
 }
 
+export interface SSEOptions {
+  signal?: AbortSignal
+  /**
+   * Called for every chunk of bytes that arrives, including keep-alive comments (`: keep-alive`) that never become
+   * a message. A server that is queueing or thinking quietly often sends only those, and they prove it is alive.
+   */
+  onActivity?: (kind: ActivityKind) => void
+}
+
 const DECODER_LABEL = 'utf-8'
 
 export async function* parseSSE(
   body: ReadableStream<Uint8Array> | null,
-  options: { signal?: AbortSignal } = {}
+  options: SSEOptions = {}
 ): AsyncGenerator<SSEMessage> {
   if (!body) return
   const reader = body.getReader()
@@ -31,6 +42,7 @@ export async function* parseSSE(
       if (options.signal?.aborted) break
       const { value, done } = await reader.read()
       if (done) break
+      options.onActivity?.('data')
       buffer += decoder.decode(value, { stream: true })
 
       let sep: number
@@ -94,7 +106,7 @@ function parseEventBlock(block: string): SSEMessage | null {
 /** Parse SSE and JSON.parse each `data` payload, skipping `[DONE]` sentinels. */
 export async function* parseSSEJson<T = unknown>(
   body: ReadableStream<Uint8Array> | null,
-  options: { signal?: AbortSignal } = {}
+  options: SSEOptions = {}
 ): AsyncGenerator<{ event?: string; data: T }> {
   for await (const msg of parseSSE(body, options)) {
     if (msg.data === '[DONE]') return

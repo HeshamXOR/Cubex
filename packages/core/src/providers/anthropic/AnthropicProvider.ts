@@ -4,11 +4,20 @@ import { NormalizedAIError } from '../../types/errors'
 import type { ModelInfo } from '../../types/model'
 import type { ProviderConfig, ProviderKind, ValidationResult } from '../../types/provider'
 import type { AIRequest, RequestOptions } from '../../types/request'
+import { sdkTimeoutMs } from '../../types/timeout'
 import type { AIStreamEvent } from '../../types/stream'
 import type { Usage } from '../../types/response'
 import { normalizeHttpError, normalizeUnknownError } from '../../errors/normalize'
-import { BaseProvider } from '../base'
-import { mapAnthUsage, mapStopReason, toAnthropicParams } from './translate'
+import { BaseProvider, normalizeBaseUrl } from '../base'
+import { requestWithSupportedEffort } from '../effort'
+import {
+  isThinkingHistoryError,
+  mapAnthUsage,
+  mapStopReason,
+  toAnthropicParams,
+  withoutThinking,
+  type AnthParams
+} from './translate'
 
 const CAPS: Capability[] = [
   'text',
@@ -54,6 +63,19 @@ const STATIC_MODELS: StaticModel[] = [
   { id: 'claude-sonnet-4-5-20250929', displayName: 'Claude Sonnet 4.5', family: 'claude-sonnet-4', contextWindow: 1_000_000, maxOutputTokens: 64_000, reasoning: true, longContext: true }
 ]
 
+const positive = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined
+
+/** The static entry of the longest family a model id belongs to ("claude-sonnet-5-5" belongs to "claude-sonnet-5"). */
+function familyOf(id: string): StaticModel | undefined {
+  let best: StaticModel | undefined
+  for (const model of STATIC_MODELS) {
+    const inFamily = id === model.family || id.startsWith(`${model.family}-`)
+    if (inFamily && (!best || model.family.length > best.family.length)) best = model
+  }
+  return best
+}
+
 /**
  * Anthropic adapter using the official `@anthropic-ai/sdk`. Translates the
  * unified request into the NATIVE Messages format (see ./translate).
@@ -74,24 +96,33 @@ export class AnthropicProvider extends BaseProvider {
     this.name = cfg.name
     this.client = new Anthropic({
       apiKey: secret ?? 'missing',
-      ...(cfg.baseUrl ? { baseURL: cfg.baseUrl } : {}),
-      dangerouslyAllowBrowser: false
+      // Trim a trailing slash so a base URL like "https://host/" doesn't
+      // produce "https://host//v1/messages" against strict proxies.
+      // Always explicit: otherwise the SDK reads ANTHROPIC_BASE_URL /
+      // ANTHROPIC_AUTH_TOKEN from the environment (common with CLI proxies) and
+      // would send this provider's stored key somewhere the user never chose.
+      baseURL: cfg.baseUrl ? normalizeBaseUrl(cfg.baseUrl, cfg.baseUrl) : 'https://api.anthropic.com',
+      authToken: null,
+      dangerouslyAllowBrowser: false,
+      // The gateway's RetryEngine is the single retry layer; SDK retries would
+      // multiply attempts and ignore the user's retry settings.
+      maxRetries: 0
     })
     this.setCapabilities(cfg.capabilities ?? CAPS)
   }
 
   /**
-   * Extra headers for a request. Models whose 1M window is gated behind a beta
-   * (older Sonnet 4.x) need the `context-1m` beta header; current models have 1M
-   * natively. Enabled when the model is a known long-context-beta model AND the
-   * provider config opts in via headers['x-cubex-long-context'] === '1'.
+   * Extra headers for a request. A 1M window that sits behind a beta (older Sonnet 4.x, and any model the
+   * person declared as offering one) needs the `context-1m` beta header. The caller opts in per request with
+   * `x-cubex-long-context: 1`, or the provider config does with the same header.
    */
-  private betaHeaders(model: string, base?: Record<string, string>): Record<string, string> | undefined {
-    const meta = STATIC_MODELS.find((m) => m.id === model)
+  private betaHeaders(base?: Record<string, string>): Record<string, string> | undefined {
     const wantLong = base?.['x-cubex-long-context'] === '1' || this.cfg.headers?.['x-cubex-long-context'] === '1'
     const headers: Record<string, string> = { ...base }
     delete headers['x-cubex-long-context']
-    if (meta?.longContext && wantLong) {
+    // The caller only opts in for a model offered with a 1M window (a known gated model, one the person
+    // declared on the provider, or one the endpoint reports), so the header needs no allow-list here.
+    if (wantLong) {
       headers['anthropic-beta'] = ['context-1m-2025-08-07', headers['anthropic-beta']].filter(Boolean).join(',')
     }
     return Object.keys(headers).length > 0 ? headers : undefined
@@ -122,8 +153,14 @@ export class AnthropicProvider extends BaseProvider {
       const known = new Map(STATIC_MODELS.map((m) => [m.id, m]))
       const models: ModelInfo[] = []
       for (const m of list.data) {
-        const meta = known.get(m.id)
-        const reasoning = meta?.reasoning ?? /fable-5|opus-5|opus-4|sonnet-5|sonnet-4|3-7-sonnet/.test(m.id)
+        const exact = known.get(m.id)
+        // A model this list has never seen (a point release, a relay's alias) is described by its family
+        // for what a family settles: whether it reasons and how much it can write in one reply.
+        const meta = exact ?? familyOf(m.id)
+        const reportedWindow = positive(m.max_input_tokens)
+        const reportedOutput = positive(m.max_tokens)
+        const reasoning = m.capabilities?.thinking?.supported ?? meta?.reasoning ?? /fable-5|opus-5|opus-4|sonnet-5|sonnet-4|3-7-sonnet/.test(m.id)
+        const maxOutputTokens = reportedOutput ?? meta?.maxOutputTokens
         models.push({
           id: m.id,
           providerId: this.id,
@@ -131,12 +168,13 @@ export class AnthropicProvider extends BaseProvider {
           location: 'cloud',
           capabilities: reasoning ? CAPS : CAPS.filter((c) => c !== 'reasoning'),
           modalities: { input: ['text', 'image'], output: ['text'] },
-          contextWindow: meta?.contextWindow ?? 200_000,
-          maxOutputTokens: meta?.maxOutputTokens ?? 8_192,
+          contextWindow: reportedWindow ?? exact?.contextWindow ?? 200_000,
+          // Left out when nothing says: a made-up cap would clamp every request to it.
+          ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
           supportsTools: true,
           supportsStructuredOutput: true,
           supportsReasoning: reasoning,
-          ...(meta?.longContext ? { longContextBeta: true } : {})
+          ...(exact?.longContext ? { longContextBeta: true } : {})
         })
       }
       return models.length > 0 ? models : this.staticModels()
@@ -148,13 +186,26 @@ export class AnthropicProvider extends BaseProvider {
   async *streamMessage(request: AIRequest, options?: RequestOptions): AsyncIterable<AIStreamEvent> {
     const signal = options?.signal
     if (signal?.aborted) throw this.abort()
+    request = requestWithSupportedEffort(this.kind, request, {
+      id: request.model,
+      supportsReasoning: this.cfg.capabilities && !this.supports('reasoning')
+        ? false : (STATIC_MODELS.find((model) => model.id === request.model) ?? familyOf(request.model))?.reasoning
+    })
 
     const body = toAnthropicParams(request, true)
+    // Automatic prompt caching: one top-level breakpoint that advances with the
+    // conversation. An agent loop resends system + tools + history every
+    // iteration, so cache reads (≈0.1× input price) dominate. Skipped for custom
+    // base URLs, whose Anthropic-compatible proxies may reject unknown fields.
+    if (!this.cfg.baseUrl && this.cfg.promptCaching !== false) body.cache_control = { type: 'ephemeral' }
     try {
-      const headers = this.betaHeaders(request.model, options?.headers)
-      const stream = await this.client.messages.create(
-        body as unknown as Anthropic.MessageCreateParamsStreaming,
-        { ...(signal ? { signal } : {}), ...(headers ? { headers } : {}) }
+      const headers = this.betaHeaders(options?.headers)
+      const stream = await this.openStream(
+        body,
+        {
+          ...(signal ? { signal } : {}), ...(headers ? { headers } : {}),
+          timeout: sdkTimeoutMs(options?.timeout)
+        }
       )
 
       let started = false
@@ -162,6 +213,8 @@ export class AnthropicProvider extends BaseProvider {
       // Map Anthropic content-block index -> our tool_call index.
       const toolBlockIndex = new Map<number, number>()
       let nextToolIndex = 0
+      // Thinking blocks carry a signature that must be replayed with tool results.
+      const thinkingSignatures = new Map<number, string>()
 
       for await (const event of stream) {
         switch (event.type) {
@@ -174,7 +227,11 @@ export class AnthropicProvider extends BaseProvider {
           }
           case 'content_block_start': {
             const block = event.content_block
-            if (block.type === 'tool_use') {
+            if ((block as { type: string }).type === 'redacted_thinking') {
+              yield { type: 'metadata', data: { reasoningBlock: { redacted: (block as unknown as { data: string }).data } } }
+            } else if (block.type === 'thinking') {
+              thinkingSignatures.set(event.index, '')
+            } else if (block.type === 'tool_use') {
               const idx = nextToolIndex++
               toolBlockIndex.set(event.index, idx)
               yield { type: 'tool_call_delta', index: idx, id: block.id, name: block.name }
@@ -182,13 +239,23 @@ export class AnthropicProvider extends BaseProvider {
             break
           }
           case 'content_block_delta': {
-            const delta = event.delta
+            const delta = event.delta as { type: string; text?: string; thinking?: string; partial_json?: string; signature?: string }
             if (delta.type === 'text_delta') {
-              yield { type: 'text_delta', text: delta.text }
+              yield { type: 'text_delta', text: delta.text ?? '' }
+            } else if (delta.type === 'thinking_delta') {
+              // Summarized adaptive-thinking tokens.
+              yield { type: 'reasoning_delta', text: delta.thinking ?? '' }
+            } else if (delta.type === 'signature_delta') {
+              thinkingSignatures.set(event.index, (thinkingSignatures.get(event.index) ?? '') + (delta.signature ?? ''))
             } else if (delta.type === 'input_json_delta') {
               const idx = toolBlockIndex.get(event.index) ?? 0
-              yield { type: 'tool_call_delta', index: idx, argsDelta: delta.partial_json }
+              yield { type: 'tool_call_delta', index: idx, argsDelta: delta.partial_json ?? '' }
             }
+            break
+          }
+          case 'content_block_stop': {
+            const signature = thinkingSignatures.get(event.index)
+            if (signature) yield { type: 'metadata', data: { reasoningBlock: { signature } } }
             break
           }
           case 'message_delta': {
@@ -212,6 +279,28 @@ export class AnthropicProvider extends BaseProvider {
       }
     } catch (err) {
       throw this.wrap(err)
+    }
+  }
+
+  /**
+   * Open the message stream. A 400 that says the history cannot carry thinking
+   * (a block bound to another conversation or model, one the API says was
+   * modified, or a tool turn written by another provider with none) is retried
+   * once with thinking removed from the request, so a fallback or an edited
+   * prefix costs this request its reasoning instead of failing the whole turn.
+   * Every other error, and a second failure, propagates unchanged.
+   */
+  private async openStream(body: AnthParams, options: Parameters<Anthropic['messages']['create']>[1]) {
+    const create = (params: AnthParams) =>
+      this.client.messages.create(params as unknown as Anthropic.MessageCreateParamsStreaming, options)
+    try {
+      return await create(body)
+    } catch (err) {
+      const retry = err instanceof APIError && err.status === 400 && isThinkingHistoryError(err.message)
+        ? withoutThinking(body)
+        : undefined
+      if (!retry) throw err
+      return create(retry)
     }
   }
 

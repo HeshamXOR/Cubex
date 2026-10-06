@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { mapFinishReason, toChatCompletionsBody, toChatMessages } from './translate'
-import { systemMessage, userMessage } from '../../builders'
+import { mapFinishReason, toChatCompletionsBody, toChatMessages, toResponsesInput } from './translate'
+import { userMessage } from '../../builders'
 import type { AIRequest } from '../../types/request'
 
 const base: AIRequest = {
@@ -73,5 +73,36 @@ describe('mapFinishReason', () => {
     expect(mapFinishReason('length')).toBe('length')
     expect(mapFinishReason('tool_calls')).toBe('tool_use')
     expect(mapFinishReason('content_filter')).toBe('content_filter')
+  })
+})
+
+describe('history that carries thinking from another provider', () => {
+  const history: AIRequest = {
+    model: 'gpt-5.6',
+    messages: [
+      userMessage('Fix it'),
+      {
+        role: 'assistant',
+        content: [
+          { type: 'reasoning', text: 'summary of signed thinking', signature: 'sig-A' },
+          { type: 'reasoning', text: '', redacted: 'ENCRYPTED' },
+          { type: 'reasoning', text: 'plain reasoning text' },
+          { type: 'tool_use', id: 'call_1', name: 'read_file', input: { path: 'a.ts' } }
+        ]
+      },
+      { role: 'tool', content: [{ type: 'tool_result', toolUseId: 'call_1', content: [{ type: 'text', text: 'ok' }] }] }
+    ]
+  }
+
+  it('sends none of it over Chat Completions, which has no field for it', () => {
+    const wire = JSON.stringify(toChatMessages(history))
+    for (const leaked of ['signed thinking', 'ENCRYPTED', 'plain reasoning', 'sig-A', 'reasoning']) expect(wire).not.toContain(leaked)
+    expect(toChatMessages(history)[1]).toMatchObject({ role: 'assistant', tool_calls: [{ id: 'call_1' }] })
+  })
+
+  it('sends none of it to the Responses API either', () => {
+    const wire = JSON.stringify(toResponsesInput(history))
+    for (const leaked of ['signed thinking', 'ENCRYPTED', 'plain reasoning', 'sig-A', 'reasoning']) expect(wire).not.toContain(leaked)
+    expect(toResponsesInput(history).map((item) => item.type)).toEqual(['message', 'function_call', 'function_call_output'])
   })
 })

@@ -9,6 +9,7 @@ export type ProviderKind =
   | 'openai'
   | 'anthropic'
   | 'openai-compat'
+  | 'gemini'
   | 'custom'
   | 'ollama'
   | 'llamacpp'
@@ -42,6 +43,8 @@ export interface ValidationResult {
  * (`credentialRef`) to a value in the OS-encrypted credential store.
  */
 export interface ProviderConfig {
+  /** Anthropic: send automatic prompt-cache breakpoints (default on for the first-party API). */
+  promptCaching?: boolean
   id: string
   kind: ProviderKind
   name: string
@@ -49,7 +52,16 @@ export interface ProviderConfig {
   baseUrl?: string
   /** e.g. 'responses' | 'chat_completions' for OpenAI-style APIs. */
   apiMode?: string
+  /**
+   * Gemini: the API version path segment (default 'v1beta'). Azure OpenAI
+   * (kind 'openai-compat', apiMode 'azure'): 'v1' (the default, the unversioned
+   * /openai/v1 route) or a dated `api-version` such as '2024-10-21'.
+   */
   apiVersion?: string
+  /** Azure OpenAI: the resource name in https://{azureResource}.openai.azure.com. Ignored when baseUrl is set. */
+  azureResource?: string
+  /** Azure OpenAI: deployment names offered as models. A request's model is the deployment name. */
+  azureDeployments?: string[]
   auth: AuthMethod
   /** Opaque id used to look up the secret; never the secret itself. */
   credentialRef?: string
@@ -57,6 +69,12 @@ export interface ProviderConfig {
   headers?: Record<string, string>
   /** Manually declared or auto-detected capability overrides. */
   capabilities?: Capability[]
+  /**
+   * Models the person declared as offering a 1M context window (Anthropic: the `context-1m` beta, which the
+   * adapter asks for when the request opts in). Listed models show the 1M option in the composer and the
+   * details panel; until it is turned on the model keeps its ordinary window.
+   */
+  longContextModels?: string[]
   defaultModel?: string
   /** For custom providers: request/response mapping (see custom adapter). */
   mapping?: CustomProviderMapping

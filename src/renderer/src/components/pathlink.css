@@ -1,0 +1,27 @@
+/* A path in the conversation that exists in the project reads as a link: dotted underline at rest,
+   solid on hover. It is a button, so the keyboard reaches it and the global focus ring applies. */
+.pathlink {
+  display: inline;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-decoration-color: var(--color-foreground-subtlest);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.pathlink:hover {
+  color: var(--color-foreground);
+  text-decoration-style: solid;
+  text-decoration-color: currentColor;
+}
+.pathlink:hover > code { background: var(--color-surface-hover); }
+/* A link in a row that must stay on one line: it clips its own text with an ellipsis. The padding keeps the
+   underline inside the clip box (rows use a line height of 1) and the negative margin gives the space back. */
+.pathlink--clip { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-bottom: 4px; margin-bottom: -4px; }

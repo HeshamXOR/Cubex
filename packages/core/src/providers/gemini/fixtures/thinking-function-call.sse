@@ -1,0 +1,6 @@
+data: {"candidates": [{"content": {"parts": [{"text": "**Reading the entry point**\n\nI need to look at the file before I can answer.","thought": true}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 62,"totalTokenCount": 62,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 62}]},"modelVersion": "gemini-3-flash-preview","responseId": "Q75CaMvbKN-Vz7IPw4S-8AM"}
+
+data: {"candidates": [{"content": {"parts": [{"text": " I will call read_file on src/index.ts.","thought": true}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 62,"totalTokenCount": 62,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 62}]},"modelVersion": "gemini-3-flash-preview","responseId": "Q75CaMvbKN-Vz7IPw4S-8AM"}
+
+data: {"candidates": [{"content": {"parts": [{"functionCall": {"name": "read_file","args": {"path": "src/index.ts"}},"thoughtSignature": "CiQBjz1rXx0y8Qk3m9v5Lw4t2nPq7cRZaBsE1uYhGdKoWfTj6Ng="}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 62,"candidatesTokenCount": 17,"totalTokenCount": 140,"thoughtsTokenCount": 61,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 62}],"candidatesTokensDetails": [{"modality": "TEXT","tokenCount": 17}]},"modelVersion": "gemini-3-flash-preview","responseId": "Q75CaMvbKN-Vz7IPw4S-8AM"}
+

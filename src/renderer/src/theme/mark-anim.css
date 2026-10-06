@@ -1,99 +1,10 @@
-/* Animated Cubex mark — the brand logo as a living activity indicator. */
-
-.cxmark {
-  display: block;
-  overflow: visible;
-  transform-origin: 50% 50%;
-}
-
-/* The whole mark breathes a soft glow. */
-.cxmark {
-  animation: cxmark-glow var(--cx-tempo, 1.6s) ease-in-out infinite;
-}
-
-/* Needles rotate slowly around the centre. */
-.cxmark__needles {
-  transform-origin: 50% 50%;
-  animation: cxmark-spin calc(var(--cx-tempo, 1.6s) * 4) linear infinite;
-  opacity: 0.9;
-}
-
-/* Cardinal blades light up in a clockwise sweep (N → E → S → W). */
-.cxmark__blade {
-  transform-origin: 50% 50%;
-  animation: cxmark-blade var(--cx-tempo, 1.6s) ease-in-out infinite;
-}
-.cxmark__blade--n {
-  animation-delay: 0s;
-}
-.cxmark__blade--e {
-  animation-delay: calc(var(--cx-tempo, 1.6s) * 0.25);
-}
-.cxmark__blade--s {
-  animation-delay: calc(var(--cx-tempo, 1.6s) * 0.5);
-}
-.cxmark__blade--w {
-  animation-delay: calc(var(--cx-tempo, 1.6s) * 0.75);
-}
-
-/* Tempo per state. */
-.cxmark--thinking {
-  --cx-tempo: 1.7s;
-}
-.cxmark--working {
-  --cx-tempo: 1.1s;
-}
-.cxmark--streaming {
-  --cx-tempo: 0.85s;
-}
-.cxmark--idle {
-  animation: none;
-}
-.cxmark--idle .cxmark__needles,
-.cxmark--idle .cxmark__blade {
-  animation: none;
-  opacity: 1;
-}
-
-@keyframes cxmark-blade {
-  0%,
-  100% {
-    opacity: 0.28;
-    transform: scale(0.9);
-  }
-  20% {
-    opacity: 1;
-    transform: scale(1.06);
-  }
-  55% {
-    opacity: 0.45;
-    transform: scale(0.94);
-  }
-}
-
-@keyframes cxmark-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes cxmark-glow {
-  0%,
-  100% {
-    filter: drop-shadow(0 0 2px rgba(120, 140, 255, 0.25));
-  }
-  50% {
-    filter: drop-shadow(0 0 9px rgba(120, 140, 255, 0.6));
-  }
-}
+/* Work in progress is the Cubex star turning, with no glow and no pulse: it holds, then
+   makes a quarter turn like a compass settling on a bearing (cx-turn is in theme.css). */
+.cxmark { display: block; flex-shrink: 0; color: inherit; transform-origin: 50% 50%; }
+.cxmark:not(.cxmark--idle) { animation: cx-turn 1.6s cubic-bezier(0.6, -0.35, 0.25, 1.35) infinite; }
+.cxmark.cxmark--planning { animation-duration: 2.2s; }
+.cxmark.cxmark--streaming { animation-duration: 2.4s; }
 
 @media (prefers-reduced-motion: reduce) {
-  .cxmark,
-  .cxmark__needles,
-  .cxmark__blade {
-    animation: none !important;
-  }
-  .cxmark__blade {
-    opacity: 1;
-  }
+  .cxmark:not(.cxmark--idle) { animation: none; }
 }

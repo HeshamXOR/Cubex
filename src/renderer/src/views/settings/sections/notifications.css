@@ -1,0 +1,2 @@
+/* The Notifications settings group. */
+.notifsec .switch:disabled { opacity: 0.4; cursor: default; }

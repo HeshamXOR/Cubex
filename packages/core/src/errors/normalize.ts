@@ -91,14 +91,34 @@ function headerGet(headers: HttpErrorInput['headers'], name: string): string | u
   return undefined
 }
 
+/**
+ * OpenRouter wraps a provider's failure: its own `message` is generic and the
+ * provider's real text sits in `metadata.raw`, as JSON or plain text.
+ */
+function upstreamMessage(metadata: unknown): string | undefined {
+  const raw = (metadata as { raw?: unknown } | null | undefined)?.raw
+  if (typeof raw !== 'string' || !raw.trim()) return undefined
+  let text = raw.trim()
+  try {
+    text = extractBodyInfo(JSON.parse(raw)).message ?? text
+  } catch {
+    /* not JSON: the raw text is the message */
+  }
+  return text.slice(0, 1000)
+}
+
 /** Try to extract a human message + provider code from a JSON error body. */
 function extractBodyInfo(body: unknown): { message?: string; code?: string } {
   if (body == null) return {}
   if (typeof body === 'string') return { message: body }
   if (typeof body === 'object') {
     const b = body as Record<string, unknown>
+    // Some servers (Ollama, xAI) send `{ "error": "text" }`.
+    if (typeof b.error === 'string') return { message: b.error, ...(typeof b.code === 'string' ? { code: b.code } : {}) }
     const err = (b.error ?? b) as Record<string, unknown>
-    const message = typeof err.message === 'string' ? err.message : undefined
+    let message = typeof err.message === 'string' ? err.message : undefined
+    const upstream = upstreamMessage(err.metadata)
+    if (upstream && !message?.includes(upstream)) message = message ? `${message}: ${upstream}` : upstream
     const code =
       typeof err.code === 'string' ? err.code : typeof err.type === 'string' ? err.type : undefined
     return { message, code }

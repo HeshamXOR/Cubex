@@ -1,0 +1,13 @@
+/* The Type checking settings group: one live line about whether edits can be checked in this folder. */
+.diag-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--color-foreground-subtle);
+  overflow-wrap: anywhere;
+}
+.diag-status > svg { flex: none; margin-top: 3px; color: var(--color-foreground-subtlest); }
+.diag-status--ok > svg { color: var(--color-success); }
+.diag-status--attention > svg { color: var(--color-warning); }

@@ -17,6 +17,13 @@ export type ContentSource =
 export interface TextPart {
   type: 'text'
   text: string
+  /** Decoded upload provenance for the harness; adapters send only `text`. */
+  attachment?: {
+    kind: 'text_file'
+    filename: string
+    mediaType: string
+    sizeBytes: number
+  }
 }
 
 export interface ImagePart {
@@ -66,6 +73,10 @@ export interface ToolResultPart {
 export interface ReasoningPart {
   type: 'reasoning'
   text: string
+  /** Provider integrity token (Anthropic thinking signature); replay verbatim. */
+  signature?: string
+  /** Opaque encrypted reasoning (Anthropic redacted_thinking `data`). */
+  redacted?: string
 }
 
 export type MessageContentPart =

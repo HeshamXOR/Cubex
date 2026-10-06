@@ -1,83 +1,253 @@
-/* Cubex design tokens — near-black surfaces, restrained borders, one accent.
-   Reference: Electric Blue #4F6CFF / Violet #7B4DFF on Jet Black #0A0A0A. */
+/* ============================================================================
+   Cubex, Atelier. One focused session: conversation and review side by side.
+   A recessed "mica" window frame holds raised neutral surfaces. Structure comes
+   from hairlines and alignment, not shadows or fills. Blue marks focus,
+   selection and progress. The primary action is the inverse of the surface,
+   light on dark and dark on light, as the send button is. Green, red and amber
+   appear only where they mean something (added, removed, needs you). Work in progress is the Cubex star
+   turning, never a dot and never a generic spinner.
+   ============================================================================ */
 
 :root,
 :root[data-theme='dark'] {
-  --brand-blue: #4f6cff;
-  --brand-violet: #7b4dff;
-  --brand-gradient: linear-gradient(135deg, #4f6cff 0%, #7b4dff 100%);
+  color-scheme: dark;
 
-  /* Surfaces: app is darkest, panels lift subtly. */
-  --bg-app: #08080a;
-  --bg-sidebar: #0b0b0e;
-  --bg-surface: #101014;
-  --bg-raised: #16161c;
-  --bg-hover: #1a1a21;
-  --bg-active: #202029;
+  /* Accent: focus, selection and progress. */
+  --color-brand: #4f6cff;
+  --color-brand-strong: #6179ff;
 
-  --border: #1c1c23;
-  --border-soft: #17171d;
-  --border-strong: #2a2a34;
+  /* Surfaces. Mica is the window frame, the card is where work happens,
+     raised is for things that sit on the card, well is for inset content. */
+  --mica: #1f1f21;
+  --card: #151516;
+  --raise: #1b1b1d;
+  --well: #111112;
 
-  --text-0: #ececf1;
-  --text-1: #a3a3b0;
-  --text-2: #75757f;
-  --text-3: #5a5a64;
+  --color-backdrop: var(--mica);
+  --color-background: var(--card);
+  --color-background-alt: var(--raise);
+  --color-sidebar: var(--mica);
+  --color-header: var(--card);
+  --color-panel: var(--card);
+  --color-surface: rgba(255, 255, 255, 0.05);
+  --color-surface-hover: rgba(255, 255, 255, 0.075);
+  --color-card: var(--raise);
+  --color-card-selected: rgba(255, 255, 255, 0.07);
+  --color-popover: #212124;
+  --color-menu: #232326;
+  --color-menu-hover: rgba(255, 255, 255, 0.07);
+  --color-input: var(--well);
+  --color-input-focused: var(--well);
 
-  --accent: #4f6cff;
-  --accent-hover: #6179ff;
-  --accent-soft: rgba(79, 108, 255, 0.12);
-  --accent-border: rgba(79, 108, 255, 0.45);
-  --accent-text: #93a5ff;
+  /* Text. The lightest two keep at least 4.5:1 on every surface they sit on (card,
+     mica, menus, hover and selected states). */
+  --color-foreground: #ececee;
+  --color-foreground-subtle: #a2a2a8;
+  --color-foreground-subtlest: #8e8e97;
+  --color-foreground-faint: #4d4d53;
+  --color-foreground-body: #dcdce0;
+  --color-foreground-inverse: #151516;
 
-  /* Selected nav pill — deep indigo wash, as in the reference. */
-  --nav-active-bg: linear-gradient(90deg, rgba(56, 74, 190, 0.55) 0%, rgba(40, 52, 140, 0.4) 100%);
-  --nav-active-border: rgba(96, 124, 255, 0.35);
+  /* Hairlines. */
+  --color-border: rgba(255, 255, 255, 0.07);
+  --color-border-hover: rgba(255, 255, 255, 0.18);
+  --color-card-border: rgba(255, 255, 255, 0.07);
+  --color-popover-border: rgba(255, 255, 255, 0.11);
+  --color-input-border: rgba(255, 255, 255, 0.11);
+  --color-input-border-hover: rgba(255, 255, 255, 0.2);
+  /* Focus is neutral: a lighter border on dark surfaces and a darker one on light, never the accent. */
+  --color-input-border-focused: rgba(255, 255, 255, 0.5);
+  --focus-ring: rgba(255, 255, 255, 0.82);
 
-  --cloud: #6b86ff;
-  --local: #34d399;
-  --hybrid: #fbbf24;
+  --color-accent: rgba(79, 108, 255, 0.14);
+  --color-accent-border: rgba(79, 108, 255, 0.4);
+  --color-accent-foreground: #8fa1ff;
 
-  --ok: #34d399;
-  --warn: #fbbf24;
-  --err: #f87171;
+  --color-hover: rgba(255, 255, 255, 0.045);
+  --color-selected: rgba(255, 255, 255, 0.07);
+  --color-primary: #4f6cff;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #3a3a3f;
 
-  --radius-sm: 7px;
-  --radius: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 18px;
+  /* The primary action: the inverse of the surface, never the accent. */
+  --action-bg: #e9e9ec;
+  --action-fg: #141415;
+  --action-hover: #ffffff;
+  --action-active: #cfcfd5;
 
-  --shadow-pop: 0 16px 48px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--border);
+  /* Meaning, used sparingly. */
+  --color-success: #4cc38a;
+  --color-success-foreground: #06170f;
+  --color-warning: #e6a940;
+  --color-warning-foreground: #241a02;
+  --color-destructive: #f0716b;
+  --color-destructive-foreground: #2a0b0b;
+  --color-confirmation-surface: rgba(76, 195, 138, 0.12);
+  --color-confirmation-foreground: #7fd9ad;
+  --color-warning-surface: rgba(230, 169, 64, 0.1);
+  --color-warning-border: rgba(230, 169, 64, 0.3);
+  --color-destructive-surface: rgba(240, 113, 107, 0.09);
+  --color-destructive-border: rgba(240, 113, 107, 0.3);
 
-  --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', Consolas, monospace;
+  /* Diffs. Gutter and word-level highlights step up from the line tint. */
+  --color-diff-added: rgba(76, 195, 138, 0.085);
+  --color-diff-added-gutter: rgba(76, 195, 138, 0.1);
+  --color-diff-added-word: rgba(76, 195, 138, 0.3);
+  --color-diff-added-foreground: #4cc38a;
+  --color-diff-removed: rgba(240, 113, 107, 0.085);
+  --color-diff-removed-gutter: rgba(240, 113, 107, 0.1);
+  --color-diff-removed-word: rgba(240, 113, 107, 0.3);
+  --color-diff-removed-foreground: #f0716b;
+  --color-diff-hunk: rgba(79, 108, 255, 0.06);
 
-  --titlebar-h: 46px;
+  /* Code tokens. */
+  --code-keyword: #c3a6ff;
+  --code-function: #82aaff;
+  --code-string: #a5d6a7;
+  --code-type: #f2c97d;
+  --code-number: #f5a97f;
+  --code-comment: #6f7380;
+  --code-operator: #8e8e98;
+  --code-tag: #f08d8d;
+  --code-plain: #c9c9cf;
+
+  /* Access-type accents (Cubex-specific). */
+  --cloud: #8fa1ff;
+  --local: #4cc38a;
+  --hybrid: #e6a940;
+
+  /* Radius: controls 7, groups 10, panels 12, the composer 16. */
+  --radius-2xl: 16px;
+  --radius-xl: 12px;
+  --radius-lg: 10px;
+  --radius-md: 7px;
+  --radius-sm: 5px;
+
+  /* Elevation belongs to overlays only. */
+  --shadow-md: 0 10px 28px rgba(0, 0, 0, 0.42), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-pop: var(--shadow-md);
+
+  /* Type. The UI font size is the one knob for chrome scaling; the conversation reads larger. */
+  --ui-font-size: 13px;
+  --chat-font-size: 14px;
+  --chat-line-height: 23px;
+  --sans: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --display: 'Segoe UI Variable Display', 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --mono: 'Cascadia Code', 'Cascadia Mono', 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+
+  --titlebar-h: 40px;
+  --gap: 6px;
+
+  /* Backward-compat aliases (existing class names across views). */
+  --bg-app: var(--color-background);
+  --bg-sidebar: var(--color-sidebar);
+  --bg-surface: var(--color-surface);
+  --bg-raised: var(--color-popover);
+  --bg-hover: var(--color-surface-hover);
+  --bg-active: var(--color-menu-hover);
+  --border: var(--color-border);
+  --border-soft: var(--color-card-border);
+  --border-strong: var(--color-border-hover);
+  --text-0: var(--color-foreground);
+  --text-1: var(--color-foreground-subtle);
+  --text-2: var(--color-foreground-subtlest);
+  --text-3: var(--color-foreground-subtlest);
+  --accent: var(--color-brand);
+  --accent-hover: var(--color-brand-strong);
+  --accent-soft: var(--color-accent);
+  --accent-border: var(--color-accent-border);
+  --accent-text: var(--color-accent-foreground);
+  --nav-active-bg: var(--color-selected);
+  --nav-active-border: transparent;
+  --ok: var(--color-success);
+  --warn: var(--color-warning);
+  --err: var(--color-destructive);
+  --radius: var(--radius-lg);
 }
 
 :root[data-theme='light'] {
-  --bg-app: #f4f4f7;
-  --bg-sidebar: #fafafc;
-  --bg-surface: #ffffff;
-  --bg-raised: #ffffff;
-  --bg-hover: #f0f0f4;
-  --bg-active: #e8e8ef;
+  color-scheme: light;
 
-  --border: #e4e4ea;
-  --border-soft: #eeeef2;
-  --border-strong: #d2d2dc;
+  --mica: #eeeef1;
+  --card: #ffffff;
+  --raise: #ffffff;
+  --well: #f5f5f8;
 
-  --text-0: #14141a;
-  --text-1: #4b4b57;
-  --text-2: #74747f;
-  --text-3: #9494a0;
+  --color-popover: #ffffff;
+  --color-menu: #ffffff;
+  --color-menu-hover: rgba(20, 20, 30, 0.06);
+  --color-surface: rgba(20, 20, 30, 0.04);
+  --color-surface-hover: rgba(20, 20, 30, 0.07);
+  --color-card-selected: rgba(20, 20, 30, 0.08);
 
-  --accent-soft: rgba(79, 108, 255, 0.1);
-  --accent-text: #3b56e0;
-  --nav-active-bg: linear-gradient(90deg, rgba(79, 108, 255, 0.16) 0%, rgba(123, 77, 255, 0.1) 100%);
-  --nav-active-border: rgba(79, 108, 255, 0.3);
+  --color-foreground: #1c1c1f;
+  --color-foreground-subtle: #55555d;
+  --color-foreground-subtlest: #666670;
+  --color-foreground-faint: #a8a8b0;
+  --color-foreground-body: #2a2a2f;
+  --color-foreground-inverse: #fafafa;
 
-  --shadow-pop: 0 16px 48px rgba(20, 20, 40, 0.16), 0 0 0 1px var(--border);
+  --color-border: rgba(20, 20, 30, 0.09);
+  --color-border-hover: rgba(20, 20, 30, 0.22);
+  --color-card-border: rgba(20, 20, 30, 0.09);
+  --color-popover-border: rgba(20, 20, 30, 0.13);
+  --color-input-border: rgba(20, 20, 30, 0.16);
+  --color-input-border-hover: rgba(20, 20, 30, 0.28);
+  --color-input-border-focused: rgba(20, 20, 30, 0.78);
+  --focus-ring: rgba(20, 20, 30, 0.86);
+
+  --color-accent: rgba(79, 108, 255, 0.1);
+  --color-accent-border: rgba(79, 108, 255, 0.45);
+  --color-accent-foreground: #3347c7;
+  --color-hover: rgba(20, 20, 30, 0.05);
+  --color-selected: rgba(20, 20, 30, 0.08);
+  --color-secondary: #d6d6dc;
+
+  --action-bg: #1c1c1f;
+  --action-fg: #ffffff;
+  --action-hover: #3a3a41;
+  --action-active: #08080a;
+
+  --color-success: #1a7f4f;
+  --color-success-foreground: #ffffff;
+  --color-warning: #9a6200;
+  --color-warning-foreground: #ffffff;
+  --color-destructive: #c9362f;
+  --color-destructive-foreground: #ffffff;
+  --color-confirmation-surface: rgba(26, 127, 79, 0.1);
+  --color-confirmation-foreground: #1a7f4f;
+  --color-warning-surface: rgba(154, 98, 0, 0.08);
+  --color-warning-border: rgba(154, 98, 0, 0.32);
+  --color-destructive-surface: rgba(201, 54, 47, 0.07);
+  --color-destructive-border: rgba(201, 54, 47, 0.32);
+
+  --color-diff-added: rgba(26, 127, 79, 0.1);
+  --color-diff-added-gutter: rgba(26, 127, 79, 0.14);
+  --color-diff-added-word: rgba(26, 127, 79, 0.25);
+  --color-diff-added-foreground: #1a7f4f;
+  --color-diff-removed: rgba(201, 54, 47, 0.08);
+  --color-diff-removed-gutter: rgba(201, 54, 47, 0.12);
+  --color-diff-removed-word: rgba(201, 54, 47, 0.22);
+  --color-diff-removed-foreground: #c9362f;
+  --color-diff-hunk: rgba(79, 108, 255, 0.07);
+
+  --code-keyword: #7a3fd1;
+  --code-function: #1f5fbf;
+  --code-string: #2d6a31;
+  --code-type: #8a5a00;
+  --code-number: #b4541a;
+  --code-comment: #7a7e8a;
+  --code-operator: #5c5c66;
+  --code-tag: #b3363f;
+  --code-plain: #2a2a2f;
+
+  --cloud: #3347c7;
+  --local: #1a7f4f;
+  --hybrid: #9a6200;
+
+  --shadow-md: 0 10px 28px rgba(20, 20, 40, 0.14), 0 0 0 1px rgba(20, 20, 40, 0.05);
+  --shadow-lg: 0 18px 48px rgba(20, 20, 40, 0.2), 0 0 0 1px rgba(20, 20, 40, 0.06);
 }
 
 * {
@@ -94,23 +264,32 @@ body,
 
 body {
   font-family: var(--sans);
-  background: var(--bg-app);
-  color: var(--text-0);
-  font-size: 14px;
-  line-height: 1.5;
+  background: var(--mica);
+  color: var(--color-foreground);
+  font-size: var(--ui-font-size);
+  line-height: 1.55;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   overflow: hidden;
 }
 
+/* text-ui-* scale: the UI type system (drives off --ui-font-size). */
+.text-ui-xl { font-size: calc(var(--ui-font-size) + 4px); line-height: 1.4; }
+.text-ui-lg { font-size: calc(var(--ui-font-size) + 2px); line-height: 1.45; }
+.text-ui-base { font-size: var(--ui-font-size); line-height: 1.5; }
+.text-ui-caption { font-size: calc(var(--ui-font-size) - 1px); line-height: 1.5; }
+.text-ui-sm { font-size: calc(var(--ui-font-size) - 1px); line-height: 1.5; }
+.text-ui-xs { font-size: max(11.5px, calc(var(--ui-font-size) - 1px)); line-height: 1.45; }
+
 button {
   font-family: inherit;
   font-size: inherit;
-  cursor: pointer;
+  cursor: default;
   border: none;
   background: none;
   color: inherit;
 }
+button:disabled { cursor: default; }
 
 input,
 textarea,
@@ -119,18 +298,37 @@ select {
   color: inherit;
 }
 
+kbd {
+  font: 11px/1 var(--sans);
+  color: var(--color-foreground-subtlest);
+}
+
+/* Text for assistive technology only. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 ::-webkit-scrollbar {
-  width: 9px;
-  height: 9px;
+  width: 10px;
+  height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
+  background: rgba(255, 255, 255, 0.14);
   border-radius: 8px;
-  border: 2px solid transparent;
+  border: 3px solid transparent;
   background-clip: padding-box;
 }
+:root[data-theme='light'] ::-webkit-scrollbar-thumb { background: rgba(20, 20, 30, 0.22); background-clip: padding-box; }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3a3a46;
+  background: var(--color-foreground-subtlest);
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-track {
@@ -138,20 +336,42 @@ select {
 }
 
 a {
-  color: var(--accent-text);
+  color: var(--color-accent-foreground);
   text-decoration: none;
 }
 
+/* Code never uses ligatures: "!==" and "=>" must read as typed. */
 code,
-pre {
+pre,
+kbd.mono,
+.mono {
   font-family: var(--mono);
+  font-variant-ligatures: none;
 }
 
 ::selection {
-  background: rgba(79, 108, 255, 0.35);
+  background: color-mix(in srgb, var(--color-brand) 32%, transparent);
 }
 
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
+}
+
+/* Identity: work in progress is the Cubex star making quarter turns. It holds,
+   then turns, like a compass settling on a bearing. */
+.turning {
+  animation: cx-turn 1.6s cubic-bezier(0.6, -0.35, 0.25, 1.35) infinite;
+}
+@keyframes cx-turn {
+  0%, 45% { transform: rotate(0); }
+  100% { transform: rotate(90deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition: none !important;
+    animation: none !important;
+    scroll-behavior: auto !important;
+  }
 }

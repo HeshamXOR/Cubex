@@ -1,0 +1,29 @@
+/* The Context summaries and Budget groups in Settings. */
+.ctxsec__slider { display: flex; align-items: center; gap: 12px; width: 240px; max-width: 100%; }
+.ctxsec__slider .slider { flex: 1; min-width: 0; margin: 0; }
+.ctxsec__slider .slider:disabled { opacity: 0.45; }
+.ctxsec__value { flex: none; width: 36px; text-align: right; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--color-foreground); }
+.ctxsec__action { width: 190px; max-width: 100%; }
+.ctxsec .callout { margin: 8px 0 0; }
+
+.budgetrow { flex-wrap: wrap; align-items: flex-start; }
+.budgetrow__text { flex: 1; min-width: 220px; }
+.budgetrow__text .setrow__label { display: block; }
+.budgetrow__control { position: relative; flex: none; width: 128px; }
+.budgetrow__prefix { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 13px; color: var(--color-foreground-subtlest); pointer-events: none; }
+.budgetrow__input { width: 100%; padding-left: 22px; text-align: right; font-variant-numeric: tabular-nums; }
+.budgetrow__input[aria-invalid='true'] { border-color: var(--color-destructive); }
+.budgetrow__error { flex-basis: 100%; margin: 0; font-size: 12px; line-height: 1.5; color: var(--color-destructive); }
+.budgetrow__spend { margin-top: 6px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--color-foreground-subtle); }
+.budgetrow__spend[data-state='warn'] { color: var(--color-warning); }
+.budgetrow__spend[data-state='over'] { color: var(--color-destructive); }
+:root[data-theme='light'] .budgetrow__spend[data-state='warn'] { color: color-mix(in srgb, var(--color-warning) 25%, var(--color-foreground)); }
+.budgetrow__bar { height: 3px; margin-top: 5px; max-width: 280px; border-radius: 2px; background: var(--color-surface-hover); overflow: hidden; }
+.budgetrow__bar > span { display: block; height: 100%; background: var(--color-foreground-subtlest); }
+.budgetrow__spend[data-state='warn'] .budgetrow__bar > span { background: var(--color-warning); }
+.budgetrow__spend[data-state='over'] .budgetrow__bar > span { background: var(--color-destructive); }
+@container settings (max-width: 520px) {
+  .ctxsec__slider,
+  .ctxsec__action { width: 100%; }
+  .budgetrow__control { width: 100%; }
+}

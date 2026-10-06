@@ -28,6 +28,8 @@ export interface ToolResult {
   toolUseId: string
   content: string | JSONValue
   isError?: boolean
+  /** Harness-owned display metadata; never forwarded as provider tool content. */
+  metadata?: Record<string, JSONValue>
 }
 
 /** Permission gate applied before any tool runs. */

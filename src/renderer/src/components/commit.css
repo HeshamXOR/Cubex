@@ -1,0 +1,131 @@
+/* ============================================================================
+   Cubex, Atelier: the commit sheet. It rises from the review footer over the
+   diff: the one place a message is written and files are picked. Same raised
+   surface as the other overlays; the primary button is the only blue.
+   ============================================================================ */
+
+.commit {
+  position: absolute;
+  z-index: 5;
+  left: 10px;
+  right: 10px;
+  bottom: 54px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: calc(100% - 64px);
+  padding: 12px;
+  border: 1px solid var(--color-popover-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-popover);
+  box-shadow: var(--shadow-md);
+  animation: commit-in 140ms ease-out;
+}
+@keyframes commit-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+.commit__h { flex: none; display: flex; align-items: center; gap: 8px; height: 26px; margin-right: -4px; }
+.commit__h > svg { flex: none; color: var(--color-foreground-subtlest); }
+.commit__h h3 { font: 600 13px/1 var(--display); color: var(--color-foreground); }
+.commit__h .ib { width: 26px; height: 26px; }
+.commit__branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 240px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: var(--color-surface);
+  font: 12px/1 var(--mono);
+  color: var(--color-foreground-subtle);
+}
+.commit__branch > svg { flex: none; color: var(--color-foreground-subtlest); }
+.commit__branch > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.commit__msg-wrap { flex: none; }
+.commit__msg {
+  display: block;
+  width: 100%;
+  min-height: 58px;
+  max-height: 142px;
+  resize: none;
+  padding: 8px 10px;
+  border: 1px solid var(--color-input-border);
+  border-radius: var(--radius-md);
+  background: var(--color-input);
+  font: 13px/20px var(--sans);
+  color: var(--color-foreground);
+  outline: none;
+  overflow-y: auto;
+  transition: border-color 0.12s;
+}
+.commit__msg:hover { border-color: var(--color-input-border-hover); }
+/* The global focus ring would sit on top of the border change; the border says it already. */
+.commit__msg:focus,
+.commit__msg:focus-visible { border-color: var(--color-input-border-focused); outline: none; }
+.commit__msg::placeholder { color: var(--color-foreground-subtlest); }
+.commit__note { margin-top: 6px; font-size: 12px; line-height: 1.45; color: var(--color-warning); }
+
+.commit__files {
+  flex: 0 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--well);
+  overflow: hidden;
+}
+.commit__fh {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 30px;
+  padding: 0 12px 0 10px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 12px;
+  color: var(--color-foreground-subtle);
+}
+.commit__list { min-height: 0; max-height: 118px; overflow-y: auto; padding: 3px; }
+.commit__row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  height: 28px;
+  padding: 0 9px 0 7px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: var(--color-foreground-subtle);
+  text-align: left;
+}
+.commit__row:hover { background: var(--color-hover); color: var(--color-foreground); }
+.commit__row[aria-checked='true'] { color: var(--color-foreground); }
+.commit .chk { margin: 0; }
+.chk.part { background: var(--color-brand); border-color: var(--color-brand); }
+.tag--done { color: var(--color-success); background: var(--color-confirmation-surface); }
+
+.commit__err {
+  flex: none;
+  max-height: 168px;
+  overflow: auto;
+  padding: 8px 10px 8px 12px;
+  border: 1px solid var(--color-border);
+  border-left: 2px solid var(--color-destructive);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--color-foreground);
+  overflow-wrap: anywhere;
+}
+.commit__err pre { margin-top: 6px; font: 11.5px/1.55 var(--mono); color: var(--color-foreground-subtle); white-space: pre-wrap; }
+
+.commit__a { flex: none; display: flex; align-items: center; gap: 6px; }
+.commit__hint { font-size: 12px; color: var(--color-foreground-subtlest); }
+@container review (max-width: 440px) { .commit__hint { display: none; } }

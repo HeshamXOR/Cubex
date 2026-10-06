@@ -11,11 +11,19 @@ export type StopReason =
   | 'unknown'
 
 export interface Usage {
+  /** Total input context, including cache reads and cache writes when reported. */
   inputTokens?: number
   outputTokens?: number
   totalTokens?: number
   reasoningTokens?: number
+  /** Subset of inputTokens read from the provider's prompt cache. */
   cachedInputTokens?: number
+  /** Subset of inputTokens used to create provider prompt-cache entries. */
+  cacheWriteInputTokens?: number
+  /** Subset of cacheWriteInputTokens written with the 1-hour lifetime (billed at a higher rate on Anthropic). */
+  cacheWrite1hInputTokens?: number
+  /** Cost in USD as reported by the provider itself (OpenRouter's usage.cost); preferred over any estimate. */
+  reportedCostUsd?: number
 }
 
 export interface Timings {

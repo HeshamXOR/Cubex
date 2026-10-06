@@ -38,7 +38,7 @@ async function collect(gen: AsyncIterable<AIStreamEvent>): Promise<AIStreamEvent
   return out
 }
 
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('OllamaProvider streaming (NDJSON)', () => {
   it('parses newline-delimited JSON into text_delta + usage from eval counts', async () => {
@@ -61,6 +61,28 @@ describe('OllamaProvider streaming (NDJSON)', () => {
     expect(usage).toBeTruthy()
   })
 
+  it('forwards thinking before answer or tool generation finishes', async () => {
+    const encoder = new TextEncoder()
+    let source!: ReadableStreamDefaultController<Uint8Array>
+    const body = new ReadableStream<Uint8Array>({ start(controller) { source = controller } })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(body)))
+    const provider = new OllamaProvider(cfg())
+    const events: AIStreamEvent[] = []
+    const pending = (async () => {
+      for await (const event of provider.streamMessage({ model: 'qwen3:8b', messages: [userMessage('Make a plan')] })) events.push(event)
+    })()
+    try {
+      source.enqueue(encoder.encode(JSON.stringify({ message: { thinking: 'Checking the constraints.', content: '' }, done: false }) + '\n'))
+      await vi.waitFor(() => expect(events).toContainEqual({ type: 'reasoning_delta', text: 'Checking the constraints.' }))
+      expect(events.some((event) => event.type === 'text_delta' || event.type === 'stop')).toBe(false)
+    } finally {
+      source.enqueue(encoder.encode(JSON.stringify({ message: { content: 'The plan is ready.' }, done: true }) + '\n'))
+      source.close()
+      await pending
+    }
+    expect(events.map((event) => event.type)).toEqual(['start', 'reasoning_delta', 'text_delta', 'stop'])
+  })
+
   it('lists installed models from /api/tags', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
@@ -72,5 +94,22 @@ describe('OllamaProvider streaming (NDJSON)', () => {
     const provider = new OllamaProvider(cfg())
     const models = await provider.getModels()
     expect(models[0]).toMatchObject({ id: 'mistral:7b', location: 'local' })
+  })
+})
+
+describe('OllamaProvider stop reasons', () => {
+  it('reports tool_use after tool calls and length on truncation', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ndjson([
+      JSON.stringify({ message: { content: '', tool_calls: [{ function: { name: 'read_file', arguments: { path: 'a' } } }] }, done: false }),
+      JSON.stringify({ message: { content: '' }, done: true, done_reason: 'stop' })
+    ])))
+    const tools = await collect(new OllamaProvider(cfg()).streamMessage({ model: 'm', messages: [userMessage('hi')], stream: true }))
+    expect(tools.find((e) => e.type === 'stop')).toMatchObject({ stopReason: 'tool_use' })
+
+    vi.stubGlobal('fetch', vi.fn(async () => ndjson([
+      JSON.stringify({ message: { content: 'cut' }, done: true, done_reason: 'length' })
+    ])))
+    const cut = await collect(new OllamaProvider(cfg()).streamMessage({ model: 'm', messages: [userMessage('hi')], stream: true }))
+    expect(cut.find((e) => e.type === 'stop')).toMatchObject({ stopReason: 'length' })
   })
 })

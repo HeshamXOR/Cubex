@@ -1,0 +1,67 @@
+/* Downloads and installed models: one grouped surface, rows divided by hairlines. */
+
+.lm-group {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--raise);
+  overflow: hidden;
+}
+.lm-group > * + * { border-top: 1px solid var(--color-border); }
+
+.lm-form { margin-bottom: 0; }
+.lm-hint { margin: 8px 0 0; font-size: 12px; color: var(--color-foreground-subtle); }
+.lm-bar { margin-top: 22px; }
+.lm-count { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--color-foreground-subtle); }
+.view__controls + .callout,
+.lm-hint + .callout { margin-top: 16px; }
+.view__controls ~ .callout:last-of-type { margin-bottom: 0; }
+
+/* One download. The glyph says what state it is in, the body says how far it has got. */
+.lm-dl {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 6px;
+  padding: 12px 14px 13px;
+}
+.lm-dl__glyph { display: grid; place-items: center; color: var(--color-foreground-subtlest); }
+.lm-dl__name { min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.lm-dl__side { display: flex; align-items: center; gap: 8px; }
+.lm-dl__stage { font-size: 12px; white-space: nowrap; color: var(--color-foreground-subtle); }
+.lm-dl[data-phase='queued'] .lm-dl__stage { color: var(--color-foreground-subtlest); }
+.lm-dl__body { grid-column: 2 / -1; min-width: 0; }
+.lm-dl__bar { margin-top: 2px; }
+.lm-dl__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-foreground-subtle);
+}
+.lm-dl__meta > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.lm-dl__meta > span:last-child { flex: none; text-align: right; }
+.lm-dl__file { margin-top: 3px; font: 11.5px/1.5 var(--mono); color: var(--color-foreground-subtlest); overflow-wrap: anywhere; }
+.lm-dl__hint { font-size: 12px; color: var(--color-foreground-subtlest); overflow-wrap: anywhere; }
+.lm-dl__note { margin: 10px 0 0; }
+
+/* Installed models. */
+.lm-installed { padding: 11px 14px; }
+.lm-installed__row { display: flex; align-items: center; gap: 12px; }
+.lm-installed__icon { flex: none; color: var(--color-foreground-subtlest); }
+.lm-installed__body { flex: 1; min-width: 0; }
+.lm-installed__name { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.lm-installed__meta { margin-top: 2px; font-size: 12px; color: var(--color-foreground-subtle); }
+.lm-delete { color: var(--color-foreground-subtlest); }
+.lm-delete:hover:not(:disabled) { color: var(--color-destructive); background: var(--color-destructive-surface); }
+
+@media (max-width: 900px) {
+  .lm-dl { column-gap: 10px; padding: 11px 12px 12px; }
+}
+@media (max-width: 560px) {
+  .lm-dl { grid-template-columns: 18px minmax(0, 1fr); }
+  .lm-dl__side { grid-column: 2; grid-row: 2; justify-content: space-between; }
+  .lm-dl__body { grid-row: 3; }
+}

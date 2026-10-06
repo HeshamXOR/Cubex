@@ -1,56 +1,90 @@
-import {
-  Check,
-  FileText,
-  FolderTree,
-  Loader2,
-  PenLine,
-  Search,
-  TriangleAlert,
-  Boxes,
-  Wrench
-} from 'lucide-react'
+import { useId, useState } from 'react'
+import { BookOpen, Boxes, ChevronRight, FileText, FolderTree, Globe, Search, Telescope, Terminal, Wrench } from 'lucide-react'
 import type { ToolActivity } from '../../../shared/ipc'
+import { fromSubagent as isFromSubagent, toolKind, toolTarget } from '../lib/transcriptGroups'
+import { ActivityGlyph, type ActivityGlyphKind } from '../theme/StateIcons'
+import { CommandOutputPanel } from './CommandOutputPanel'
+import { PathLink } from './PathLink'
 import './toolcard.css'
 
 const ICON: Record<string, JSX.Element> = {
-  read_file: <FileText size={14} />,
-  write_file: <PenLine size={14} />,
-  list_files: <FolderTree size={14} />,
-  search_files: <Search size={14} />,
-  delegate_to_subagent: <Boxes size={14} />
+  read_file: <FileText size={15} strokeWidth={1.65} />,
+  list_files: <FolderTree size={15} strokeWidth={1.65} />,
+  search_files: <Search size={15} strokeWidth={1.65} />,
+  glob_files: <FolderTree size={15} strokeWidth={1.65} />,
+  run_command: <Terminal size={15} strokeWidth={1.65} />,
+  read_command_output: <Terminal size={15} strokeWidth={1.65} />,
+  web_fetch: <Globe size={15} strokeWidth={1.65} />,
+  web_search: <Telescope size={15} strokeWidth={1.65} />,
+  skill: <BookOpen size={15} strokeWidth={1.65} />,
+  delegate_to_subagent: <Boxes size={15} strokeWidth={1.65} />
 }
+const GLYPH: Record<string, ActivityGlyphKind> = {
+  write_file: 'editing', edit_file: 'editing', remove_file: 'removing', delete_file: 'removing',
+  exit_plan_mode: 'planning', read_plan: 'planning', ask_user_question: 'waiting',
+  run_command: 'running', read_command_output: 'running'
+}
+/** The calls whose target is a file or folder of the project. */
+const LINKED_TOOLS: ReadonlySet<string> = new Set(['read_file', 'list_files'])
 
-/**
- * An in-thread card showing one tool the model is running — spinner while
- * active, a check when done, and +added / −removed line badges for edits.
- */
-export function ToolCard({ tool }: { tool: ToolActivity }): JSX.Element {
-  const icon = ICON[tool.name] ?? <Wrench size={14} />
-  const running = tool.phase === 'running'
+/** A compact operation row with its actual phase and optional result or diff. */
+export function ToolCard({ tool, waitingForInput = false }: { tool: ToolActivity; waitingForInput?: boolean }): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const [outputOpen, setOutputOpen] = useState(false)
+  const id = useId()
+  const waiting = tool.phase === 'running' && waitingForInput
+  const running = tool.phase === 'running' && !waiting
   const error = tool.phase === 'error'
-  return (
-    <div className={`toolcard ${running ? 'toolcard--running' : ''} ${error ? 'toolcard--error' : ''}`}>
-      <span className="toolcard__icon">{icon}</span>
-      <span className="toolcard__title">{tool.title || tool.name}</span>
+  const queued = tool.phase === 'queued'
+  const kind = toolKind(tool.name)
+  const glyph = GLYPH[tool.name]
+  const fromSubagent = isFromSubagent(tool)
+  const target = toolTarget(tool)
+  const hasOutput = !!(tool.outputId && tool.outputConversationId)
+  const hasDetails = !!(tool.diff || tool.detail || hasOutput)
+  const phase = tool.interrupted ? 'Interrupted' : error ? 'Failed' : waiting ? 'Waiting for you' : running ? 'Running' : queued ? 'Queued' : 'Completed'
+  const removing = glyph === 'removing'
+  // A row with nothing to expand is plain text, so the file or folder it names can be a link. A button cannot hold one.
+  const linkable = !hasDetails && !!target && LINKED_TOOLS.has(tool.name)
 
-      {(tool.added !== undefined || tool.removed !== undefined) && (
-        <span className="toolcard__diff">
-          {tool.added ? <span className="diff-add">+{tool.added}</span> : null}
-          {tool.removed ? <span className="diff-del">−{tool.removed}</span> : null}
-        </span>
-      )}
-
-      {tool.detail && !running && <span className="toolcard__detail">{tool.detail}</span>}
-
-      <span className="toolcard__status">
-        {running ? (
-          <Loader2 size={13} className="spin" />
-        ) : error ? (
-          <TriangleAlert size={13} style={{ color: 'var(--err)' }} />
-        ) : (
-          <Check size={13} style={{ color: 'var(--ok)' }} />
-        )}
+  const summary = (
+    <>
+      <span className="toolrow__icon">
+        {waiting ? <ActivityGlyph kind="waiting" size={15} />
+          : running ? <ActivityGlyph kind="thinking" size={14} active />
+          : glyph ? <ActivityGlyph kind={glyph} size={15} />
+          : ICON[tool.name] ?? <Wrench size={15} strokeWidth={1.65} />}
       </span>
+      <span className="toolrow__kind">{kind}</span>{' '}
+      {target && <span className={linkable ? 'toolrow__target toolrow__target--link' : 'toolrow__target'} title={target}>{linkable ? <PathLink text={target} className="pathlink--clip">{target}</PathLink> : target}</span>}{' '}
+      {fromSubagent && tool.name !== 'delegate_to_subagent' && <span className="toolrow__origin">Subagent</span>}
+      {(!!tool.added || !!tool.removed) && <span className="toolrow__diff" aria-label={`${tool.added ?? 0} lines added, ${tool.removed ?? 0} removed`}>
+        {!!tool.added && <span className="diff-add">+{tool.added}</span>}
+        {!!tool.removed && <span className="diff-del">−{tool.removed}</span>}
+      </span>}
+      {(running || waiting || error || queued)
+        ? <span className={`toolrow__phase ${error && !tool.interrupted ? 'toolrow__phase--error' : ''} ${waiting ? 'toolrow__phase--waiting' : ''}`}>{phase}</span>
+        : <span className="sr-only">{phase}</span>}
+      {hasDetails && <ChevronRight size={14} className={`toolrow__chev ${open ? 'is-open' : ''}`} aria-hidden="true" />}
+    </>
+  )
+
+  return (
+    <div className={`toolrow ${removing ? 'toolrow--removing' : ''}`} data-phase={tool.interrupted ? 'interrupted' : waiting ? 'waiting' : tool.phase} data-tool={tool.name}>
+      {linkable
+        ? <div className="toolrow__summary toolrow__summary--static">{summary}</div>
+        : <button className="toolrow__summary" onClick={() => hasDetails && setOpen(value => !value)} disabled={!hasDetails} aria-expanded={hasDetails ? open : undefined} aria-controls={hasDetails ? id : undefined}>{summary}</button>}
+      {open && tool.diff ? <div id={id} className="toolrow__diffview" role="region" aria-label={`${kind} changes`}>
+        {tool.diff.split('\n').map((line, index) => {
+          const tag = line[0]
+          const change = tag === '+' || tag === '-'
+          const content = change || tag === ' ' ? line.slice(1) : line
+          const cls = tag === '+' ? 'tdl tdl--add' : tag === '-' ? 'tdl tdl--del' : tag === '@' ? 'tdl tdl--gap' : 'tdl'
+          return <div className={cls} key={index}><span className="tdl__tag" aria-hidden="true">{change ? tag : ''}</span><span>{content || '\u00a0'}</span></div>
+        })}
+      </div> : open && (tool.detail || hasOutput) && <div id={id} className="toolrow__body">{tool.detail || 'Command output saved.'}</div>}
+      {open && hasOutput && <button className="toolrow__output" onClick={() => setOutputOpen(true)}><Terminal size={14} />View saved output<ChevronRight size={13} /></button>}
+      {outputOpen && hasOutput && <CommandOutputPanel key={`${tool.outputConversationId}:${tool.outputId}`} conversationId={tool.outputConversationId!} outputId={tool.outputId!} onClose={() => setOutputOpen(false)} />}
     </div>
   )
 }

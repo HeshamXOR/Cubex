@@ -1,0 +1,260 @@
+/* ============================================================================
+   Cubex, Atelier: the review panel. Changes with a diff for each file, the plan
+   and the model's details. A raised card like the conversation, on the Mica frame.
+   ============================================================================ */
+
+.review { container: review / inline-size; }
+
+.rev-h {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 52px;
+  padding: 0 12px 0 14px;
+  border-bottom: 1px solid var(--color-border);
+}
+.rev-tabs { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.rev-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font: 500 13.5px/1 var(--display);
+  color: var(--color-foreground-subtlest);
+  white-space: nowrap;
+}
+.rev-tab:hover { color: var(--color-foreground); background: var(--color-hover); }
+.rev-tab.on { color: var(--color-foreground); font-weight: 600; background: var(--color-selected); }
+.rev-count { font: 500 11.5px/1 var(--sans); color: var(--color-foreground-subtlest); font-variant-numeric: tabular-nums; }
+.rev-wait { color: var(--color-warning); flex: none; }
+
+.rev-panel { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.rev-panel > .rdetails { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 18px 28px; }
+.rev-panel > .plan-review { flex: 1; min-height: 0; }
+.rev-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+/* A row under the tabs: what changed in total, and the two bulk actions. */
+.rev-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 44px;
+  padding: 0 12px 0 18px;
+}
+.rev-sum { display: inline-flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--color-foreground-subtle); }
+
+.stat { display: inline-flex; gap: 6px; font: 12px/1 var(--mono); }
+.stat .p { color: var(--color-diff-added-foreground); }
+.stat .m { color: var(--color-diff-removed-foreground); }
+
+.rev-notice {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 12px 8px;
+  padding: 8px 10px 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  background: var(--color-surface);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--color-foreground-subtle);
+}
+.rev-notice > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.rev-notice > button { flex: none; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 5px; color: inherit; }
+.rev-notice > button:hover { background: var(--color-hover); }
+/* Tone is one edge in the semantic color; the words keep the text color so they stay readable. */
+.rev-notice--ok { border-left: 2px solid var(--color-success); color: var(--color-foreground); }
+.rev-notice--warn { border-left: 2px solid var(--color-warning); color: var(--color-foreground); }
+.rev-notice--error { border-left: 2px solid var(--color-destructive); color: var(--color-foreground); }
+.rev-notice__detail { margin-top: 2px; font-size: 12px; opacity: 0.85; }
+
+/* File list */
+.rf-list { flex: none; max-height: 196px; overflow-y: auto; padding: 4px 6px 6px; border-bottom: 1px solid var(--color-border); }
+.rf { position: relative; display: flex; align-items: center; height: 32px; border-radius: 7px; color: var(--color-foreground-subtle); }
+.rf:hover { background: var(--color-hover); }
+.rf.sel { background: var(--color-selected); color: var(--color-foreground); }
+.rf-open { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: 9px; padding: 0 8px 0 2px; font-size: 13px; color: inherit; text-align: left; }
+.rf-open > svg { flex: none; color: var(--color-foreground-subtlest); }
+.rf-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dir { color: var(--color-foreground-subtlest); }
+.tag { flex: none; height: 18px; padding: 0 6px; border-radius: 5px; font-size: 11px; line-height: 18px; }
+.tag--new { color: var(--color-diff-added-foreground); background: var(--color-diff-added-gutter); }
+.tag--del { color: var(--color-diff-removed-foreground); background: var(--color-diff-removed-gutter); }
+.chk {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin: 0 7px 0 10px;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid var(--color-foreground-faint);
+  border-radius: 4px;
+  color: #fff;
+  transition: background 0.1s, border-color 0.1s;
+}
+.chk:hover { border-color: var(--color-foreground-subtlest); }
+.chk.on { background: var(--color-brand); border-color: var(--color-brand); }
+.rf-undo {
+  flex: none;
+  display: none;
+  width: 26px;
+  height: 26px;
+  margin-right: 4px;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--color-foreground-subtle);
+}
+.rf-undo:hover:not(:disabled) { background: var(--color-surface-hover); color: var(--color-foreground); }
+.rf-undo:disabled { opacity: 0.4; }
+.rf:hover .rf-undo,
+.rf:focus-within .rf-undo { display: grid; }
+
+/* Diff header */
+.dv-h { flex: none; display: flex; align-items: center; gap: 10px; min-width: 0; height: 44px; padding: 0 12px 0 18px; }
+.dv-h .fp { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12.5px var(--mono); color: var(--color-foreground); }
+.dv-h .when { flex: none; font-size: 12px; color: var(--color-foreground-subtlest); white-space: nowrap; }
+.dv-scroll { flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 0 10px 10px; border: 1px solid var(--color-border); border-radius: 9px; background: var(--well); overflow: hidden; }
+.rev-nodiff { padding: 24px 20px; font-size: 13px; line-height: 1.6; color: var(--color-foreground-subtle); }
+
+/* The diff itself. Every rule is scoped so the transcript's own diff styles stay separate. */
+.diff { flex: 1; min-height: 0; overflow: auto; font: 12px/20px var(--mono); }
+/* The diff scrolls with the keyboard, and its box clips what is drawn outside it, so the focus ring sits inside. */
+.diff:focus-visible { outline-offset: -2px; }
+.diff--unified .diff__body { min-width: max-content; }
+.diff .dh {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--color-border);
+  /* Opaque, so rows do not show through the sticky header while it scrolls. */
+  background-color: var(--well);
+  background-image: linear-gradient(var(--color-diff-hunk), var(--color-diff-hunk));
+  color: var(--color-foreground-subtlest);
+  font-size: 11.5px;
+}
+.diff .dl { display: grid; grid-template-columns: 40px 40px 18px minmax(0, 1fr); white-space: pre; color: var(--code-plain); }
+.diff .dl .o,
+.diff .dl .n,
+.diff .dc .n { text-align: right; padding-right: 10px; color: var(--color-foreground-faint); font-size: 11px; user-select: none; font-variant-numeric: tabular-nums; }
+.diff .sg { color: var(--color-foreground-faint); user-select: none; }
+.diff .dl.add { background: var(--color-diff-added); }
+.diff .dl.add .o,
+.diff .dl.add .n { background: var(--color-diff-added-gutter); color: color-mix(in srgb, var(--color-diff-added-foreground) 70%, transparent); }
+.diff .dl.add .sg { color: var(--color-diff-added-foreground); }
+.diff .dl.del { background: var(--color-diff-removed); }
+.diff .dl.del .o,
+.diff .dl.del .n { background: var(--color-diff-removed-gutter); color: color-mix(in srgb, var(--color-diff-removed-foreground) 70%, transparent); }
+.diff .dl.del .sg { color: var(--color-diff-removed-foreground); }
+.diff .cd { min-width: 0; }
+.diff .wd { padding: 1px 0; border-radius: 3px; }
+.diff .dl.add .wd,
+.diff .dc.add .wd { background: var(--color-diff-added-word); }
+.diff .dl.del .wd,
+.diff .dc.del .wd { background: var(--color-diff-removed-word); }
+.diff .dmore {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 14px;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  font: 12px var(--sans);
+  color: var(--color-foreground-subtlest);
+}
+.diff .dmore:first-child { border-top: 0; }
+.diff .dmore:last-child { border-bottom: 0; }
+
+/* Split view wraps long lines so both sides stay in view. */
+.diff--split .ds { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.diff--split .ds + .ds { border-top: 0; }
+.diff .dc { display: grid; grid-template-columns: 40px 16px minmax(0, 1fr); color: var(--code-plain); white-space: pre-wrap; overflow-wrap: anywhere; min-height: 20px; }
+.diff .dc + .dc { border-left: 1px solid var(--color-border); }
+/* Not named .empty: the app's empty-state rule would pad it to a hundred pixels tall. */
+.diff .dc--blank { background: var(--color-surface); }
+.diff .dc.add { background: var(--color-diff-added); }
+.diff .dc.add .n { background: var(--color-diff-added-gutter); }
+.diff .dc.add .sg { color: var(--color-diff-added-foreground); }
+.diff .dc.del { background: var(--color-diff-removed); }
+.diff .dc.del .n { background: var(--color-diff-removed-gutter); }
+.diff .dc.del .sg { color: var(--color-diff-removed-foreground); }
+
+/* Token colors, shared with the code blocks in the thread. */
+.tk-k { color: var(--code-keyword); }
+.tk-f { color: var(--code-function); }
+.tk-s { color: var(--code-string); }
+.tk-t { color: var(--code-type); }
+.tk-n { color: var(--code-number); }
+.tk-c { color: var(--code-comment); font-style: italic; }
+.tk-o { color: var(--code-operator); }
+.tk-p { color: var(--code-plain); }
+
+.rev-f {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 46px;
+  padding: 0 12px 0 18px;
+  border-top: 1px solid var(--color-border);
+  font-size: 12px;
+  color: var(--color-foreground-subtlest);
+  white-space: nowrap;
+}
+.rev-f .btn { flex: none; }
+.rev-f .btn.is-open { background: var(--color-surface-hover); border-color: var(--color-border-hover); }
+.rev-f__done { min-width: 0; display: inline-flex; align-items: center; gap: 7px; color: var(--color-success); }
+.rev-f__done > svg { flex: none; }
+.rev-f__done code { flex: none; font: 12px var(--mono); }
+.rev-f__subject { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--color-foreground-subtle); }
+@container review (max-width: 520px) { .rev-f__hint { display: none; } }
+
+.rev-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 36px;
+  text-align: center;
+  color: var(--color-foreground-subtlest);
+}
+/* The panel's headings start at h2 (plans and details do too); an empty state's title is one of them. */
+.rev-empty :is(h2, h3) { font: 600 14px/1.4 var(--display); color: var(--color-foreground); }
+.rev-empty p { max-width: 340px; font-size: 13px; line-height: 1.6; color: var(--color-foreground-subtle); }
+
+/* Details */
+.rdetails .rsec { margin-bottom: 4px; padding: 14px 0 16px; border-bottom: 1px solid var(--color-border); }
+.rsec__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.rsec__title { font: 600 13px/1.4 var(--display); color: var(--color-foreground); }
+.rsec__link { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; color: var(--color-foreground-subtlest); }
+.rsec__link:hover { color: var(--color-accent-foreground); }
+.rdetails .eslider { --eff-surface: var(--card); margin-bottom: 4px; padding: 2px 0 0; }
+.rfull { width: 100%; }
+.rfacts { margin-top: 8px; }
+.rhint { margin-top: 6px; font-size: 12px; line-height: 1.5; color: var(--color-foreground-subtlest); overflow-wrap: anywhere; }
+.rtoggle { width: 100%; text-align: left; }
+.rtoggle:hover { color: var(--color-foreground); }
+.rtrail { display: flex; flex-direction: column; gap: 4px; }
+.rtrail .mono { font-size: 11.5px; color: var(--color-foreground-subtle); overflow-wrap: anywhere; }
+.rerror { padding: 10px 12px 10px 14px; border: 1px solid var(--color-border); border-left: 2px solid var(--color-destructive); border-radius: 9px; background: var(--color-surface); font-size: 12.5px; color: var(--color-foreground); }
+.rerror p { margin-top: 4px; color: var(--color-foreground-subtle); }
+.rinspect { margin-top: 14px; }
+.rinspect > summary { display: flex; align-items: center; gap: 8px; height: 34px; cursor: pointer; list-style: none; font: 600 13px var(--display); user-select: none; }
+.rinspect > summary::-webkit-details-marker { display: none; }
+.rinspect > summary .badge { margin-left: auto; }
+.rinspect__chev { color: var(--color-foreground-subtlest); transition: transform 0.15s; }
+.rinspect[open] .rinspect__chev { transform: rotate(90deg); }
+.rinspect .rsec { margin-bottom: 0; }

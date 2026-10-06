@@ -7,6 +7,8 @@ export interface RetryHooks {
   onRetry?: (info: { attempt: number; error: NormalizedAIError; delayMs: number }) => void
   /** Called on a terminal (non-retryable / exhausted) error. */
   onGiveUp?: (info: { attempt: number; error: NormalizedAIError }) => void
+  /** A further veto after the policy has said an error may be retried (the gateway caps retries of long waits with it). */
+  allowRetry?: (error: NormalizedAIError) => boolean
   /** Injectable sleep (tests pass a no-op / fake timer). */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>
   /** Injectable RNG for jitter. */
@@ -125,7 +127,7 @@ export async function withRetry<T>(
               cause: err
             })
 
-      const canRetry = attempt < maxAttempts && isRetryable(error, policy)
+      const canRetry = attempt < maxAttempts && isRetryable(error, policy) && (hooks.allowRetry?.(error) ?? true)
       if (!canRetry) {
         hooks.onGiveUp?.({ attempt, error })
         throw error

@@ -7,26 +7,40 @@ import type { AIStreamEvent } from '../../types/stream'
 import { extractText } from '../../builders'
 import { normalizeHttpError, normalizeUnknownError } from '../../errors/normalize'
 import { parseSSEJson } from '../../streaming/sse'
+import { chatFetchInit } from '../../util/chatFetch'
 import { withTimeout } from '../../util/timeout'
 import { BaseProvider, buildAuthHeaders, normalizeBaseUrl } from '../base'
 import { OpenAICompatProvider } from '../openai-compat/OpenAICompatProvider'
 import { AnthropicProvider } from '../anthropic/AnthropicProvider'
 
 const DEFAULT_CAPS: Capability[] = ['text', 'streaming', 'system_prompt', 'multi_turn', 'cancellation']
+const UNSAFE_PATH_SEGMENTS = new Set(['__proto__', 'constructor', 'prototype'])
+
+function pathSegments(path: string): string[] {
+  const segments = path.split('.')
+  if (segments.some((segment) => !segment || UNSAFE_PATH_SEGMENTS.has(segment))) {
+    throw new TypeError('Mapping paths must contain nonempty fields and cannot use __proto__, constructor, or prototype.')
+  }
+  return segments
+}
 
 /** Read a value at a dot-path (e.g. "choices.0.text") from a nested object. */
 export function getPath(obj: unknown, path: string): unknown {
   if (!path) return undefined
+  let segments: string[]
+  try {
+    segments = pathSegments(path)
+  } catch {
+    return undefined
+  }
   let cur: unknown = obj
-  for (const seg of path.split('.')) {
-    if (cur == null) return undefined
+  for (const seg of segments) {
+    if (cur == null || typeof cur !== 'object' || !Object.hasOwn(cur, seg)) return undefined
     if (Array.isArray(cur)) {
-      const idx = Number(seg)
-      cur = Number.isInteger(idx) ? cur[idx] : undefined
-    } else if (typeof cur === 'object') {
-      cur = (cur as Record<string, unknown>)[seg]
+      if (!/^(0|[1-9]\d*)$/.test(seg) || Number(seg) >= cur.length) return undefined
+      cur = cur[Number(seg)]
     } else {
-      return undefined
+      cur = (cur as Record<string, unknown>)[seg]
     }
   }
   return cur
@@ -35,18 +49,19 @@ export function getPath(obj: unknown, path: string): unknown {
 /** Set a value at a dot-path, creating intermediate objects as needed. */
 export function setPath(obj: Record<string, unknown>, path: string, value: unknown): void {
   if (!path) return
-  const segs = path.split('.')
+  // Validate the whole path before creating anything, including intermediate fields.
+  const segs = pathSegments(path)
   let cur: Record<string, unknown> = obj
   for (let i = 0; i < segs.length - 1; i++) {
     const seg = segs[i] as string
-    const existing = cur[seg]
+    const existing = Object.hasOwn(cur, seg) ? cur[seg] : undefined
     if (existing == null || typeof existing !== 'object') {
-      cur[seg] = {}
+      Object.defineProperty(cur, seg, { value: {}, writable: true, enumerable: true, configurable: true })
     }
     cur = cur[seg] as Record<string, unknown>
   }
   const last = segs[segs.length - 1] as string
-  cur[last] = value
+  Object.defineProperty(cur, last, { value, writable: true, enumerable: true, configurable: true })
 }
 
 /**
@@ -116,48 +131,40 @@ export class CustomProvider extends BaseProvider {
   private async *streamRest(request: AIRequest, options?: RequestOptions): AsyncIterable<AIStreamEvent> {
     const signal0 = options?.signal
     if (signal0?.aborted) throw this.abort()
+    this.validateMapping()
 
     const method = this.mapping.method ?? 'POST'
     const streaming = this.mapping.sse === true
     const { signal, clear } = withTimeout(options?.timeout, options?.signal)
 
-    // Assemble the request body from the mapping's dot-paths.
-    const promptText = this.buildPromptText(request)
-    const body: Record<string, unknown> = {}
-    if (this.mapping.promptField) setPath(body, this.mapping.promptField, promptText)
-    if (this.mapping.modelField) setPath(body, this.mapping.modelField, request.model)
-    if (this.mapping.streamField) setPath(body, this.mapping.streamField, streaming)
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...buildAuthHeaders(this.cfg, this.secret),
-      ...(options?.headers ?? {})
-    }
-
-    let res: Response
     try {
-      res = await this.fetchImpl(this.baseUrl, {
+      // Assemble the request body from the mapping's dot-paths.
+      const promptText = this.buildPromptText(request)
+      const body: Record<string, unknown> = {}
+      if (this.mapping.promptField) setPath(body, this.mapping.promptField, promptText)
+      if (this.mapping.modelField) setPath(body, this.mapping.modelField, request.model)
+      if (this.mapping.streamField) setPath(body, this.mapping.streamField, streaming)
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...buildAuthHeaders(this.cfg, this.secret),
+        ...(options?.headers ?? {})
+      }
+
+      const res = await this.fetchImpl(this.baseUrl, {
         method,
         headers,
         ...(method === 'POST' ? { body: JSON.stringify(body) } : {}),
-        signal
+        signal,
+        ...chatFetchInit()
       })
-    } catch (err) {
-      clear()
-      throw normalizeUnknownError(this.id, err)
-    }
+      if (!res.ok) throw await this.httpError(res)
 
-    if (!res.ok) {
-      clear()
-      throw await this.httpError(res)
-    }
-
-    try {
       yield { type: 'start', provider: this.id, model: request.model }
       const textPath = this.mapping.responseTextPath ?? 'text'
 
       if (streaming) {
-        for await (const { data } of parseSSEJson(res.body, { signal })) {
+        for await (const { data } of parseSSEJson(res.body, { signal, onActivity: options?.onActivity })) {
           const chunk = getPath(data, textPath)
           if (typeof chunk === 'string' && chunk) yield { type: 'text_delta', text: chunk }
         }
@@ -173,6 +180,25 @@ export class CustomProvider extends BaseProvider {
       throw normalizeUnknownError(this.id, err)
     } finally {
       clear()
+    }
+  }
+
+  private validateMapping(): void {
+    for (const field of ['promptField', 'modelField', 'streamField', 'responseTextPath'] as const) {
+      const path = this.mapping[field]
+      if (!path) continue
+      try {
+        pathSegments(path)
+      } catch (cause) {
+        throw new NormalizedAIError({
+          provider: this.id,
+          category: 'INVALID_REQUEST',
+          message: `Invalid custom provider ${field}. ${(cause as Error).message}`,
+          classification: 'permanent',
+          retryable: false,
+          cause
+        })
+      }
     }
   }
 
@@ -193,6 +219,11 @@ export class CustomProvider extends BaseProvider {
   async validateConfiguration(): Promise<ValidationResult> {
     if (this.delegate) return this.delegate.validateConfiguration()
     if (!this.baseUrl) return { ok: false, message: 'No baseUrl configured for custom provider.' }
+    try {
+      this.validateMapping()
+    } catch (err) {
+      return { ok: false, message: normalizeUnknownError(this.id, err).message }
+    }
     // Best-effort reachability: a GET (or HEAD) to the endpoint.
     try {
       const res = await this.fetchImpl(this.baseUrl, {

@@ -48,6 +48,8 @@ export interface ChatToolCall {
 export interface ChatMessage {
   role: 'system' | 'developer' | 'user' | 'assistant' | 'tool'
   content?: string | ChatContentPart[] | null
+  /** Assistant turns only, and only for servers whose thinking mode expects it back (see ./dialect). */
+  reasoning_content?: string
   tool_calls?: ChatToolCall[]
   tool_call_id?: string
   name?: string
@@ -143,8 +145,26 @@ function toolResultToString(part: Extract<MessageContentPart, { type: 'tool_resu
   }
 }
 
+export interface ChatMessageOptions {
+  /** Echo the model's reasoning on assistant turns as `reasoning_content` (DeepSeek, Kimi). */
+  reasoningContent?: boolean
+}
+
+/**
+ * The reasoning to hand back to the server that produced it. Provider-signed
+ * thinking (Anthropic) is bound to its provider and never leaves it, so only
+ * plain reasoning text counts, in the order it was produced.
+ */
+function replayableReasoning(parts: MessageContentPart[]): string {
+  let text = ''
+  for (const part of parts) {
+    if (part.type === 'reasoning' && part.signature === undefined && part.redacted === undefined) text += part.text
+  }
+  return text
+}
+
 /** Translate the unified messages + system prompt into Chat Completions messages. */
-export function toChatMessages(request: AIRequest): ChatMessage[] {
+export function toChatMessages(request: AIRequest, options: ChatMessageOptions = {}): ChatMessage[] {
   const messages: ChatMessage[] = []
 
   if (request.system !== undefined) {
@@ -176,6 +196,13 @@ export function toChatMessages(request: AIRequest): ChatMessage[] {
         if (toolCalls.length > 0) entry.tool_calls = toolCalls
         // An assistant turn with neither text nor tool calls still needs content.
         if (!entry.content && toolCalls.length === 0) entry.content = ''
+        if (options.reasoningContent) {
+          // These servers 400 on a tool-call turn that lacks the field, so a turn
+          // with no reasoning to give back (written by another provider, or
+          // loaded from text-only history) still carries it, empty.
+          const reasoning = replayableReasoning(msg.content)
+          if (reasoning || toolCalls.length > 0) entry.reasoning_content = reasoning
+        }
         messages.push(entry)
         break
       }
@@ -241,10 +268,21 @@ export function toChatResponseFormat(request: AIRequest): ChatResponseFormat | u
   return { type: 'text' }
 }
 
-export interface ChatBodyOptions {
+export interface ChatBodyOptions extends ChatMessageOptions {
   stream?: boolean
   /** Newer OpenAI models require `max_completion_tokens`; most compat servers use `max_tokens`. */
   maxTokensField?: 'max_tokens' | 'max_completion_tokens'
+  /** Ask for `stream_options.include_usage` when streaming. Default true (OpenAI); see ./dialect. */
+  streamUsage?: boolean
+  /** Forward `request.metadata`. Default true (OpenAI); see ./dialect. */
+  metadata?: boolean
+  /** Forward the chosen reasoning effort. Default true; a server that refuses the field turns it off. */
+  reasoningEffort?: boolean
+  /**
+   * Send the effort as chosen. A compatible host's levels were already checked against what its model takes, so OpenAI's
+   * own clamp (max and xhigh to high) would only take away a level the model offers.
+   */
+  effortAsChosen?: boolean
 }
 
 /** Build a complete Chat Completions request body from the unified request. */
@@ -255,7 +293,7 @@ export function toChatCompletionsBody(request: AIRequest, options: ChatBodyOptio
 
   const body: ChatCompletionsBody = {
     model: request.model,
-    messages: toChatMessages(request)
+    messages: toChatMessages(request, options)
   }
 
   const tools = toChatTools(request.tools)
@@ -272,13 +310,13 @@ export function toChatCompletionsBody(request: AIRequest, options: ChatBodyOptio
   if (params.seed !== undefined) body.seed = params.seed
   if (params.presencePenalty !== undefined) body.presence_penalty = params.presencePenalty
   if (params.frequencyPenalty !== undefined) body.frequency_penalty = params.frequencyPenalty
-  const effort = toOpenAIEffort(params.reasoningEffort, request.model)
-  if (effort !== undefined) body.reasoning_effort = effort
-  if (request.metadata) body.metadata = request.metadata
+  const effort = options.effortAsChosen ? params.reasoningEffort : toOpenAIEffort(params.reasoningEffort, request.model)
+  if (effort !== undefined && options.reasoningEffort !== false) body.reasoning_effort = effort
+  if (request.metadata && options.metadata !== false) body.metadata = request.metadata
 
   if (stream) {
     body.stream = true
-    body.stream_options = { include_usage: true }
+    if (options.streamUsage !== false) body.stream_options = { include_usage: true }
   }
 
   return body
@@ -309,7 +347,27 @@ export interface ChatUsage {
   completion_tokens?: number
   total_tokens?: number
   completion_tokens_details?: { reasoning_tokens?: number } | null
-  prompt_tokens_details?: { cached_tokens?: number } | null
+  prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number | null } | null
+  /** OpenRouter: the amount it charged for the request, in USD. */
+  cost?: number | null
+  /** OpenRouter: true when the request used the caller's own upstream key. */
+  is_byok?: boolean | null
+  cost_details?: { upstream_inference_cost?: number | null } | null
+}
+
+function money(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+}
+
+/**
+ * The bill the provider itself reported. With a bring-your-own-key request OpenRouter's `cost` is
+ * only its fee and the upstream provider bills the rest, so that charge is added; otherwise the
+ * upstream figure is informational and already inside `cost`.
+ */
+function reportedCost(usage: ChatUsage): number | undefined {
+  const cost = money(usage.cost)
+  if (cost === undefined) return undefined
+  return usage.is_byok === true ? cost + (money(usage.cost_details?.upstream_inference_cost) ?? 0) : cost
 }
 
 /** Map a Chat Completions usage object to the unified Usage. */
@@ -319,10 +377,20 @@ export function mapChatUsage(usage: ChatUsage | null | undefined): Usage | undef
   if (usage.prompt_tokens !== undefined) out.inputTokens = usage.prompt_tokens
   if (usage.completion_tokens !== undefined) out.outputTokens = usage.completion_tokens
   if (usage.total_tokens !== undefined) out.totalTokens = usage.total_tokens
+  // Some providers keep a model's thinking out of `completion_tokens` and fold it into the total alone. What was
+  // generated is then the total less what was sent, so a long answer is never counted short.
+  if (usage.prompt_tokens !== undefined && usage.completion_tokens !== undefined && usage.total_tokens !== undefined &&
+      usage.total_tokens - usage.prompt_tokens > usage.completion_tokens) {
+    out.outputTokens = usage.total_tokens - usage.prompt_tokens
+  }
   const reasoning = usage.completion_tokens_details?.reasoning_tokens
   if (reasoning !== undefined) out.reasoningTokens = reasoning
   const cached = usage.prompt_tokens_details?.cached_tokens
   if (cached !== undefined) out.cachedInputTokens = cached
+  const cacheWrite = usage.prompt_tokens_details?.cache_write_tokens
+  if (typeof cacheWrite === 'number' && Number.isSafeInteger(cacheWrite) && cacheWrite >= 0) out.cacheWriteInputTokens = cacheWrite
+  const reported = reportedCost(usage)
+  if (reported !== undefined) out.reportedCostUsd = reported
   return Object.keys(out).length > 0 ? out : undefined
 }
 

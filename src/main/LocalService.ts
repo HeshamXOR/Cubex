@@ -2,6 +2,7 @@ import { nanoid } from 'nanoid'
 import { scanSystem } from '@local/hardware'
 import { recommendModels } from '@local/compatibility'
 import { BenchmarkRunner } from '@local/benchmark'
+import { PullManager, runGuardedPull, type PullEvent } from '@local/download'
 import { OllamaRuntime, MockLocalRuntime, type LocalRuntime } from '@local/runtimes'
 import { CURATED_MODELS } from '@local/catalog'
 import type {
@@ -12,11 +13,36 @@ import type {
   PullRequest,
   RuntimeStatus
 } from '@shared/ipc'
+import { isModelName, MODEL_NAME_HINT } from '@shared/modelName'
 import type { BenchmarkResult, SystemProfile } from '@core/types'
 import { getSettings } from './config'
 import { benchmarkRepo } from './db'
 import { logger } from './logger'
 import type { ProviderManager } from './ProviderManager'
+
+export interface LocalServiceOptions {
+  /** Replaces the runtimes built from settings, for tests. */
+  runtimes?: LocalRuntime[]
+  /** Free bytes on the volume holding a folder, for tests. Defaults to the real disk. */
+  freeBytes?: (dir: string) => Promise<number>
+  /** How long a download may receive no bytes before it is reported as stalled. */
+  stallAfterMs?: number
+}
+
+/** The approximate size of a curated model, for the disk check when a runtime cannot size it. */
+function catalogBytes(modelId: string): number | undefined {
+  return CURATED_MODELS.find((m) => m.id === modelId)?.downloadSizeBytes
+}
+
+/** A renderer-supplied download request is untrusted: it names a known runtime and a model name, nothing else. */
+function parsePullRequest(req: unknown, runtimes: ReadonlyMap<string, LocalRuntime>): PullRequest {
+  if (typeof req !== 'object' || req === null) throw new Error('Invalid download request.')
+  const { runtime, modelId } = req as Record<string, unknown>
+  if (typeof runtime !== 'string' || !runtimes.has(runtime)) throw new Error(`Unknown runtime "${String(runtime).slice(0, 40)}".`)
+  const name = typeof modelId === 'string' ? modelId.trim() : ''
+  if (!isModelName(name)) throw new Error(MODEL_NAME_HINT)
+  return { runtime, modelId: name }
+}
 
 /**
  * Local-model concerns: hardware scan, model recommendations, runtime detection,
@@ -26,7 +52,10 @@ import type { ProviderManager } from './ProviderManager'
 export class LocalService {
   private profileCache: SystemProfile | null = null
   private readonly runtimes = new Map<string, LocalRuntime>()
-  private readonly pulls = new Map<string, AbortController>()
+  /** One line of downloads per runtime: a runtime fetches one model at a time, the rest wait their turn. */
+  private readonly lanes = new Map<string, PullManager>()
+  private readonly pullIdByModel = new Map<string, string>()
+  private readonly pullOwner = new Map<string, { runtime: string; key: string }>()
   private readonly benches = new Map<string, AbortController>()
 
   constructor(
@@ -37,12 +66,16 @@ export class LocalService {
       done: boolean
       result?: BenchmarkResult
       progress?: number
-    }) => void
+    }) => void,
+    private readonly options: LocalServiceOptions = {}
   ) {
-    const s = getSettings()
-    this.runtimes.set('ollama', new OllamaRuntime(s.local.ollamaBaseUrl))
-    if (process.env.CUBEX_MOCK_LOCAL === '1') {
-      this.runtimes.set('mock-local', new MockLocalRuntime({ installed: true, running: true }))
+    if (options.runtimes) {
+      for (const rt of options.runtimes) this.runtimes.set(rt.id, rt)
+    } else {
+      this.runtimes.set('ollama', new OllamaRuntime(getSettings().local.ollamaBaseUrl))
+      if (process.env.CUBEX_MOCK_LOCAL === '1') {
+        this.runtimes.set('mock-local', new MockLocalRuntime({ installed: true, running: true }))
+      }
     }
   }
 
@@ -101,42 +134,59 @@ export class LocalService {
     )
   }
 
-  async pull(req: PullRequest): Promise<{ pullId: string }> {
-    const rt = this.runtimes.get(req.runtime)
+  /**
+   * Start, or queue, a model download. The renderer hears about it through the
+   * progress events: a runtime fetches one model at a time, so a second request waits
+   * ("queued, 2nd") and starts when the first finishes. Asking for a model that is
+   * already downloading or waiting returns that download instead of adding another.
+   */
+  async pull(req: unknown): Promise<{ pullId: string }> {
+    const { runtime, modelId } = parsePullRequest(req, this.runtimes)
+    const key = `${runtime}\n${modelId}`
+    const current = this.pullIdByModel.get(key)
+    if (current) return { pullId: current }
+
+    const rt = this.runtimes.get(runtime)!
     const pullId = nanoid()
-    if (!rt?.pull) {
-      this.onPullProgress({ pullId, modelId: req.modelId, status: 'error', done: true, error: 'Runtime does not support pulling.' })
-      return { pullId }
-    }
-    const controller = new AbortController()
-    this.pulls.set(pullId, controller)
-    void rt
-      .pull(
-        req.modelId,
-        (p) =>
-          this.onPullProgress({
-            pullId,
-            modelId: req.modelId,
-            status: p.status,
-            ...(p.completedBytes !== undefined ? { completedBytes: p.completedBytes } : {}),
-            ...(p.totalBytes !== undefined ? { totalBytes: p.totalBytes } : {}),
-            ...(p.speedBps !== undefined ? { speedBps: p.speedBps } : {}),
-            ...(p.etaSeconds !== undefined ? { etaSeconds: p.etaSeconds } : {}),
-            done: p.done,
-            ...(p.error ? { error: p.error } : {})
-          }),
-        controller.signal
-      )
-      .catch((err: unknown) =>
-        this.onPullProgress({ pullId, modelId: req.modelId, status: 'error', done: true, error: String(err) })
-      )
-      .finally(() => this.pulls.delete(pullId))
+    this.pullIdByModel.set(key, pullId)
+    this.pullOwner.set(pullId, { runtime, key })
+    this.lane(runtime).enqueue({
+      pullId,
+      modelId,
+      run: (onProgress, signal) =>
+        runGuardedPull(
+          { runtime: rt, modelId, catalogBytes, ...(this.options.freeBytes ? { freeBytes: this.options.freeBytes } : {}) },
+          onProgress,
+          signal
+        )
+    })
     return { pullId }
   }
 
   cancelPull(pullId: string): void {
-    this.pulls.get(pullId)?.abort()
-    this.pulls.delete(pullId)
+    const owner = typeof pullId === 'string' ? this.pullOwner.get(pullId) : undefined
+    if (owner) this.lanes.get(owner.runtime)?.cancel(pullId)
+  }
+
+  private lane(runtime: string): PullManager {
+    const existing = this.lanes.get(runtime)
+    if (existing) return existing
+    const lane = new PullManager({
+      maxConcurrent: 1,
+      ...(this.options.stallAfterMs !== undefined ? { stallAfterMs: this.options.stallAfterMs } : {}),
+      onEvent: (event) => this.forwardPull(runtime, event)
+    })
+    this.lanes.set(runtime, lane)
+    return lane
+  }
+
+  private forwardPull(runtime: string, event: PullEvent): void {
+    if (event.done) {
+      const owner = this.pullOwner.get(event.pullId)
+      if (owner) this.pullIdByModel.delete(owner.key)
+      this.pullOwner.delete(event.pullId)
+    }
+    this.onPullProgress({ ...event, runtime })
   }
 
   async deleteLocalModel(runtime: string, modelId: string): Promise<void> {

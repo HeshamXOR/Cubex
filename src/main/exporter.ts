@@ -37,7 +37,11 @@ export function importConversation(data: string): Conversation {
     createdAt: parsed.createdAt ?? now,
     updatedAt: now,
     execution: parsed.execution ?? 'cloud',
-    messages: (parsed.messages ?? []).map((m) => ({ ...m, id: m.id ?? nanoid() })),
+    // Message ids are a global primary key: an imported copy of an existing
+    // conversation must never reuse them (UNIQUE failure, half-created import).
+    messages: (Array.isArray(parsed.messages) ? parsed.messages : [])
+      .filter((m) => m && (m.role === 'user' || m.role === 'assistant' || m.role === 'system') && typeof m.text === 'string')
+      .map((m) => ({ ...m, id: nanoid() })),
     ...(parsed.providerId ? { providerId: parsed.providerId } : {}),
     ...(parsed.model ? { model: parsed.model } : {})
   }

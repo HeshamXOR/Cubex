@@ -49,4 +49,23 @@ export interface CompatibilityResult {
   speed: SpeedEstimate
   /** Fraction of the model that fits on GPU (0..1). */
   gpuFraction: number
+  /** How the model would run: fully on the GPU, split with the CPU, CPU only, or not at all. */
+  verdict?: FitVerdict
+  /** Short plain-language label for `verdict`, for example "Fits fully on GPU". */
+  verdictLabel?: string
+  /** A context length (tokens) that keeps this verdict with some headroom; absent when it will not fit. */
+  recommendedContext?: number
+  /** The largest context length that still keeps this verdict. */
+  maxContext?: number
+  /** Transformer layers to offload to the GPU (equals totalLayers when the whole model fits). */
+  gpuLayers?: number
+  totalLayers?: number
+  /** Estimated bytes needed in VRAM and in system RAM at the recommended context (midpoints). */
+  vramNeededBytes?: number
+  ramNeededBytes?: number
+  /** True when the fit is within a few percent of a limit. */
+  tight?: boolean
 }
+
+/** Where a model would run on this machine; finer than `CompatibilityStatus`. */
+export type FitVerdict = 'gpu_full' | 'gpu_partial' | 'cpu_only' | 'wont_fit'

@@ -1,124 +1,138 @@
-import type { Quantization } from '../../../core/src/types/common'
 import type { MemoryEstimate, Range } from '../../../core/src/types/estimation'
+import { fallbackAttention, kvCacheBytes, type Attention, type KvCacheType } from './attention'
+import { bitsPerWeight, isKnownQuant, normalizeQuant } from './quant'
 
-const GB = 1024 * 1024 * 1024
+const GIB = 1024 * 1024 * 1024
 
-/**
- * Effective bytes-per-parameter for common formats. GGUF k-quants carry metadata
- * + partial higher-precision tensors, so these are *effective averages* over a
- * whole model, not the nominal bit-width. Unknown formats assume ~4-bit.
- */
-export function bytesPerParam(quant: Quantization | undefined): number {
-  switch (quant) {
-    case 'FP32':
-      return 4
-    case 'FP16':
-    case 'BF16':
-      return 2
-    case 'INT8':
-    case 'Q8_0':
-      return 1
-    case 'Q6_K':
-      return 0.82
-    case 'Q5_K_M':
-    case 'Q5_K_S':
-      return 0.7
-    case 'Q4_K_M':
-    case 'Q4_K_S':
-    case 'Q4_0':
-    case 'INT4':
-    case 'AWQ':
-    case 'GPTQ':
-      return 0.55
-    case 'Q3_K_M':
-      return 0.43
-    case 'Q2_K':
-      return 0.33
-    default:
-      return 0.7 // unknown: assume a ~5-bit-ish average, noted by callers
-  }
+/** Effective bytes per parameter: bits per weight (see quant.ts) over eight. */
+export function bytesPerParam(quant: string | undefined): number {
+  return bitsPerWeight(quant) / 8
 }
 
 function range(low: number, high: number, unit = 'bytes'): Range {
   return { low: Math.round(low), high: Math.round(high), unit }
 }
 
-export function estimateWeightsBytes(paramsBillions: number, quant: Quantization | undefined): Range {
-  const mid = paramsBillions * 1e9 * bytesPerParam(quant)
-  return range(mid * 0.92, mid * 1.08)
-}
-
-/** Rough architecture shape from parameter count when the model card is silent. */
-function archShape(paramsBillions: number): { layers: number; hidden: number } {
-  const table: Array<{ p: number; layers: number; hidden: number }> = [
-    { p: 1, layers: 22, hidden: 2048 },
-    { p: 3, layers: 26, hidden: 3072 },
-    { p: 7, layers: 32, hidden: 4096 },
-    { p: 8, layers: 32, hidden: 4096 },
-    { p: 13, layers: 40, hidden: 5120 },
-    { p: 14, layers: 40, hidden: 5120 },
-    { p: 34, layers: 48, hidden: 7168 },
-    { p: 70, layers: 80, hidden: 8192 }
-  ]
-  let best = table[0]!
-  for (const row of table) {
-    if (Math.abs(row.p - paramsBillions) < Math.abs(best.p - paramsBillions)) best = row
-  }
-  return { layers: best.layers, hidden: best.hidden }
+function positive(n: number | undefined): number {
+  return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : 0
 }
 
 /**
- * KV cache ≈ contextTokens * 2 (K and V) * layers * hidden * 2 bytes (fp16).
- * This assumes an fp16 cache and no GQA reduction, so it's an upper-ish bound;
- * we widen the range downward to reflect GQA models using far less.
+ * Weights from parameters times effective bits. Published GGUF sizes sit within
+ * about 1.5 percent of this for the common quantizations, so the band is 3
+ * percent for a known quantization and wider when the quantization is a guess.
+ */
+export function estimateWeightsBytes(paramsBillions: number, quant: string | undefined): Range {
+  const mid = positive(paramsBillions) * 1e9 * bytesPerParam(quant)
+  const spread = isKnownQuant(quant) ? 0.03 : 0.15
+  return range(mid * (1 - spread), mid * (1 + spread))
+}
+
+/** How far a size-class attention guess may be off the real cache, as multipliers of the guess. */
+const GUESS_LOW = 0.85
+const GUESS_HIGH = 1.25
+
+export interface KvCacheOptions {
+  /** The model's real attention shape; without it a size-class guess widens the range. */
+  attention?: Attention
+  kvCacheType?: KvCacheType
+}
+
+/**
+ * Key and value cache for a context. Exact when the attention shape is known;
+ * otherwise taken from the nearest size class (see attention.ts) and widened.
+ * Hidden size is not an input: under grouped-query attention it does not
+ * determine the cache width, the number of KV heads does.
  */
 export function estimateKvCacheBytes(
   contextTokens: number,
   paramsBillions: number,
-  hiddenSize?: number,
-  numLayers?: number
+  options: KvCacheOptions = {}
 ): Range {
-  const shape = archShape(paramsBillions)
-  const layers = numLayers ?? shape.layers
-  const hidden = hiddenSize ?? shape.hidden
-  const full = contextTokens * 2 * layers * hidden * 2
-  // Low end reflects GQA (~1/4 to 1/8 the KV heads); high end the full estimate.
-  return range(full * 0.2, full)
+  const type = options.kvCacheType ?? 'f16'
+  if (options.attention) {
+    const exact = kvCacheBytes(options.attention, contextTokens, type)
+    return range(exact, exact)
+  }
+  const guess = kvCacheBytes(fallbackAttention(paramsBillions), contextTokens, type)
+  return range(guess * GUESS_LOW, guess * GUESS_HIGH)
 }
 
+/**
+ * Runtime cost beyond weights and cache: the CUDA or Metal context and the
+ * compute buffers, which grow with the model's width. About 0.5 to 1 GiB for an
+ * 8B model, 1.2 to 3 GiB for a 70B one.
+ */
 export function estimateOverheadBytes(weightsHigh: number): Range {
-  const fixed = 0.5 * GB
-  return range(fixed + weightsHigh * 0.1, fixed + weightsHigh * 0.2)
+  const w = positive(weightsHigh)
+  return range(0.4 * GIB + w * 0.02, 0.7 * GIB + w * 0.06)
+}
+
+/** What the memory estimate needs to know about a model. */
+export interface MemoryModelInput {
+  /** Billions of parameters (all of them, also for mixture-of-experts models). */
+  parameterCount?: number
+  quantization?: string
+  /** Size of the weights file when known; beats parameters times bits. */
+  diskSizeBytes?: number
+  attention?: Attention
+}
+
+export interface MemoryOptions {
+  kvCacheType?: KvCacheType
 }
 
 export function estimateMemory(
-  model: { parameterCount?: number; quantization?: Quantization },
-  contextTokens: number
+  model: MemoryModelInput,
+  contextTokens: number,
+  options: MemoryOptions = {}
 ): MemoryEstimate {
   const notes: string[] = []
-  const params = model.parameterCount ?? 0
+  const tokens = Math.max(0, Math.floor(positive(contextTokens)))
+  const kvType = options.kvCacheType ?? 'f16'
+  const quant = normalizeQuant(model.quantization)
+  const disk = positive(model.diskSizeBytes)
+  let params = positive(model.parameterCount)
 
-  if (!params) {
-    notes.push('Parameter count unknown — memory estimate is very rough.')
+  let weights: Range
+  if (disk) {
+    // The file is the tensor data plus a few MB of metadata and tokenizer.
+    weights = range(disk * 0.99, disk * 1.01)
+    if (!params) params = (disk * 8) / bitsPerWeight(quant) / 1e9
+    notes.push('Weights taken from the file size on disk.')
+  } else if (params) {
+    weights = estimateWeightsBytes(params, quant)
+    notes.push(
+      isKnownQuant(quant)
+        ? `Weights estimated at about ${bitsPerWeight(quant).toFixed(2)} bits per weight for ${quant}.`
+        : `Quantization unknown, so about ${bitsPerWeight(quant).toFixed(1)} bits per weight were assumed.`
+    )
+  } else {
+    weights = range(0, 0)
+    notes.push('Parameter count unknown, so the weights are not counted and the estimate is very rough.')
   }
-  const bpp = bytesPerParam(model.quantization)
-  notes.push(
-    `Assumed ~${bpp.toFixed(2)} bytes/param for quantization "${model.quantization ?? 'unknown'}" (effective average).`
-  )
-  notes.push(`Context size assumed ${contextTokens} tokens for KV cache.`)
-  notes.push('GGUF k-quant overhead and GQA are approximated; treat as a range.')
 
-  const weights = estimateWeightsBytes(params, model.quantization)
-  const kv = estimateKvCacheBytes(contextTokens, params || 7)
+  const kv = estimateKvCacheBytes(tokens, params, { attention: model.attention, kvCacheType: kvType })
+  if (model.attention) {
+    notes.push(
+      `KV cache is exact for ${model.attention.layers} layers and ${model.attention.kvHeads} KV heads at ${tokens} tokens (${kvType}).`
+    )
+  } else {
+    notes.push(
+      `KV cache uses a guess from the nearest model size class at ${tokens} tokens (${kvType}), so it is a range.`
+    )
+  }
+  if (kvType !== 'f16') notes.push('A quantized KV cache needs flash attention in llama.cpp.')
+
   const overhead = estimateOverheadBytes(weights.high)
-  const total: Range = {
-    low: weights.low + kv.low + overhead.low,
-    high: weights.high + kv.high + overhead.high,
-    unit: 'bytes'
-  }
+  notes.push('Runtime overhead (GPU context and compute buffers) is an allowance, not a measurement.')
 
   return {
-    totalBytes: total,
+    totalBytes: {
+      low: weights.low + kv.low + overhead.low,
+      high: weights.high + kv.high + overhead.high,
+      unit: 'bytes'
+    },
     weightsBytes: weights,
     kvCacheBytes: kv,
     overheadBytes: overhead,

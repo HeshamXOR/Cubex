@@ -1,0 +1,216 @@
+/* ============================================================
+   Settings groups for permissions, MCP servers and hooks.
+   Neutral surfaces, hairlines, one colored edge where a state
+   means success, failure or attention. Tokens only, so dark and
+   light both work.
+   ============================================================ */
+
+/* ---------- Shared ---------- */
+
+.pol-code {
+  font: 12px/1.5 var(--mono);
+  color: var(--color-foreground);
+  background: var(--color-surface);
+  border-radius: var(--radius-sm);
+  padding: 0 4px;
+  overflow-wrap: anywhere;
+}
+
+.pol-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0 4px;
+  color: var(--color-foreground-subtle);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.pol-state > svg { flex: none; }
+
+.pol-empty { padding: 6px 0 2px; max-width: 66ch; }
+.pol-empty__title { font-size: 13px; font-weight: 600; color: var(--color-foreground); }
+.pol-empty__body { margin-top: 3px; font-size: 12.5px; line-height: 1.6; color: var(--color-foreground-subtle); text-wrap: pretty; }
+
+.pol-pre {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  max-height: 180px;
+  overflow: auto;
+  background: var(--well);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-foreground-body);
+  font: 12px/1.55 var(--mono);
+  font-variant-ligatures: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.pol-meta { display: flex; flex-wrap: wrap; gap: 2px 16px; margin: 4px 0 0; font-size: 12px; color: var(--color-foreground-subtle); }
+.pol-meta dt { display: inline; color: var(--color-foreground-subtlest); }
+.pol-meta dd { display: inline; margin: 0 0 0 5px; color: var(--color-foreground); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+.pol-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 2px 4px;
+  border-radius: 5px;
+  color: var(--color-foreground-subtle);
+  font-size: 12px;
+}
+.pol-toggle:hover { background: var(--color-hover); color: var(--color-foreground); }
+.pol-toggle > svg { flex: none; transition: transform 0.12s; }
+.pol-toggle[aria-expanded='true'] > svg { transform: rotate(90deg); }
+
+/* Remove asks twice, in place: the button turns into the question. */
+.pol-remove { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+
+/* A success edge for the callout, next to the error and warn ones. */
+.callout--ok { --callout-edge: var(--color-success); }
+.callout--plain { --callout-edge: var(--color-border-hover); }
+.pol-callout { margin: 10px 0 0; }
+.pol-callout .callout__body > * + * { margin-top: 3px; }
+.pol-callout .callout__hint { color: var(--color-foreground-subtle); }
+.pol-callout .pol-toggle { margin: 4px 0 0 -4px; }
+
+.pol-field-error { color: var(--color-destructive); font-size: 12px; line-height: 1.5; }
+
+/* ---------- Permissions ---------- */
+
+/* What each kind of rule covers: a short definition list that opens under the note. */
+.pol-coverage { margin: 6px 0 0 4px; padding: 2px 0 2px 12px; max-width: 72ch; border-left: 1px solid var(--color-border); }
+.pol-coverage > div { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 0 12px; padding: 3px 0; }
+.pol-coverage dt { color: var(--color-foreground); font-size: 12px; line-height: 1.6; }
+.pol-coverage dd { margin: 0; color: var(--color-foreground-subtle); font-size: 12px; line-height: 1.6; text-wrap: pretty; }
+
+.rules__project { margin-top: 18px; }
+.rules__project:first-of-type { margin-top: 10px; }
+.rules__head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 10px; }
+.rules__name { font: 600 13px/1.5 var(--display); color: var(--color-foreground); overflow-wrap: anywhere; }
+.rules__tag { font-size: 11.5px; color: var(--color-foreground-subtle); }
+.rules__path { margin-top: 1px; font: 11.5px/1.5 var(--mono); color: var(--color-foreground-subtlest); overflow-wrap: anywhere; }
+.rules__list { list-style: none; margin: 6px 0 0; padding: 0; border-bottom: 1px solid var(--color-border); }
+
+.rule {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto auto;
+  align-items: start;
+  gap: 1px 12px;
+  padding: 9px 0;
+  border-top: 1px solid var(--color-border);
+}
+.rule__icon { grid-row: 1; margin-top: 3px; color: var(--color-foreground-subtlest); }
+.rule__text { grid-row: 1; grid-column: 2; min-width: 0; color: var(--color-foreground); font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
+.rule__detail { grid-column: 2 / -1; min-width: 0; color: var(--color-foreground-subtle); font-size: 12px; line-height: 1.55; text-wrap: pretty; }
+.rule__when { grid-row: 1; grid-column: 3; padding-top: 2px; color: var(--color-foreground-subtlest); font-size: 12px; white-space: nowrap; }
+.rule__action { grid-row: 1; grid-column: 4; justify-self: end; }
+.rule--inert .rule__text { color: var(--color-foreground-subtle); }
+
+/* ---------- Rows shared by servers and hooks ---------- */
+
+.prows { list-style: none; margin: 4px 0 0; padding: 0; }
+.prow { padding: 12px 0; border-top: 1px solid var(--color-border); }
+.prow:first-child { border-top: 0; }
+.prow__head { display: flex; align-items: center; gap: 12px; }
+.prow__title { flex: 1; min-width: 0; }
+.prow__name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; color: var(--color-foreground); font-weight: 500; font-size: var(--ui-font-size); overflow-wrap: anywhere; }
+.prow__sub { color: var(--color-foreground-subtle); font-weight: 400; font-size: 12px; }
+.prow__cmd {
+  margin-top: 1px;
+  color: var(--color-foreground-subtle);
+  font: 12px/1.5 var(--mono);
+  font-variant-ligatures: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prow__actions { display: flex; align-items: center; gap: 4px; flex: none; }
+/* Everything under the title lines up with it, past the switch. */
+.prow__below { margin: 8px 0 0 50px; min-width: 0; }
+.prow__status { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; font-size: 12px; line-height: 1.55; color: var(--color-foreground-subtle); }
+.prow__status > svg { flex: none; }
+.prow__status .ok { color: var(--color-success); }
+.prow__status .bad { color: var(--color-destructive); }
+.prow__why { color: var(--color-foreground); }
+.prow__fix { margin-top: 2px; color: var(--color-foreground-subtle); font-size: 12px; line-height: 1.55; max-width: 72ch; text-wrap: pretty; }
+
+/* ---------- MCP tools ---------- */
+
+.tools { margin: 6px 0 0; padding: 0; list-style: none; max-height: 264px; overflow: auto; border-top: 1px solid var(--color-border); overscroll-behavior: contain; }
+.tool { display: grid; grid-template-columns: minmax(110px, 230px) minmax(0, 1fr); gap: 2px 14px; padding: 6px 0; border-bottom: 1px solid var(--color-border); }
+.tool__name { font: 12px/1.55 var(--mono); font-variant-ligatures: none; color: var(--color-foreground); overflow-wrap: anywhere; }
+.tool__desc { font-size: 12px; line-height: 1.55; color: var(--color-foreground-subtle); overflow-wrap: anywhere; text-wrap: pretty; }
+.tool__desc--none { color: var(--color-foreground-faint); }
+
+/* ---------- Add forms ---------- */
+
+.pform { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--color-border); }
+.pform__title { margin: 0 0 8px; font: 600 12.5px/1.4 var(--display); color: var(--color-foreground); }
+.pform__grid { display: flex; flex-wrap: wrap; gap: 14px 12px; align-items: flex-start; }
+.pform__field { display: flex; flex-direction: column; gap: 6px; flex: 1 1 220px; min-width: 0; color: var(--color-foreground-subtle); font-size: 12px; line-height: 1.6; }
+.pform__field--wide { flex: 1 1 100%; }
+.pform__field .input, .pform__field .select, .pform__field .textarea { width: 100%; min-width: 0; }
+.pform__field textarea { min-height: 84px; resize: vertical; font-family: var(--mono); line-height: 1.65; }
+.pform__help { color: var(--color-foreground-subtlest); font-size: 12px; line-height: 1.55; text-wrap: pretty; }
+.pform__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
+.pform__select { flex: 0 1 200px; }
+
+/* ---------- Environment variables ---------- */
+
+/* The add form groups them in a fieldset; its browser chrome is reset so it lines up with the other fields. */
+.env-set { border: 0; margin: 0; padding: 0; }
+.env-set > legend { padding: 0; margin-bottom: 6px; }
+
+.prow__env { margin-top: 4px; }
+/* The editor of a saved server hangs under its row, set in by a hairline like the coverage list. */
+.prow__editor { margin: 6px 0 0; padding: 4px 0 2px 12px; border-left: 1px solid var(--color-border); max-width: 880px; }
+.prow__editor > .pform__help { margin: 0 0 10px; max-width: 72ch; }
+
+.env { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.env__rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+/* One grid per row: the name and value columns share what the fixed Secret column and the Remove button leave. The header repeats the columns, with room kept for the button, so its labels sit over the fields. */
+.env__head,
+.env__row { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 6fr) 92px minmax(66px, auto); gap: 4px 10px; align-items: start; }
+.env__head { color: var(--color-foreground-subtlest); font-size: 12px; line-height: 1.4; }
+.env__cell { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.env .input { width: 100%; min-width: 0; }
+.env__name { display: flex; align-items: center; min-height: 33px; font: 12.5px/1.5 var(--mono); color: var(--color-foreground); overflow-wrap: anywhere; }
+.env__value { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.env__value .input { flex: 1 1 0; width: auto; }
+/* The base small button pads its sides, which would squeeze the icon of this square one to a sliver. */
+.env__value .env__peek { flex: none; width: 28px; padding: 0; justify-content: center; }
+.env__peek svg { flex: none; }
+/* The browser draws its own reveal control in a password field; this field has one of its own. */
+.env__value input::-ms-reveal { display: none; }
+.env__kept { display: flex; align-items: center; gap: 8px; min-height: 33px; }
+.env__saved { display: inline-flex; align-items: center; gap: 6px; color: var(--color-foreground); font-size: 12.5px; }
+.env__saved > svg { color: var(--color-success); }
+.env__cell--secret { flex-direction: row; align-items: center; gap: 8px; min-height: 33px; }
+.env__switch-label { color: var(--color-foreground-subtle); font-size: 12px; }
+.env__cell--remove { flex-direction: row; align-items: center; justify-content: flex-end; min-height: 33px; }
+.env__add { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; }
+
+/* ---------- Narrow ---------- */
+
+@container settings (max-width: 560px) {
+  .rule { grid-template-columns: 16px minmax(0, 1fr) auto; }
+  .rule__when { grid-row: 2; grid-column: 2; padding-top: 0; }
+  .rule__detail { grid-column: 2; }
+  .rule__action { grid-row: 1; grid-column: 3; }
+  .pol-coverage > div { grid-template-columns: minmax(0, 1fr); }
+  .prow__head { flex-wrap: wrap; }
+  /* Own line under the title, level with it; the margin is part of the width so the row never spills. */
+  .prow__actions { flex: 0 0 calc(100% - 50px); margin-left: 50px; }
+  .prow__below { margin-left: 0; }
+  .tool { grid-template-columns: minmax(0, 1fr); }
+  .env__head { display: none; }
+  .env__row { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; }
+  .env__row > .env__cell:nth-child(1),
+  .env__row > .env__cell:nth-child(2) { grid-column: 1 / -1; }
+  /* Stacked, a variable is three or four lines; a hairline shows where one ends and the next begins. */
+  .env__rows { gap: 0; }
+  .env__row { padding: 10px 0; border-top: 1px solid var(--color-border); }
+  .env__row:first-child { padding-top: 0; border-top: 0; }
+  .prow__editor { padding-left: 10px; }
+}

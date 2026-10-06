@@ -1,13 +1,38 @@
 {
   "name": "cubex",
   "version": "0.1.0",
-  "description": "Cubex — Universal Desktop AI Harness. One unified interface, many cloud providers, many local runtimes.",
-  "author": "Cubex",
+  "private": true,
+  "description": "A desktop AI coding harness for any model: cloud providers, local runtimes and MCP tools in one app.",
+  "keywords": [
+    "ai",
+    "llm",
+    "agent",
+    "coding-assistant",
+    "desktop",
+    "electron",
+    "mcp",
+    "ollama",
+    "anthropic",
+    "openai"
+  ],
+  "homepage": "https://github.com/HeshamXOR/Cubex#readme",
+  "bugs": {
+    "url": "https://github.com/HeshamXOR/Cubex/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HeshamXOR/Cubex.git"
+  },
+  "author": {
+    "name": "HeshamXOR",
+    "url": "https://github.com/HeshamXOR"
+  },
   "license": "MIT",
   "main": "./out/main/index.js",
   "type": "module",
   "scripts": {
     "dev": "electron-vite dev",
+    "dev:web": "vite --config vite.web.config.ts",
     "start": "electron-vite preview",
     "build": "electron-vite build",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",

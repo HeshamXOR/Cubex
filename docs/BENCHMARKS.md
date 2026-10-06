@@ -1,49 +1,38 @@
 # Benchmarks
 
-Benchmarks replace *estimates* with *measurements*. When you run one, the resulting tokens/sec and
-TTFT are labeled **Measured** and stored with the exact configuration that produced them.
+A benchmark measures how fast a local model generates on your machine. Its numbers are measurements, not estimates, and each result is stored with the exact settings that produced it, so runs at different settings are never compared as if they were equal.
+
+## Status
+
+The benchmark engine is implemented and tested, but the desktop app has no Benchmarks screen at the moment, so nothing in the interface starts a run. The runner in `packages/local/src/benchmark`, its storage in the `benchmarks` table of the app database, and the IPC channels remain in place: `bench:run`, `bench:cancel`, `bench:list` and `bench:progress`, exposed on `window.cubex` as `runBenchmark`, `cancelBenchmark`, `listBenchmarks` and `onBenchmarkProgress`. Results are not yet shown anywhere, and they do not feed back into the estimates on the Hardware screen. See [HARDWARE_ANALYZER.md](HARDWARE_ANALYZER.md).
 
 ## Method
 
-`packages/local/src/benchmark/runner.ts`:
+`BenchmarkRunner` (`packages/local/src/benchmark/runner.ts`) takes a configuration and any `AIProvider`:
 
-1. A controlled prompt is sent to the selected local model `N` times (default 3).
-2. Each run measures:
-   - **TTFT** — time to the first `text_delta`.
-   - **Generation time** — first token → completion.
-   - **Generated tokens** — from the model's `usage` when reported, else a whitespace-token
-     approximation of the output.
-   - **tokens/sec** = generated tokens ÷ generation seconds.
-3. Across runs, `computeStats` reports **mean, median, min, max, variance, and standard deviation**
-   for tokens/sec and TTFT.
-4. The result stores its full `BenchmarkConfig` (model, runtime, prompt, max tokens, run count,
-   temperature). **Runs at different settings are never compared as equivalent** — the config
-   travels with the numbers.
+1. It sends the same prompt `runs` times, one run after another. The setting `local.benchmarkRuns` defaults to 3.
+2. For each run it streams the reply and measures:
+   - **Time to first token (TTFT):** from sending the request to the first `text_delta`.
+   - **Generation time:** from the first token to the end of the stream.
+   - **Generated tokens:** the provider's reported output tokens when it reports them, otherwise an approximation of 1.3 tokens per whitespace-separated word.
+   - **Tokens per second:** generated tokens divided by generation seconds.
+3. Across runs, `computeStats` reports the mean, median, minimum, maximum, variance and standard deviation (population statistics) for tokens per second and for TTFT.
+4. The result stores the full `BenchmarkConfig`: model, runtime, prompt, maximum output tokens, number of runs, and optionally a context size and temperature.
 
-Results are persisted (SQLite, `benchmarks` table) and shown in the Benchmarks view with the config
-inline.
-
-## Running a benchmark
-
-1. Install a model (**Local Models** → pull, e.g. `llama3.1:8b`), or set `CUBEX_MOCK_LOCAL=1`.
-2. Open **Benchmarks**, pick the model, set the run count, click **Run**.
-3. Progress streams as each run completes; **Stop** cancels and aggregates what finished.
+Stopping a benchmark keeps the runs that had already finished and aggregates them.
 
 ## Reading results
 
-- **Generation** — sustained decode speed (tok/s), with median and spread.
-- **Time to first token** — prompt-processing + first-token latency.
-- **σ (stddev) / variance** — run-to-run consistency; high variance means thermal throttling,
-  background load, or cold caches.
+- **Generation speed** is the sustained decode rate in tokens per second, with its median and spread.
+- **TTFT** is prompt processing plus the first token. It grows with prompt length and with a cold model load.
+- **Standard deviation and variance** show run-to-run consistency. High variance suggests thermal throttling, background load or cold caches.
 
-## Honest comparisons
+## Comparing results
 
-- Only compare benchmarks with the **same runtime, model, quantization, and settings**.
-- Peak VRAM / GPU-utilization capture is best-effort and may be absent depending on the platform.
-- A benchmark measures *your* machine at that moment; results are not portable guarantees.
+- Compare only runs with the same runtime, model, quantization and settings. The stored configuration is there so you can check.
+- A benchmark describes your machine at that moment. It is not a portable guarantee.
+- The result type has fields for peak VRAM and peak RAM, but the runner does not fill them in yet.
 
-## Deterministic tests
+## Tests
 
-`benchmark/stats.test.ts` and `benchmark/runner.test.ts` verify the statistics and the run loop
-against the Mock local runtime (a `MockAIProvider` with a configurable tokens/sec), so the
-benchmark pipeline is covered without a GPU.
+`benchmark/stats.test.ts` and `benchmark/runner.test.ts` check the statistics and the run loop against the mock provider, so the whole pipeline is covered without a GPU or a runtime.

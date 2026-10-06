@@ -1,5 +1,5 @@
 import { safeStorage } from 'electron'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { dataDir } from './paths'
 
@@ -22,12 +22,19 @@ function loadStore(): EncStore {
   try {
     return JSON.parse(readFileSync(file, 'utf8')) as EncStore
   } catch {
+    // Keep the damaged file for recovery; the next save must not silently
+    // overwrite every other provider's key with an empty store.
+    try { renameSync(file, `${file}.corrupt-${Date.now()}`) } catch { /* best effort */ }
     return {}
   }
 }
 
 function saveStore(store: EncStore): void {
-  writeFileSync(STORE_FILE(), JSON.stringify(store, null, 2), { mode: 0o600 })
+  // Temp + rename: a crash mid-write leaves the previous file intact.
+  const file = STORE_FILE()
+  const temp = `${file}.${process.pid}.tmp`
+  writeFileSync(temp, JSON.stringify(store, null, 2), { mode: 0o600 })
+  renameSync(temp, file)
 }
 
 export function encryptionAvailable(): boolean {
@@ -69,8 +76,11 @@ export function getSecret(ref: string | undefined): string | undefined {
   const store = loadStore()
   const entry = store[ref]
   if (!entry) {
-    // Allow a bare env-var convention fallback: ref itself names an env var.
-    return process.env[ref] ?? undefined
+    // No stored secret for this ref. Env-var fallbacks are handled explicitly
+    // (an `env:` ref below, or ProviderManager's per-kind CUBEX_* vars) — we do
+    // NOT treat an arbitrary ref as an env-var name, so a ref that collides with
+    // a real variable (PATH, USER, …) can't leak that value as a credential.
+    return undefined
   }
   if (entry.startsWith('env:')) {
     return process.env[entry.slice(4)] ?? undefined

@@ -1,0 +1,11 @@
+/* The chip a message in the thread carries when it named a skill: the neutral attachment chip, with the name set
+   in the face skill names are written in. The doubled class keeps these over .u-att-file whichever loads last. */
+
+.u-atts--skill:last-child { margin-bottom: 0; }
+.u-att-file.u-skill {
+  gap: 6px;
+  font: 12px/1.4 var(--mono);
+  font-variant-ligatures: none;
+  color: var(--color-foreground-body);
+}
+.u-skill > svg { flex: none; color: var(--color-foreground-subtlest); }

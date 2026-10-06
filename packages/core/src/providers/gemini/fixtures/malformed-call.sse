@@ -1,0 +1,2 @@
+data: {"candidates": [{"finishReason": "MALFORMED_FUNCTION_CALL","finishMessage": "Malformed function call: call:read_file{path: <ctrl46>","index": 0}],"usageMetadata": {"promptTokenCount": 44,"totalTokenCount": 44},"modelVersion": "gemini-2.5-flash","responseId": "Zb5CaMiaJePkz7IPy8T6iQs"}
+

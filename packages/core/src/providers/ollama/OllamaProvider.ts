@@ -11,6 +11,7 @@ import type { MessageContentPart } from '../../types/content'
 import type { ToolDefinition } from '../../types/tools'
 import { extractText } from '../../builders'
 import { normalizeUnknownError } from '../../errors/normalize'
+import { chatFetchInit } from '../../util/chatFetch'
 import { withTimeout } from '../../util/timeout'
 import { BaseProvider, normalizeBaseUrl } from '../base'
 
@@ -50,7 +51,7 @@ export interface OllamaChatBody {
 export interface OllamaChatLine {
   model?: string
   created_at?: string
-  message?: { role?: string; content?: string; tool_calls?: OllamaMessage['tool_calls'] }
+  message?: { role?: string; content?: string; thinking?: string; tool_calls?: OllamaMessage['tool_calls'] }
   done?: boolean
   prompt_eval_count?: number
   eval_count?: number
@@ -85,7 +86,7 @@ function toOllamaMessage(role: OllamaMessage['role'], parts: MessageContentPart[
 }
 
 /** Build the native /api/chat request body from the unified request. */
-export function toOllamaChatBody(request: AIRequest, stream: boolean): OllamaChatBody {
+export function toOllamaChatBody(request: AIRequest, stream: boolean, contextWindow?: number): OllamaChatBody {
   const params = request.params ?? {}
   const messages: OllamaMessage[] = []
 
@@ -116,6 +117,15 @@ export function toOllamaChatBody(request: AIRequest, stream: boolean): OllamaCha
   if (params.maxOutputTokens !== undefined) options.num_predict = params.maxOutputTokens
   if (params.stopSequences && params.stopSequences.length > 0) options.stop = params.stopSequences
   if (params.seed !== undefined) options.seed = params.seed
+
+  const rawNumCtx = contextWindow ??
+    (params as Record<string, unknown>).num_ctx ??
+    (params as Record<string, unknown>).contextWindow ??
+    (request as unknown as { contextWindow?: unknown }).contextWindow ??
+    (request.metadata?.contextWindow ? Number(request.metadata.contextWindow) : undefined)
+  if (typeof rawNumCtx === 'number' && Number.isFinite(rawNumCtx) && rawNumCtx > 0) {
+    options.num_ctx = Math.floor(rawNumCtx)
+  }
 
   const body: OllamaChatBody = { model: request.model, messages, stream }
   const tools = toOllamaTools(request.tools)
@@ -266,7 +276,7 @@ export class OllamaProvider extends BaseProvider {
     if (signal0?.aborted) throw this.abort()
 
     const { signal, clear } = withTimeout(options?.timeout, options?.signal)
-    const body = toOllamaChatBody(request, true)
+    const body = toOllamaChatBody(request, true, (options as any)?.contextWindow)
 
     let res: Response
     try {
@@ -274,7 +284,8 @@ export class OllamaProvider extends BaseProvider {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(options?.headers ?? {}) },
         body: JSON.stringify(body),
-        signal
+        signal,
+        ...chatFetchInit()
       })
     } catch (err) {
       clear()
@@ -298,7 +309,10 @@ export class OllamaProvider extends BaseProvider {
       yield { type: 'start', provider: this.id, model: request.model }
       let usage: Usage | undefined
       let toolIndex = 0
+      let doneReason: string | undefined
       for await (const line of parseNdjson<OllamaChatLine>(res.body, { signal })) {
+        const thinking = line.message?.thinking
+        if (typeof thinking === 'string' && thinking) yield { type: 'reasoning_delta', text: thinking }
         const content = line.message?.content
         if (content) yield { type: 'text_delta', text: content }
         const toolCalls = line.message?.tool_calls
@@ -315,12 +329,14 @@ export class OllamaProvider extends BaseProvider {
           }
         }
         if (line.done) {
+          doneReason = (line as { done_reason?: string }).done_reason
           const u = mapOllamaUsage(line)
           if (u) usage = u
         }
       }
       if (usage) yield { type: 'usage', usage }
-      yield { type: 'stop', stopReason: 'stop' }
+      // The tool loop and truncation notices depend on an honest stop reason.
+      yield { type: 'stop', stopReason: toolIndex > 0 ? 'tool_use' : doneReason === 'length' ? 'length' : 'stop' }
     } catch (err) {
       throw this.wrap(err)
     } finally {

@@ -1,0 +1,51 @@
+/* Presets: one editor card, then a hairline list of saved setups. */
+
+.presets .view__inner { container: presets / inline-size; }
+.presets .view__action { margin-bottom: 0; }
+
+.presets__editor { margin-top: 20px; }
+.presets__editor-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.presets__editor-head .h2 { margin: 0; }
+.presets__close { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; color: var(--color-foreground-subtle); }
+.presets__fields { display: grid; gap: 14px; }
+.presets__fields .input,
+.presets__fields .select,
+.presets__fields .textarea { width: 100%; min-width: 0; }
+.presets__pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.presets__tokens { max-width: 240px; }
+.presets__hint { margin: -6px 0 0; font-size: 12px; line-height: 1.5; color: var(--color-foreground-subtle); }
+.presets__actions { display: flex; gap: 8px; margin-top: 4px; }
+
+.presets__bar { margin-top: 28px; }
+.presets__count { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--color-foreground-subtle); }
+.presets__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--raise);
+  overflow: hidden;
+}
+.presets__list > li + li { border-top: 1px solid var(--color-border); }
+.presets__item { padding: 13px 16px; }
+.presets__row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.presets__text { flex: 1; min-width: 0; }
+.presets__name { font: 600 13.5px/1.4 var(--display); color: var(--color-foreground); overflow-wrap: anywhere; }
+.presets__meta { margin-top: 3px; font-size: 12.5px; line-height: 1.55; color: var(--color-foreground-subtle); overflow-wrap: anywhere; }
+.presets__prompt { margin-top: 6px; max-width: 64ch; font-size: 12px; color: var(--color-foreground-subtlest); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.presets__blocked { margin-top: 6px; font-size: 12px; line-height: 1.5; color: var(--color-warning); }
+.presets__buttons { display: flex; align-items: center; gap: 4px; flex: none; }
+.presets__delete { color: var(--color-foreground-subtlest); }
+.presets__delete:hover:not(:disabled) { color: var(--color-destructive); background: var(--color-destructive-surface); }
+
+.presets__empty { display: grid; justify-items: start; gap: 12px; }
+
+@container presets (max-width: 640px) {
+  .presets__row { flex-direction: column; align-items: stretch; gap: 10px; }
+  .presets__buttons { flex-wrap: wrap; }
+  /* Beside the text the buttons end the row; on their own line Delete moves to the far edge, apart from the safe ones. */
+  .presets__delete { margin-left: auto; }
+  .presets__pair { grid-template-columns: minmax(0, 1fr); }
+  .presets__tokens { max-width: none; }
+}

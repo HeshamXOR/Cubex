@@ -1,0 +1,4 @@
+data: {"candidates": [{"content": {"parts": [{"text": "Partial answer"}],"role": "model"},"index": 0}],"modelVersion": "gemini-2.5-flash","responseId": "Xb5CaLqtEdyNz7IPm-eGkQs"}
+
+data: {"error": {"code": 503,"message": "The model is overloaded. Please try again later.","status": "UNAVAILABLE"}}
+

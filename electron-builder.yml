@@ -1,25 +1,36 @@
 appId: dev.cubex.harness
 productName: Cubex
-copyright: Cubex — Intelligence. Open. Limitless.
+copyright: Copyright © 2026 HeshamXOR
+publish: null
 directories:
   output: release
   buildResources: resources
 files:
-  - out/**/*
+  - out/main/**/*
+  - out/preload/**/*
+  - out/renderer/**/*
   - resources/**/*
+  - "!resources/skills/**/*"
+  - "!resources/logo-source.webp"
+  - "!resources/icon.ico"
+  - agent-skills-library/skills/**/*
+  - agent-skills-library/LICENSE
+  - agent-skills-library/README.md
+  - agent-skills-library/index.json
   - package.json
 asarUnpack:
   - "**/*.node"
 npmRebuild: true
-# A single 1254×1254 PNG (the Cubex mark). electron-builder auto-generates the
-# platform icons (.ico / .icns) from it.
+# resources/icon.png is the 1254x1254 Cubex mark. resources/icon.ico is the multi-size Windows icon cut from it.
+# Builds are unsigned: with no certificate configured electron-builder skips signing and still stamps the icon and
+# version info onto the executable.
 win:
   target:
     - target: nsis
       arch: [x64]
-  icon: resources/icon.png
-  signAndEditExecutable: false
+  icon: resources/icon.ico
 nsis:
+  artifactName: Cubex-Setup-${version}.${ext}
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true

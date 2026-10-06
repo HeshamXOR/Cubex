@@ -1,156 +1,26 @@
-/* Harness activity indicator — subtle, no bouncing emoji. */
+/* The live phase of a turn: the turning star, a label that sweeps, and how long it has been. */
+.status,
+.activity { --activity-tone: var(--color-foreground-subtle); display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; font-variant-numeric: tabular-nums; }
+.status { font-size: 12.5px; font-weight: 500; color: var(--color-foreground-subtle); user-select: none; }
+.status__icon,
+.activity__icon { display: inline-flex; flex: none; color: var(--activity-tone); }
+.status__label { flex: none; white-space: nowrap; color: var(--color-foreground-subtle); }
+.status__detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; color: var(--color-foreground-subtlest); }
+.status__time { flex: none; font-size: 12px; font-weight: 400; color: var(--color-foreground-subtlest); }
+.status--accent,
+.activity--accent { --activity-tone: var(--color-accent-foreground); }
+.status--warn,
+.activity--warn { --activity-tone: var(--color-warning); }
+.status--ok,
+.activity--ok { --activity-tone: var(--color-success); }
+.status--err,
+.activity--err { --activity-tone: var(--color-destructive); }
 
-.status {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--text-2);
-  font-variant-numeric: tabular-nums;
-  user-select: none;
-}
-
-.status__icon {
-  display: flex;
-  align-items: center;
-}
-.status__icon--spin {
-  animation: status-spin 0.9s linear infinite;
-}
-@keyframes status-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.status--accent .status__icon {
-  color: var(--accent-text);
-}
-.status--warn .status__icon {
-  color: var(--warn);
-}
-.status--ok .status__icon {
-  color: var(--ok);
-}
-.status--err .status__icon {
-  color: var(--err);
-}
-.status--mute .status__icon {
-  color: var(--text-3);
-}
-
-.status__label--live {
-  color: var(--text-1);
-  animation: status-breathe 1.8s ease-in-out infinite;
-}
-@keyframes status-breathe {
-  0%,
-  100% {
-    opacity: 0.62;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-/* Trailing "..." that fills in one dot at a time. */
-.status__dots::after {
-  content: '';
-  animation: status-ellipsis 1.4s steps(1, end) infinite;
-}
-@keyframes status-ellipsis {
-  0% {
-    content: '';
-  }
-  25% {
-    content: '.';
-  }
-  50% {
-    content: '..';
-  }
-  75% {
-    content: '...';
-  }
-}
-
-.status__detail {
-  color: var(--text-3);
-  font-size: 12px;
-}
-
-/* ---- In-thread activity block ---- */
-.activity {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  padding: 7px 12px;
-  border-radius: 100px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  margin-bottom: 12px;
-  font-size: 13px;
-}
-.activity__icon {
-  display: flex;
-  color: var(--accent-text);
-}
-.activity__icon--spin {
-  animation: status-spin 0.9s linear infinite;
-}
-.activity__label {
-  font-weight: 600;
-}
-.activity__detail {
-  color: var(--text-2);
-  font-size: 12.5px;
-  padding-left: 2px;
-  border-left: 1px solid var(--border-strong);
-  padding-left: 9px;
-  margin-left: 1px;
-}
-.activity__time {
-  color: var(--text-3);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  margin-left: 2px;
-}
-
-/* Shimmering gradient text sweep — the hallmark "thinking" affordance. */
-.shimmer {
-  background: linear-gradient(
-    100deg,
-    var(--text-2) 30%,
-    var(--text-0) 45%,
-    #9db0ff 50%,
-    var(--text-0) 55%,
-    var(--text-2) 70%
-  );
-  background-size: 220% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: shimmer-sweep 2.2s linear infinite;
-}
-@keyframes shimmer-sweep {
-  0% {
-    background-position: 180% 0;
-  }
-  100% {
-    background-position: -80% 0;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .activity__icon--spin,
-  .shimmer,
-  .status__icon--spin,
-  .status__label--live,
-  .status__dots::after {
-    animation: none;
-  }
-  .shimmer {
-    -webkit-text-fill-color: var(--text-0);
-    color: var(--text-0);
-  }
-}
+.activity { height: 30px; margin-top: 4px; font-size: 13px; }
+.activity__label { flex: none; font-weight: 500; color: var(--color-foreground-subtle); }
+.activity--warn .activity__label { color: var(--color-warning); }
+.activity__detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--color-foreground-subtlest); }
+.activity__time { flex: none; font-size: 12px; color: var(--color-foreground-subtlest); }
+/* Compatibility for older callers: live text remains readable and still. */
+.shimmer { color: var(--color-foreground-subtle); }
+@media (max-width: 900px) { .status__detail { display: none; } }

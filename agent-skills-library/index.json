@@ -1,0 +1,203 @@
+{
+  "skills": [
+    {
+      "name": "backend-engineering",
+      "description": "Designs and implements reliable, secure, maintainable backend services and APIs (REST, JSON over HTTP, background jobs, databases, caching, auth, queues) in any stack such as FastAPI, Django, Node/Express/NestJS, Go, or Spring. Use whenever the task involves an API endpoint, service layer, database schema or query, migration, authentication or authorization, validation, error handling, background workers, webhooks, rate limiting, idempotency, observability, or server-side architecture, even if the user only says \"add an endpoint\" or \"store this in the database\".",
+      "path": "skills/backend-engineering/SKILL.md",
+      "category": "engineering",
+      "version": "1.0",
+      "body_lines": 112,
+      "files": [
+        "references/api-design.md",
+        "references/auth-and-sessions.md",
+        "references/database-and-migrations.md",
+        "references/reliability-and-observability.md"
+      ]
+    },
+    {
+      "name": "clean-code",
+      "description": "Guides writing, reviewing, and refactoring code so it is readable, simple, and easy to change, in any language. Covers naming, function and module design, duplication, error handling, comments, code smells, SOLID used pragmatically, and safe step-by-step refactoring. Use whenever the user asks to clean up, refactor, simplify, restructure, review code quality, reduce complexity, fix code smells, improve naming, or when writing any non-trivial new code that other people will maintain.",
+      "path": "skills/clean-code/SKILL.md",
+      "category": "engineering",
+      "version": "1.0",
+      "body_lines": 110,
+      "files": [
+        "references/naming-and-comments.md",
+        "references/refactoring-catalog.md"
+      ]
+    },
+    {
+      "name": "code-review",
+      "description": "Reviews code changes, pull requests, diffs, and AI-generated code for correctness, security, design, tests, readability, and performance, and writes clear, prioritized, actionable feedback. Use whenever the user asks to review, critique, audit, or sanity-check code or a PR, asks \"is this good\", \"what's wrong with this\", or \"can you look over this diff\", and also to self-review your own changes before reporting them as done.",
+      "path": "skills/code-review/SKILL.md",
+      "category": "engineering",
+      "version": "1.0",
+      "body_lines": 106,
+      "files": []
+    },
+    {
+      "name": "data-analysis",
+      "description": "Performs and reviews data analysis end to end: framing the question, profiling and cleaning data, exploratory analysis, choosing statistical methods, building SQL, pandas, or Polars pipelines, creating honest visualizations, validating results, and communicating findings and limitations. Use whenever the user provides a dataset (CSV, Excel, JSON, database), asks for insights, metrics, KPIs, dashboards, A/B test analysis, forecasting basics, statistical tests, charts, or data cleaning, and whenever an analysis needs to be checked for correctness.",
+      "path": "skills/data-analysis/SKILL.md",
+      "category": "data",
+      "version": "1.0",
+      "body_lines": 152,
+      "files": []
+    },
+    {
+      "name": "debugging",
+      "description": "A systematic, evidence-driven method for finding and fixing bugs, crashes, wrong output, flaky tests, performance regressions, race conditions, memory leaks, and environment-specific failures. Use whenever something is broken, throws an error, behaves differently than expected, works locally but fails elsewhere, fails intermittently, or the user pastes a stack trace or error log, even if they only say \"this doesn't work\" or \"why is this happening\".",
+      "path": "skills/debugging/SKILL.md",
+      "category": "engineering",
+      "version": "1.0",
+      "body_lines": 99,
+      "files": []
+    },
+    {
+      "name": "deep-research",
+      "description": "Conducts rigorous, well-sourced research on any topic using web search and document tools: scoping the question, planning searches, gathering primary and secondary sources, evaluating credibility, cross-verifying claims, synthesizing findings, and writing a cited report with calibrated confidence. Use whenever the user asks to research, investigate, compare options, fact-check, survey the state of the art, do a literature review, evaluate a technology or vendor, find current information, or produce a report, brief, or recommendation that must be accurate and up to date.",
+      "path": "skills/deep-research/SKILL.md",
+      "category": "research",
+      "version": "1.0",
+      "body_lines": 125,
+      "files": [
+        "references/report-template.md",
+        "references/source-evaluation.md"
+      ]
+    },
+    {
+      "name": "devops-and-ci-cd",
+      "description": "Designs and reviews build, test, and deployment automation and infrastructure: CI/CD pipelines (GitHub Actions and similar), Docker images and Compose, Kubernetes basics, infrastructure as code (Terraform), release strategies, environments, secrets, supply chain hardening, and DORA delivery metrics. Use whenever the user asks about pipelines, workflows, Dockerfiles, containers, deployments, releases, rollbacks, environment configuration, IaC, cloud infrastructure, or making delivery faster, safer, and more reliable.",
+      "path": "skills/devops-and-ci-cd/SKILL.md",
+      "category": "operations",
+      "version": "1.0",
+      "body_lines": 106,
+      "files": [
+        "references/docker.md",
+        "references/github-actions.md"
+      ]
+    },
+    {
+      "name": "frontend-engineering",
+      "description": "Builds, reviews, and refactors production-quality frontend code (HTML, CSS, JavaScript/TypeScript, React and similar component frameworks) with accessibility, performance, responsiveness, and design quality built in. Use whenever the task involves a UI, web page, component, form, layout, styling, client-side state, data fetching in the browser, Core Web Vitals, WCAG accessibility, dark mode, RTL or i18n layouts, or turning a design or idea into working interface code, even if the user does not say the word frontend.",
+      "path": "skills/frontend-engineering/SKILL.md",
+      "category": "engineering",
+      "version": "1.0",
+      "body_lines": 100,
+      "files": [
+        "references/accessibility.md",
+        "references/css-and-layout.md",
+        "references/performance.md",
+        "references/react-patterns.md"
+      ]
+    },
+    {
+      "name": "llm-application-engineering",
+      "description": "Builds, evaluates, and hardens applications powered by large language models: prompt design, structured outputs, tool use, retrieval-augmented generation (RAG), agents and workflows, context management, evaluation suites, cost and latency optimization, observability, and safety. Also covers core ML engineering practice such as data splits, leakage, baselines, and experiment tracking. Use whenever the task involves an LLM API, prompts, embeddings, vector search, chatbots, agents, tool calling, fine-tuning decisions, evals, or shipping any AI feature to production.",
+      "path": "skills/llm-application-engineering/SKILL.md",
+      "category": "ai",
+      "version": "1.0",
+      "body_lines": 124,
+      "files": [
+        "references/agents-and-tools.md",
+        "references/evals.md",
+        "references/rag.md"
+      ]
+    },
+    {
+      "name": "performance-optimization",
+      "description": "Finds and removes performance bottlenecks in code, databases, services, and pipelines using a measure-first method: define targets, benchmark, profile, form a hypothesis, change one thing, and verify. Covers algorithmic complexity, memory, I/O, concurrency, caching, database query tuning, and latency percentiles, with tools per language. Use whenever the user reports slowness, high latency, timeouts, high CPU or memory, poor throughput, slow builds or queries, or asks to optimize, profile, benchmark, or scale something.",
+      "path": "skills/performance-optimization/SKILL.md",
+      "category": "engineering",
+      "version": "1.0",
+      "body_lines": 112,
+      "files": []
+    },
+    {
+      "name": "python-engineering",
+      "description": "Writes idiomatic, typed, testable, production-grade Python: project layout and packaging with pyproject.toml, uv and Ruff tooling, type hints, dataclasses and Pydantic, exceptions, context managers, generators, asyncio, logging, configuration, performance basics, and FastAPI, Django, and data-science patterns. Use whenever the user is writing, reviewing, debugging, structuring, or packaging Python code or scripts, setting up a Python project, adding type hints, writing async code, or building Python services, CLIs, or libraries.",
+      "path": "skills/python-engineering/SKILL.md",
+      "category": "language",
+      "version": "1.0",
+      "body_lines": 164,
+      "files": []
+    },
+    {
+      "name": "security-review",
+      "description": "Performs defensive security review and threat modeling of code, architecture, configuration, dependencies, CI/CD pipelines, and LLM or agent systems, mapped to the OWASP Top 10:2025, and produces prioritized findings with concrete fixes. Use whenever the user asks for a security audit, vulnerability check, secure coding guidance, threat model, secrets or dependency review, hardening advice, or when code handles authentication, authorization, user input, files, payments, personal data, external requests, or untrusted content, even if security is not mentioned. Defensive use only; does not build malware or exploits.",
+      "path": "skills/security-review/SKILL.md",
+      "category": "security",
+      "version": "1.0",
+      "body_lines": 121,
+      "files": [
+        "references/llm-and-agent-security.md",
+        "references/owasp-top10-2025-checklist.md"
+      ]
+    },
+    {
+      "name": "skill-authoring",
+      "description": "Creates, reviews, and improves agent skills (SKILL.md folders following the Agent Skills format) for an agent harness: choosing scope, writing effective names and trigger-rich descriptions, structuring instructions with progressive disclosure, adding references, scripts, and assets, setting the right degree of freedom, and testing skills with evaluations. Use whenever the user wants to add a new skill to this library, edit or split an existing skill, debug why a skill does not trigger or is ignored, or validate the skills folder.",
+      "path": "skills/skill-authoring/SKILL.md",
+      "category": "meta",
+      "version": "1.0",
+      "body_lines": 117,
+      "files": [
+        "assets/skill-template.md"
+      ]
+    },
+    {
+      "name": "software-engineering-workflow",
+      "description": "The default end-to-end workflow for any software task: clarify the goal, explore the codebase, plan small steps, implement incrementally, verify with tests and tooling, review the diff, and report honestly. Use whenever starting any coding, bug-fix, feature, migration, or repository task, especially in an unfamiliar codebase, when the request is vague, when a change touches multiple files, when adding dependencies, or when deciding whether to ask a question or proceed on assumptions.",
+      "path": "skills/software-engineering-workflow/SKILL.md",
+      "category": "engineering",
+      "version": "1.0",
+      "body_lines": 116,
+      "files": [
+        "references/git-and-commits.md"
+      ]
+    },
+    {
+      "name": "system-design",
+      "description": "Guides software architecture and system design: gathering functional and non-functional requirements, capacity estimation, choosing architecture styles and data stores, defining components, APIs, and data models, analyzing trade-offs and failure modes, and documenting decisions as design docs and ADRs with diagrams. Use whenever the user asks to design or architect a system, feature, service, pipeline, or platform, compare technologies, decide monolith versus microservices, plan for scale or reliability, review an architecture, or write a design document or architecture decision record.",
+      "path": "skills/system-design/SKILL.md",
+      "category": "architecture",
+      "version": "1.0",
+      "body_lines": 107,
+      "files": [
+        "assets/adr-template.md",
+        "assets/design-doc-template.md"
+      ]
+    },
+    {
+      "name": "technical-writing",
+      "description": "Writes and improves technical documentation: READMEs, API and reference docs, tutorials, how-to guides, architecture docs, runbooks, changelogs, release notes, pull request descriptions, commit messages, and code comments, using the Diataxis structure and plain-language principles. Use whenever the user asks to document code or a system, write or improve a README, explain how something works to other engineers, produce onboarding or operational docs, write a changelog or PR description, or edit technical prose for clarity.",
+      "path": "skills/technical-writing/SKILL.md",
+      "category": "communication",
+      "version": "1.0",
+      "body_lines": 103,
+      "files": [
+        "assets/readme-template.md"
+      ]
+    },
+    {
+      "name": "testing-strategy",
+      "description": "Designs and writes effective automated tests (unit, integration, contract, end-to-end, property-based) and decides what to test, how, and at which level. Covers test structure, doubles and mocking policy, determinism, flaky tests, test data, TDD, coverage and mutation testing, and framework patterns for pytest, Jest/Vitest, Testing Library, and Playwright. Use whenever the user asks to add tests, improve coverage, fix flaky tests, practice TDD, review a test suite, or when implementing a feature or bug fix that needs proof it works.",
+      "path": "skills/testing-strategy/SKILL.md",
+      "category": "engineering",
+      "version": "1.0",
+      "body_lines": 112,
+      "files": [
+        "references/test-patterns.md"
+      ]
+    },
+    {
+      "name": "typescript-engineering",
+      "description": "Writes and reviews type-safe, maintainable TypeScript and modern JavaScript for Node.js, browsers, and libraries: strict tsconfig, type design (unions, generics, narrowing, branded types), runtime validation with Zod, async patterns, error handling, module structure, tooling (ESLint, Prettier or Biome, Vitest), and common pitfalls. Use whenever the user is writing or fixing TypeScript or JavaScript, configuring tsconfig or ESLint, fixing type errors, designing types or APIs, working with Node.js services or npm packages, or migrating JavaScript to TypeScript.",
+      "path": "skills/typescript-engineering/SKILL.md",
+      "category": "language",
+      "version": "1.0",
+      "body_lines": 145,
+      "files": []
+    }
+  ]
+}

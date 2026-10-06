@@ -1,0 +1,36 @@
+{"prompt": "Build a responsive pricing page with a monthly/yearly toggle in React", "expected": ["frontend-engineering"]}
+{"prompt": "My React component re-renders too often and the input feels laggy", "expected": ["frontend-engineering", "performance-optimization"]}
+{"prompt": "Is our signup form accessible to screen reader users?", "expected": ["frontend-engineering"]}
+{"prompt": "This function is 200 lines long, can you clean it up?", "expected": ["clean-code"]}
+{"prompt": "Rename these variables so the code is easier to read", "expected": ["clean-code"]}
+{"prompt": "Add a POST /orders endpoint with validation and idempotency", "expected": ["backend-engineering"]}
+{"prompt": "Design the database schema for a multi-tenant invoicing app", "expected": ["backend-engineering", "system-design"]}
+{"prompt": "How should I add zero-downtime migration for renaming a column?", "expected": ["backend-engineering"]}
+{"prompt": "Implement JWT login with refresh tokens in FastAPI", "expected": ["backend-engineering", "python-engineering", "security-review"]}
+{"prompt": "Fix the failing test in the repo and open a PR", "expected": ["software-engineering-workflow", "debugging"]}
+{"prompt": "Add dark mode to this project", "expected": ["software-engineering-workflow", "frontend-engineering"]}
+{"prompt": "The app crashes with 'Cannot read properties of undefined' only in production", "expected": ["debugging"]}
+{"prompt": "Our nightly test job fails randomly about one run in ten", "expected": ["debugging", "testing-strategy"]}
+{"prompt": "Write unit tests for this pricing module", "expected": ["testing-strategy"]}
+{"prompt": "Review this pull request diff and tell me what is wrong", "expected": ["code-review"]}
+{"prompt": "Audit this Express app for security vulnerabilities", "expected": ["security-review"]}
+{"prompt": "Threat model our file upload feature", "expected": ["security-review"]}
+{"prompt": "Design a URL shortener that handles 10k requests per second", "expected": ["system-design"]}
+{"prompt": "Should we use microservices or a monolith for a team of six?", "expected": ["system-design"]}
+{"prompt": "Write a GitHub Actions workflow that tests and deploys to AWS", "expected": ["devops-and-ci-cd"]}
+{"prompt": "Containerize this Node service with a small production Dockerfile", "expected": ["devops-and-ci-cd"]}
+{"prompt": "This SQL query takes 12 seconds, how do I speed it up?", "expected": ["performance-optimization", "backend-engineering"]}
+{"prompt": "Write a README for this repository", "expected": ["technical-writing"]}
+{"prompt": "Document the on-call runbook for the payments service", "expected": ["technical-writing"]}
+{"prompt": "Research the best vector database for 5M documents and give me a sourced comparison", "expected": ["deep-research", "llm-application-engineering"]}
+{"prompt": "Fact-check this claim I found online about battery lifetimes", "expected": ["deep-research"]}
+{"prompt": "Here is a CSV of sales, find trends and make charts", "expected": ["data-analysis"]}
+{"prompt": "Analyze the results of our A/B test", "expected": ["data-analysis"]}
+{"prompt": "Build a RAG chatbot over our PDF documentation", "expected": ["llm-application-engineering"]}
+{"prompt": "How do I evaluate whether my prompt changes made the assistant better?", "expected": ["llm-application-engineering"]}
+{"prompt": "Set up a new Python package with uv, ruff and pytest", "expected": ["python-engineering"]}
+{"prompt": "Fix these TypeScript strict mode errors", "expected": ["typescript-engineering"]}
+{"prompt": "Write a new skill for our harness that teaches API documentation", "expected": ["skill-authoring", "technical-writing"]}
+{"prompt": "What is the capital of France?", "expected": []}
+{"prompt": "Write a short poem about the sea", "expected": []}
+{"prompt": "Translate 'good morning' into Spanish", "expected": []}

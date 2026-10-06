@@ -1,0 +1,123 @@
+/* The "/" menu above the composer: commands, then the skills the task can use. Each group sizes its name column
+   to its longest name (capped), so the descriptions in it line up from the first row to the last. */
+
+.slashmenu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 30;
+  container: slashmenu / inline-size;
+  overflow: hidden;
+  border: 1px solid var(--color-popover-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-menu);
+  box-shadow: var(--shadow-md);
+  animation: menu-in 110ms ease-out;
+}
+
+.slashmenu__list {
+  /* Tall enough for every command and the start of the skills; short windows leave less room above the composer. */
+  max-height: clamp(180px, calc(100vh - 260px), 520px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* A row reached by the arrow keys stops below the sticky group label, not under it. */
+  scroll-padding: 30px 0 6px;
+  padding: 4px;
+}
+
+.slashmenu__group {
+  display: grid;
+  grid-template-columns: fit-content(15rem) minmax(0, 1fr) auto;
+  column-gap: 12px;
+  row-gap: 1px;
+  align-content: start;
+}
+.slashmenu__group + .slashmenu__group {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--color-border);
+}
+
+.slashmenu__label {
+  grid-column: 1 / -1;
+  position: sticky;
+  top: -4px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px 3px;
+  background: var(--color-menu);
+  font-size: 12px;
+  color: var(--color-foreground-subtlest);
+}
+.slashmenu__label > svg { flex: none; }
+
+.slashmenu__row {
+  position: relative;
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: baseline;
+  min-height: 28px;
+  padding: 4px 9px;
+  border-radius: 6px;
+  cursor: default;
+}
+.slashmenu__row[aria-selected='true'] { background: var(--color-menu-hover); }
+/* The field keeps focus, so the highlighted row carries its own mark: selection is what the accent is for. */
+.slashmenu__row[aria-selected='true']::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--color-brand);
+}
+
+.slashmenu__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 13px/1.4 var(--mono);
+  font-variant-ligatures: none;
+  color: var(--color-foreground);
+}
+.slashmenu__slash,
+.slashmenu__args { color: var(--color-foreground-subtlest); }
+.slashmenu__desc {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--color-foreground-subtle);
+}
+.slashmenu__source {
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--color-foreground-subtlest);
+}
+.slashmenu__note {
+  grid-column: 1 / -1;
+  padding: 5px 9px 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-foreground-subtlest);
+}
+
+/* The message above the field when a named skill could not be applied. */
+.composer__failure { margin-bottom: 10px; }
+
+/* In a narrow composer the description takes its own line under the name. */
+@container slashmenu (max-width: 540px) {
+  .slashmenu__group { grid-template-columns: minmax(0, 1fr) auto; }
+  .slashmenu__row { row-gap: 1px; padding-block: 5px; }
+  .slashmenu__desc { grid-column: 1 / -1; grid-row: 2; }
+  .slashmenu__source { grid-column: 2; grid-row: 1; }
+}

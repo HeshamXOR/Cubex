@@ -8,8 +8,11 @@ import type { Usage } from '../../types/response'
 import type { MessageContentPart } from '../../types/content'
 import { normalizeHttpError, normalizeUnknownError } from '../../errors/normalize'
 import { parseSSEJson } from '../../streaming/sse'
+import { chatFetchInit } from '../../util/chatFetch'
 import { withTimeout } from '../../util/timeout'
 import { BaseProvider, buildAuthHeaders, normalizeBaseUrl } from '../base'
+import { requestWithSupportedEffort, type EffortModel } from '../effort'
+import { ChatDialects, chatExtrasRejected, chatExtrasSent, type ChatDialect } from '../openai/dialect'
 import {
   mapChatUsage,
   mapFinishReason,
@@ -33,10 +36,19 @@ const DEFAULT_CAPS: Capability[] = [
 interface ChatChunk {
   id?: string
   choices?: Array<{
-    delta?: { content?: string | null; tool_calls?: Array<ChatToolCall & { index: number }> }
+    delta?: {
+      content?: string | null
+      reasoning_content?: string | null
+      reasoning?: string | null
+      tool_calls?: Array<ChatToolCall & { index?: number }>
+    }
     finish_reason?: string | null
+    /** Kimi (Moonshot) reports stream usage inside the final choice rather than at the top level. */
+    usage?: Parameters<typeof mapChatUsage>[0]
   }>
   usage?: Parameters<typeof mapChatUsage>[0]
+  /** In-band upstream failure (OpenRouter, vLLM) sent after HTTP 200. */
+  error?: { code?: number | string; message?: string; type?: string }
 }
 
 /**
@@ -55,13 +67,16 @@ export class OpenAICompatProvider extends BaseProvider {
   constructor(
     protected readonly cfg: ProviderConfig,
     protected readonly secret?: string,
-    kind: ProviderKind = 'openai-compat'
+    kind: ProviderKind = 'openai-compat',
+    /** What the app knows about a model that its endpoint does not list. */
+    private readonly modelInfo?: (modelId: string) => EffortModel | undefined
   ) {
     super()
     this.kind = kind
     this.id = cfg.id
     this.name = cfg.name
     this.baseUrl = normalizeBaseUrl(cfg.baseUrl, 'https://api.openai.com/v1')
+    this.dialects = new ChatDialects(this.baseUrl)
     // Respect declared capability overrides so supports() reflects the server.
     this.setCapabilities(cfg.capabilities ?? DEFAULT_CAPS)
     this.fetchImpl = globalThis.fetch
@@ -139,50 +154,109 @@ export class OpenAICompatProvider extends BaseProvider {
     }
   }
 
+  /** What each model's server takes beyond the baseline, and what it has refused so far. */
+  private readonly dialects: ChatDialects
+
+  /**
+   * Where a chat request goes and which field carries its token limit. Servers that
+   * route differently (Azure OpenAI, by deployment) override this; nothing else
+   * about the request or the stream changes.
+   */
+  protected chatTarget(_request: AIRequest): { url: string; maxTokensField: 'max_tokens' | 'max_completion_tokens' } {
+    return { url: `${this.baseUrl}/chat/completions`, maxTokensField: 'max_tokens' }
+  }
+
+  /**
+   * POST the chat request with the extras this host takes. A server that refuses
+   * one (a 400 or 422 naming it) is asked again once without it, and the refusal
+   * is remembered so later requests to that model skip the failed attempt.
+   * Resolves with an OK response; any other outcome throws.
+   */
+  private async open(request: AIRequest, headers: Record<string, string> | undefined, signal: AbortSignal): Promise<Response> {
+    const target = this.chatTarget(request)
+    const attempt = async (dialect: ChatDialect) => {
+      const body = toChatCompletionsBody(request, { stream: true, maxTokensField: target.maxTokensField, effortAsChosen: true, ...dialect })
+      const res = await this.fetchImpl(target.url, {
+        method: 'POST',
+        headers: this.headers(headers),
+        body: JSON.stringify(body),
+        signal,
+        ...chatFetchInit()
+      })
+      return { res, body }
+    }
+    const first = await attempt(this.dialects.for(request.model))
+    if (first.res.ok) return first.res
+    const { error, text } = await this.readError(first.res)
+    const refused = chatExtrasRejected(first.res.status, text, chatExtrasSent(first.body))
+    if (refused.length === 0) throw error
+    this.dialects.refuse(request.model, refused)
+    const second = await attempt(this.dialects.for(request.model))
+    if (second.res.ok) return second.res
+    throw await this.httpError(second.res)
+  }
+
   async *streamMessage(request: AIRequest, options?: RequestOptions): AsyncIterable<AIStreamEvent> {
     this.assertContentSupported(request)
+    const known = this.modelInfo?.(request.model)
+    request = requestWithSupportedEffort(this.kind, request, {
+      id: request.model,
+      supportsReasoning: known?.supportsReasoning === true || this.supports('reasoning'),
+      ...(known?.reasoningEfforts ? { reasoningEfforts: known.reasoningEfforts } : {})
+    })
 
     const { signal, clear } = withTimeout(options?.timeout, options?.signal)
-    const body = toChatCompletionsBody(request, { stream: true, maxTokensField: 'max_tokens' })
 
     let res: Response
     try {
-      res = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: this.headers(options?.headers),
-        body: JSON.stringify(body),
-        signal
-      })
+      res = await this.open(request, options?.headers, signal)
     } catch (err) {
       clear()
       throw normalizeUnknownError(this.id, err)
     }
 
-    if (!res.ok) {
-      const err = await this.httpError(res)
-      clear()
-      throw err
-    }
-
     try {
       yield { type: 'start', provider: this.id, model: request.model }
       let usage: Usage | undefined
-      for await (const { data } of parseSSEJson<ChatChunk>(res.body, { signal })) {
+      // Some servers omit `index` on tool-call deltas; key them by id instead,
+      // and attach id-less continuation deltas to the last call seen.
+      const indexById = new Map<string, number>()
+      let lastIndex = 0
+      for await (const { data } of parseSSEJson<ChatChunk>(res.body, { signal, onActivity: options?.onActivity })) {
+        if (data.error) {
+          // A 200 stream can still fail upstream. Never report the partial text as a finished answer.
+          throw normalizeHttpError({ provider: this.id, status: Number(data.error.code) || 502, body: { error: data.error } })
+        }
         const choice = data.choices?.[0]
         if (choice) {
+          // DeepSeek and other compatible endpoints stream reasoning separately
+          // from the answer. Forward it as it arrives, including before tools.
+          const primaryReasoning = choice.delta?.reasoning_content
+          const reasoning = typeof primaryReasoning === 'string' && primaryReasoning ? primaryReasoning : choice.delta?.reasoning
+          if (typeof reasoning === 'string' && reasoning) yield { type: 'reasoning_delta', text: reasoning }
           if (choice.delta?.content) yield { type: 'text_delta', text: choice.delta.content }
           if (choice.delta?.tool_calls) {
             for (const tc of choice.delta.tool_calls) {
-              const evt: Extract<AIStreamEvent, { type: 'tool_call_delta' }> = { type: 'tool_call_delta', index: tc.index }
+              let index: number
+              if (typeof tc.index === 'number') index = tc.index
+              else if (tc.id) {
+                if (!indexById.has(tc.id)) indexById.set(tc.id, indexById.size)
+                index = indexById.get(tc.id)!
+              } else index = lastIndex
+              lastIndex = index
+              const evt: Extract<AIStreamEvent, { type: 'tool_call_delta' }> = { type: 'tool_call_delta', index }
               if (tc.id) evt.id = tc.id
               if (tc.function?.name) evt.name = tc.function.name
               if (tc.function?.arguments) evt.argsDelta = tc.function.arguments
               yield evt
             }
           }
+          if (choice.finish_reason === 'error') {
+            throw normalizeHttpError({ provider: this.id, status: 502, body: { error: { message: 'The upstream model failed mid-response.' } } })
+          }
           if (choice.finish_reason) yield { type: 'stop', stopReason: mapFinishReason(choice.finish_reason) }
         }
-        const u = mapChatUsage(data.usage)
+        const u = mapChatUsage(data.usage ?? choice?.usage)
         if (u) usage = u
       }
       if (usage) yield { type: 'usage', usage }
@@ -219,6 +293,11 @@ export class OpenAICompatProvider extends BaseProvider {
 
   /** Build a NormalizedAIError from a non-OK Response, reading retry-after + body. */
   protected async httpError(res: Response): Promise<NormalizedAIError> {
+    return (await this.readError(res)).error
+  }
+
+  /** The normalized error for a non-OK response, with the raw body text it was read from. */
+  private async readError(res: Response): Promise<{ error: NormalizedAIError; text: string }> {
     let body: unknown
     const text = await res.text().catch(() => '')
     try {
@@ -226,11 +305,12 @@ export class OpenAICompatProvider extends BaseProvider {
     } catch {
       body = text
     }
-    return normalizeHttpError({
+    const error = normalizeHttpError({
       provider: this.id,
       status: res.status,
       headers: res.headers,
       body
     })
+    return { error, text }
   }
 }

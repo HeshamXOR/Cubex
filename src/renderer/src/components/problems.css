@@ -1,0 +1,86 @@
+/* ============================================================================
+   Cubex, Atelier: compiler problems. A quiet count chip on a changed file's row,
+   the short list the chip opens in the thread, and the live Problems list. The
+   words are always there; only the small icon carries color.
+   ============================================================================ */
+
+.prob {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: 12px/1 var(--sans);
+  white-space: nowrap;
+  color: var(--color-foreground-body);
+}
+.prob > svg { flex: none; }
+.prob--error > svg { color: var(--color-destructive); }
+.prob--warn > svg { color: var(--color-warning); }
+
+/* The review list puts its extras after the line counts. The counts stay in one column, so the chip goes before them. */
+.rf-open > .stat { order: 1; }
+
+/* ---------- In the thread: a row with a toggle, and the list under it ---------- */
+
+.fileline { position: relative; }
+/* Room for the chevron at the row's end. In a list of several files every row keeps it, so their line counts stay in one column. */
+.fileline:has(> .fileline__toggle) > .file,
+.files:has(.fileline__toggle) .file { padding-right: 34px; }
+.fileline__toggle {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--color-foreground-subtlest);
+}
+.fileline__toggle:hover { background: var(--color-surface-hover); color: var(--color-foreground); }
+.fileline__toggle > svg { transition: transform 0.15s; }
+.fileline__toggle.is-open > svg { transform: rotate(90deg); }
+
+/* Aligned with the file name above it: icon 15px plus the row gap 9px. */
+.problems { margin: 0 0 6px 24px; padding: 0; list-style: none; animation: problems-in 140ms ease-out; }
+@keyframes problems-in { from { opacity: 0; transform: translateY(-3px); } }
+.problem {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  width: calc(100% + 6px);
+  min-width: 0;
+  margin-left: -6px;
+  padding: 3px 8px 3px 6px;
+  border-radius: 6px;
+  font: 12px/1.55 var(--mono);
+  color: var(--color-foreground-body);
+  text-align: left;
+}
+.problem:hover { background: var(--color-hover); color: var(--color-foreground); }
+/* The icon must not shrink when a long message wraps beside it. */
+.problem__sev { flex: none; align-self: flex-start; margin: 3px -4px 0 0; }
+.problem__sev--error { color: var(--color-destructive); }
+.problem__sev--warn { color: var(--color-warning); }
+.problem__at { flex: none; min-width: 5ch; color: var(--color-foreground-subtlest); font-variant-numeric: tabular-nums; }
+.problem__msg { min-width: 0; overflow-wrap: anywhere; }
+.problem__code { margin-left: 8px; color: var(--color-foreground-subtlest); white-space: nowrap; }
+.problems__more { margin: 2px 0 0; font-size: 12px; color: var(--color-foreground-subtlest); }
+
+/* ---------- The live Problems list ---------- */
+
+.problems-list { min-width: 0; font-size: 13px; color: var(--color-foreground-subtle); }
+.problems-list .problems { margin: 0; animation: none; }
+.problems-file { display: flex; align-items: baseline; gap: 10px; margin: 12px 0 2px; font: 12px/1.5 var(--mono); color: var(--color-foreground-subtle); }
+.problems-file:first-child { margin-top: 0; }
+.problems-file__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.problems-file__name b { font-weight: 400; color: var(--color-foreground); }
+.problems-state { display: flex; align-items: flex-start; gap: 9px; line-height: 1.55; overflow-wrap: anywhere; }
+.problems-state > svg { flex: none; margin-top: 3px; color: var(--color-foreground-subtlest); }
+.problems-state--ok > svg { color: var(--color-success); }
+.problems-state--attention > svg { color: var(--color-warning); }
+
+@media (prefers-reduced-motion: reduce) {
+  .problems { animation: none; }
+  .fileline__toggle > svg { transition: none; }
+}

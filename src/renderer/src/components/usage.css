@@ -1,0 +1,53 @@
+/* "Spend today" in the sidebar footer, and the breakdown it opens. */
+.usage-btn { display: flex; align-items: center; gap: 8px; width: calc(100% + 12px); margin: -4px -6px 0; padding: 4px 6px; border-radius: 6px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--color-foreground-subtlest); transition: background 120ms, color 120ms; }
+.usage-btn > span:first-child { flex: 1; min-width: 0; text-align: left; }
+.usage-btn b { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; color: var(--color-foreground-subtle); }
+.usage-btn:hover,
+.usage-btn.is-open { background: var(--color-hover); }
+.usage-btn[data-budget='warn'] b { color: var(--color-warning); }
+.usage-btn[data-budget='over'] b { color: var(--color-destructive); }
+.usage-btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
+.usagepop { --usage-warning: var(--color-warning); position: fixed; z-index: 1100; display: flex; flex-direction: column; border: 1px solid var(--color-popover-border); border-radius: 12px; background: var(--color-popover); color: var(--color-foreground); box-shadow: var(--shadow-lg); overflow: hidden; font-size: 12px; line-height: 1.45; animation: usage-reveal 130ms ease-out; }
+:root[data-theme='light'] .usagepop { --usage-warning: color-mix(in srgb, var(--color-warning) 25%, var(--color-foreground)); }
+.usagepop:focus,
+.usagepop:focus-visible { outline: none; }
+.usagepop button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.usagepop__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px 10px; flex-shrink: 0; }
+.usagepop__head h2 { font: 600 14px/1.4 var(--display); }
+.usagepop__close { display: grid; place-items: center; width: 26px; height: 26px; margin-right: -4px; border-radius: 6px; color: var(--color-foreground-subtle); }
+.usagepop__close:hover { background: var(--color-hover); color: var(--color-foreground); }
+.usagepop__body { min-height: 0; padding: 0 16px 14px; overflow-y: auto; overscroll-behavior: contain; }
+.usagepop__total { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 14px 0 2px; }
+.usagepop__figure { font: 600 22px/1.2 var(--display); letter-spacing: -0.4px; font-variant-numeric: tabular-nums; }
+.usagepop__sub { font-size: 11.5px; color: var(--color-foreground-subtlest); }
+.usagepop__empty { margin: 16px 0 2px; line-height: 1.6; color: var(--color-foreground-subtle); }
+.usagepop h3 { margin: 18px 0 8px; font: 600 12px/1.4 var(--display); color: var(--color-foreground-subtle); }
+/* minmax(0, 1fr) keeps a long model name from widening the column; the name truncates instead. */
+.usagepop ul { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin: 0; padding: 0; list-style: none; }
+.usagepop__line { display: flex; align-items: baseline; gap: 8px; }
+.usagepop__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-foreground); }
+.usagepop__flag { flex: none; font-size: 11px; color: var(--color-foreground-subtlest); }
+.usagepop__amount { flex: none; font: 12px var(--mono); font-variant-numeric: tabular-nums; }
+.usagepop__amount.is-none { font-family: var(--sans); color: var(--color-foreground-subtlest); }
+/* A share of the total, in one neutral tone: a bar says how much, the number says exactly. */
+.usagepop__bar { height: 3px; margin-top: 4px; border-radius: 2px; background: var(--color-surface-hover); overflow: hidden; }
+.usagepop__bar > span { display: block; height: 100%; background: var(--color-foreground-subtlest); }
+.usagepop__list .usagepop__sub { margin-top: 3px; }
+.usagepop__meters { margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--color-border); }
+.usagepop__meters h3 { margin-top: 4px; }
+.usagepop__bar--meter { height: 5px; }
+.usagepop__bar--meter > span { background: var(--color-foreground-subtle); }
+.usagepop__meters li[data-state='warn'] .usagepop__bar > span { background: var(--color-warning); }
+.usagepop__meters li[data-state='over'] .usagepop__bar > span { background: var(--color-destructive); }
+.usagepop__state { margin-top: 3px; font-size: 11.5px; font-weight: 500; }
+.usagepop__meters li[data-state='warn'] .usagepop__state { color: var(--usage-warning); }
+.usagepop__meters li[data-state='over'] .usagepop__state { color: var(--color-destructive); }
+.usagepop__more { margin-top: 8px; padding: 0; border-radius: 3px; font-size: 11.5px; color: var(--color-foreground-subtle); text-decoration: underline; text-underline-offset: 3px; }
+.usagepop__more:hover { color: var(--color-foreground); }
+.usagepop__notes { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--color-border); font-size: 11.5px; line-height: 1.6; color: var(--color-foreground-subtlest); }
+.usagepop__notes p + p { margin-top: 4px; }
+.usagepop__link { margin-top: 8px; padding: 0; border-radius: 3px; font-size: 12px; color: var(--color-foreground); text-decoration: underline; text-underline-offset: 3px; }
+.usagepop__link:hover { color: var(--color-foreground-subtle); }
+@keyframes usage-reveal { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .usagepop { animation: none; } .usage-btn { transition: none; } }

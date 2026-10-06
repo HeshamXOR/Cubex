@@ -1,0 +1,6 @@
+data: {"candidates": [{"content": {"parts": [{"text": "**Working it out**\n\nSix times seven.","thought": true}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 14,"totalTokenCount": 14},"modelVersion": "gemini-3-flash-preview","responseId": "Sb5CaIXnH-qMz7IPrNmZsQQ"}
+
+data: {"candidates": [{"content": {"parts": [{"text": "The answer is 42."}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 14,"candidatesTokenCount": 6,"totalTokenCount": 40,"thoughtsTokenCount": 20},"modelVersion": "gemini-3-flash-preview","responseId": "Sb5CaIXnH-qMz7IPrNmZsQQ"}
+
+data: {"candidates": [{"content": {"parts": [{"text": "","thoughtSignature": "EjQKMgG+Pvb7TEXTSIGNATUREzzzzzzzzzzzzzzzzzzzzzzzzzzzz"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 14,"candidatesTokenCount": 6,"totalTokenCount": 40,"thoughtsTokenCount": 20},"modelVersion": "gemini-3-flash-preview","responseId": "Sb5CaIXnH-qMz7IPrNmZsQQ"}
+

@@ -1,46 +1,24 @@
-import type { HarnessState } from './StatusIndicator'
-import { AnimatedMark, type MarkMotion } from '../theme/AnimatedMark'
+import { activitySpecFor, StateIcon, type HarnessState } from './StatusIndicator'
 import { formatElapsed, useElapsed } from '../lib/useElapsed'
 import './status.css'
 
-const LABEL: Partial<Record<HarnessState, string>> = {
-  thinking: 'Thinking',
-  working: 'Working',
-  editing: 'Editing',
-  streaming: 'Generating',
-  retrying: 'Retrying',
-  falling_back: 'Falling back',
-  running_tool: 'Running tool'
-}
-
-function motionFor(state: HarnessState): MarkMotion {
-  if (state === 'streaming') return 'streaming'
-  if (state === 'working' || state === 'running_tool' || state === 'editing') return 'working'
-  return 'thinking'
-}
-
-/**
- * The in-thread harness activity block: the animated Cubex mark, a shimmering
- * verb, an optional detail (tool name / fallback target), and a live timer.
- */
-export function ActivityRow({
-  state,
-  startedAt,
-  detail
-}: {
+/** An operation label, its matching glyph, and the actual turn elapsed time. */
+export function ActivityRow({ state, startedAt, detail, label, iconSize = 18 }: {
   state: HarnessState
   startedAt?: number
   detail?: string
+  label?: string
+  iconSize?: number
 }): JSX.Element | null {
-  const label = LABEL[state]
-  const elapsed = useElapsed(startedAt, !!label)
-  if (!label) return null
+  const spec = activitySpecFor(state)
+  const elapsed = useElapsed(startedAt, !!spec.active)
+  if (!spec.active && state !== 'awaiting_input') return null
   return (
-    <div className="activity">
-      <AnimatedMark size={20} state={motionFor(state)} />
-      <span className="activity__label shimmer">{label}</span>
-      {detail && <span className="activity__detail">{detail}</span>}
-      <span className="activity__time">{formatElapsed(elapsed)}</span>
+    <div className={`activity activity--${spec.tone}`} data-state={state} role="status" aria-live="polite">
+      <span className="activity__icon"><StateIcon state={state} size={iconSize} /></span>
+      <span className={`activity__label ${spec.active ? 'is-shimmer' : ''}`}>{label ?? spec.label}</span>
+      {detail && <span className="activity__detail" title={detail}>{detail}</span>}
+      {spec.active && startedAt !== undefined && <span className="activity__time" aria-hidden="true">{formatElapsed(elapsed)}</span>}
     </div>
   )
 }

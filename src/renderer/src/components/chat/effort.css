@@ -1,0 +1,188 @@
+/* ============================================================================
+   Cubex, Atelier: reasoning effort as a slider. Brand blue for every stop but
+   the last; the last is amber and keeps moving, because it is the one that
+   costs. Colors in between would only be a muddy blend, so there are none.
+   ============================================================================ */
+
+.eslider {
+  --eff-t: 0;
+  --eff-hue: var(--color-brand);
+  --eff-heat: var(--color-warning);
+  /* Light can be brighter than the text amber: it is only ever light, never read. */
+  --eff-glow: var(--color-warning);
+  --eff-surface: var(--color-menu);
+  position: relative;
+  isolation: isolate;
+  padding: 9px 10px 4px;
+  border-radius: 10px;
+}
+.eslider.is-max { --eff-hue: var(--color-warning); }
+
+.eslider__head { display: flex; align-items: center; gap: 10px; min-height: 16px; }
+.eslider__label { flex: 1; min-width: 0; font-size: 12px; color: var(--color-foreground-subtlest); }
+.eslider__value {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  font: 600 12.5px/1 var(--display);
+  color: var(--eff-hue);
+  font-variant-numeric: tabular-nums;
+  transition: color 0.2s;
+}
+.eslider__flame { flex: none; transform-origin: 50% 90%; }
+
+.eslider__track { position: relative; height: 22px; margin-top: 7px; }
+/* The rail. */
+.eslider__track::before {
+  content: '';
+  position: absolute;
+  top: 9px;
+  left: 0;
+  right: 0;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--color-surface-hover);
+}
+.eslider__fill {
+  position: absolute;
+  top: 9px;
+  left: 0;
+  width: calc(var(--eff-t) * 100%);
+  height: 4px;
+  border-radius: 999px;
+  background: var(--eff-hue);
+  transition: width 0.16s ease, background 0.2s;
+}
+
+/* Stops, so the scale reads as discrete even though it slides. */
+.eslider__ticks { position: absolute; top: 9px; left: 0; right: 0; height: 4px; display: flex; justify-content: space-between; }
+.eslider__tick { width: 2px; height: 4px; border-radius: 1px; background: var(--color-backdrop); opacity: 0.55; }
+.eslider__tick:first-child,
+.eslider__tick:last-child { opacity: 0; }
+
+/* A real range input, made invisible: it keeps the keyboard and pointer behavior. */
+.eslider__input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  background: none;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.eslider__input::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--eff-hue);
+  box-shadow: 0 0 0 3px var(--eff-surface), 0 1px 3px rgba(0, 0, 0, 0.5);
+  cursor: default;
+  transition: background 0.2s, transform 0.12s;
+}
+.eslider__input:hover::-webkit-slider-thumb { transform: scale(1.1); }
+.eslider__input:active::-webkit-slider-thumb { transform: scale(1.04); }
+.eslider__input:focus,
+.eslider__input:focus-visible { outline: none; }
+.eslider__input:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--eff-surface), 0 0 0 5px var(--focus-ring);
+}
+
+.eslider__hint { margin-top: 7px; font-size: 11.5px; line-height: 1.5; color: var(--color-foreground-subtlest); }
+.eslider__cost { margin-top: 2px; font-size: 11.5px; line-height: 1.5; font-weight: 500; color: var(--eff-heat); }
+:root[data-theme='light'] .eslider { --eff-heat: color-mix(in srgb, var(--color-warning) 55%, var(--color-foreground)); --eff-glow: #f2a612; }
+
+/* ---- The top stop. Several layers at once, because this is the one that burns. ---- */
+
+/* Heat gathering around the rail, breathing. An ellipse that ends inside its box, so it has no edge. */
+.eslider.is-max .eslider__track::after {
+  content: '';
+  position: absolute;
+  inset: -16px -12px;
+  z-index: -1;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--eff-glow) 24%, transparent), transparent);
+  pointer-events: none;
+  animation: eff-heat 2.2s ease-in-out infinite;
+}
+@keyframes eff-heat {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+/* The fill glows and a bright current runs through it, faster than anything else in the menu. */
+.eslider.is-max .eslider__fill {
+  background-image: linear-gradient(
+    100deg,
+    transparent 15%,
+    color-mix(in srgb, #fff 62%, transparent) 50%,
+    transparent 85%
+  );
+  background-size: 190% 100%;
+  background-repeat: no-repeat;
+  animation: eff-current 1.05s linear infinite, eff-glow 1.4s ease-in-out infinite;
+}
+@keyframes eff-current {
+  from { background-position: -130% 0; }
+  to { background-position: 230% 0; }
+}
+@keyframes eff-glow {
+  0%, 100% { box-shadow: 0 0 3px color-mix(in srgb, var(--eff-glow) 45%, transparent); }
+  50% { box-shadow: 0 0 11px 1px color-mix(in srgb, var(--eff-glow) 85%, transparent); }
+}
+
+/* Rings leave the thumb, one after another, like a pulse being sent out. */
+.eslider__beacon {
+  position: absolute;
+  top: 4px;
+  left: calc(7px + var(--eff-t) * (100% - 14px));
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  pointer-events: none;
+}
+.eslider__beacon::before,
+.eslider__beacon::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1.5px solid var(--eff-glow);
+  border-radius: 50%;
+  opacity: 0;
+  animation: eff-ripple 1.6s cubic-bezier(0.2, 0.6, 0.35, 1) infinite;
+}
+.eslider__beacon::after { animation-delay: -0.8s; }
+@keyframes eff-ripple {
+  0% { transform: scale(0.9); opacity: 0.85; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+
+/* Naming the stop is the first thing that moves: it pops once, then the flame keeps going. */
+.eslider.is-max .eslider__value { animation: eff-pop 0.42s cubic-bezier(0.2, 0.9, 0.3, 1.5) both; }
+@keyframes eff-pop {
+  0% { transform: scale(0.8); }
+  100% { transform: scale(1); }
+}
+.eslider.is-max .eslider__flame { animation: eff-flicker 0.9s ease-in-out infinite; }
+@keyframes eff-flicker {
+  0%, 100% { transform: scale(1, 1) rotate(0deg); }
+  22% { transform: scale(0.94, 1.1) rotate(-4deg); }
+  48% { transform: scale(1.04, 0.95) rotate(3deg); }
+  74% { transform: scale(0.96, 1.08) rotate(-2deg); }
+}
+
+/* Without motion the meaning has to survive in color and words alone. */
+@media (prefers-reduced-motion: reduce) {
+  .eslider.is-max .eslider__track::after { animation: none; opacity: 0.8; }
+  .eslider.is-max .eslider__fill { animation: none; background-image: none; box-shadow: 0 0 7px color-mix(in srgb, var(--eff-glow) 60%, transparent); }
+  .eslider__beacon::before,
+  .eslider__beacon::after { animation: none; opacity: 0; }
+  .eslider.is-max .eslider__value,
+  .eslider.is-max .eslider__flame { animation: none; }
+  .eslider__fill,
+  .eslider__value,
+  .eslider__input::-webkit-slider-thumb { transition: none; }
+}

@@ -48,20 +48,36 @@ export interface AIRequest {
   stream?: boolean
 }
 
+/**
+ * When a request is stopped. A request is only cut when it is stuck, never for being slow or long: once data is
+ * arriving, only `streamIdleMs` (silence) and an explicit `totalMs` can end it. A limit of 0 turns that limit off,
+ * and a missing value means its default (`DEFAULT_TIMEOUT_CONFIG`). Read it through `resolveTimeouts`.
+ */
 export interface TimeoutConfig {
   connectionMs?: number
+  /** How long to wait for the response to begin, for example while the provider queues the request. Default 10 minutes. */
   requestMs?: number
-  /** Abort if no stream chunk arrives within this window. */
+  /** How long a response that has begun may send nothing. Every piece of data restarts the clock. Default 5 minutes. */
   streamIdleMs?: number
+  /** A hard ceiling on one request, even while data is still arriving. 0 or absent means no ceiling. */
   totalMs?: number
   /** Local runtime cold-start allowance. */
   localStartupMs?: number
 }
 
+/** `'output'` is model output (text, reasoning, a tool call); `'data'` is any other sign of life from the server. */
+export type ActivityKind = 'data' | 'output'
+
 /** Per-call options passed alongside a request. */
 export interface RequestOptions {
   signal?: AbortSignal
+  /** The gateway enforces these limits itself. An adapter reads them only to size an SDK client's own timeout. */
   timeout?: TimeoutConfig
   /** Extra headers merged into the outbound request (never logged raw). */
   headers?: Record<string, string>
+  /**
+   * Called when the provider is heard from, including keep-alive comments that never become stream events, so the
+   * gateway can restart its silence clock. Optional: an adapter that cannot tell simply never calls it.
+   */
+  onActivity?: (kind: ActivityKind) => void
 }

@@ -1,0 +1,101 @@
+/* ============================================================================
+   Cubex, Atelier: background tasks. One row per command the harness started and left
+   running: what it is, whether it is up, how long, its newest line. Rows are separated
+   by hairlines, not boxes. A row opens to a live tail, a field to answer the process,
+   and the one destructive action behind an armed confirmation. Work in progress is the
+   turning star (the shared glyph); color appears only for success, failure and attention.
+   ============================================================================ */
+
+.tasks { flex: 1; min-height: 0; display: flex; flex-direction: column; container: tasks / inline-size; }
+.tasks__bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 44px;
+  padding: 0 18px;
+  font-size: 12.5px;
+  color: var(--color-foreground);
+}
+.tasks__quiet { color: var(--color-foreground-subtlest); }
+.tasks__list { flex: 1; min-height: 0; margin: 0; padding: 0 6px 14px; list-style: none; overflow-y: auto; overscroll-behavior: contain; }
+
+.task + .task { border-top: 1px solid var(--color-border); }
+
+.task__head { display: flex; align-items: center; gap: 2px; padding: 5px 2px 0 0; }
+.task__summary {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 13px 16px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+  min-height: 30px;
+  padding: 0 8px;
+  border-radius: 7px;
+  text-align: left;
+  color: var(--color-foreground);
+}
+.task__summary:hover { background: var(--color-hover); }
+.task__chev { color: var(--color-foreground-subtlest); transition: transform 0.12s; }
+.task[data-open='true'] .task__chev { transform: rotate(90deg); }
+.task__icon { display: grid; place-items: center; width: 16px; height: 16px; }
+.task__glyph { flex: none; }
+.task__glyph--done { color: var(--color-success); }
+.task__glyph--failed { color: var(--color-destructive); }
+.task__glyph--timed-out { color: var(--color-warning); }
+.task__glyph--stopped { color: var(--color-foreground-subtlest); }
+.task__cmd { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.task__time { font-size: 12px; color: var(--color-foreground-subtlest); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* A word, not a bare square: the one action here that ends something should read as one. */
+.btn.task__stop { flex: none; height: 26px; padding: 0 9px; margin-left: 2px; }
+.btn.task__stop:hover:not(:disabled),
+.btn.task__stop.is-armed { background: var(--color-destructive-surface); color: var(--color-destructive); }
+
+/* What the row says about itself sits under the command, lined up with it. */
+.task__meta { display: flex; flex-direction: column; gap: 1px; padding: 0 12px 9px 53px; min-width: 0; }
+.task__meta:empty { padding-bottom: 5px; }
+.task__ready { display: inline-flex; align-items: center; gap: 3px; width: fit-content; max-width: 100%; min-height: 24px; font-size: 12.5px; line-height: 20px; }
+.task__ready:hover { text-decoration: underline; text-underline-offset: 3px; }
+.task__status { font-size: 12.5px; line-height: 20px; color: var(--color-foreground-subtle); }
+.task__last { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 20px; color: var(--color-foreground-subtlest); }
+
+.task .confirm { margin: 0 12px 10px 53px; padding-top: 10px; gap: 8px 12px; }
+.task .confirm p { min-width: 160px; font-size: 12.5px; }
+.task__note { margin: 0; font-size: 12px; }
+.task__note--row { margin: 0 12px 10px 53px; }
+
+.task__detail { display: flex; flex-direction: column; gap: 8px; padding: 2px 12px 14px 53px; min-width: 0; }
+
+.task__facts { display: grid; grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr); gap: 2px 12px; margin: 0; font-size: 12px; line-height: 20px; }
+.task__facts dt { color: var(--color-foreground-subtlest); }
+.task__facts dd { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-foreground-body); font-variant-numeric: tabular-nums; }
+@container tasks (max-width: 470px) {
+  .task__facts { grid-template-columns: auto minmax(0, 1fr); }
+}
+
+.task__tailwrap { position: relative; border: 1px solid var(--color-border); border-radius: 9px; background: var(--well); overflow: hidden; }
+/* 260px = 8px padding + 14 lines of 18px, so a tail that follows the end never shows a sliver of a cut line. */
+.task__tail { max-height: 260px; min-height: 64px; overflow: auto; overscroll-behavior: contain; padding: 8px 10px; }
+.task__tail:focus-visible { outline-offset: -2px; }
+.task__tail pre { margin: 0; font: 12px/18px var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--color-foreground-body); }
+.task__tail pre.task__quiet { color: var(--color-foreground-subtlest); }
+.task__tailwrap .scrolldown { bottom: 10px; width: 28px; height: 28px; }
+
+.task__tailbar { display: flex; align-items: center; gap: 4px; min-height: 28px; font-size: 12px; color: var(--color-foreground-subtlest); font-variant-numeric: tabular-nums; }
+.task__tailbar .btn--sm { height: 24px; padding: 0 8px; }
+.task__reveal { width: 26px; height: 26px; }
+
+.task__send form { display: flex; gap: 6px; }
+.task__send .input { flex: 1; min-width: 0; height: 28px; padding: 0 9px; font: 12.5px var(--mono); }
+.task__send .btn--sm { flex: none; height: 28px; }
+.task__sent { display: flex; flex-direction: column; gap: 1px; margin: 6px 0 0; padding: 0; list-style: none; font-size: 12px; line-height: 18px; color: var(--color-foreground-subtle); }
+.task__sent li { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.task__sent svg { flex: none; color: var(--color-success); }
+.task__sent code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--mono); }
+.task__enter { font-size: 12px; color: var(--color-foreground-subtlest); }
+
+/* The conversation header's count of what is running. The star is the shared working glyph. */
+.chip.tasks-chip { gap: 6px; }
+.chip.tasks-chip svg { color: var(--color-accent-foreground); }

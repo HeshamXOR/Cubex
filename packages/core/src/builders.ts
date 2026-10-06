@@ -1,9 +1,11 @@
 import type {
   AIMessage,
+  AIResponse,
   ImagePart,
   MessageContentPart,
   Role,
-  TextPart
+  TextPart,
+  ToolCall
 } from './types'
 
 /** Build a text content part. */
@@ -44,4 +46,33 @@ export function extractReasoning(parts: MessageContentPart[]): string {
     .filter((p): p is Extract<MessageContentPart, { type: 'reasoning' }> => p.type === 'reasoning')
     .map((p) => p.text)
     .join('')
+}
+
+/**
+ * The assistant message that carries one response into the next request of a
+ * tool loop. Blocks keep the order the model produced them in and thinking is
+ * passed back untouched: providers verify a signed block where it was generated,
+ * so rebuilding the turn as "all reasoning, then text, then tool calls" is
+ * rejected (400) by models that think between tool calls.
+ *
+ * `calls` replaces `response.toolCalls` when the caller recovered calls the model
+ * wrote as text; any call without a tool_use block yet is appended.
+ */
+export function assistantTurn(
+  response: Pick<AIResponse, 'content' | 'text' | 'toolCalls'>,
+  calls: readonly ToolCall[] = response.toolCalls
+): AIMessage {
+  const content = response.content.filter(
+    (part) => part.type === 'text' || part.type === 'reasoning' || part.type === 'tool_use'
+  )
+  // Hand-built responses may carry only `text` and `toolCalls`.
+  if (response.text && !content.some((part) => part.type === 'text')) {
+    const firstCall = content.findIndex((part) => part.type === 'tool_use')
+    content.splice(firstCall < 0 ? content.length : firstCall, 0, textPart(response.text))
+  }
+  const present = new Set(content.flatMap((part) => (part.type === 'tool_use' ? [part.id] : [])))
+  for (const call of calls) {
+    if (!present.has(call.id)) content.push({ type: 'tool_use', id: call.id, name: call.name, input: call.input })
+  }
+  return { role: 'assistant', content }
 }

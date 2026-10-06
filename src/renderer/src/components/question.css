@@ -1,0 +1,30 @@
+/* The model's question, in the dock. Options are choices, not links: they carry a number and a clear selected state. */
+.question-review { width: 100%; margin: 0 0 10px; padding: 16px; border: 1px solid var(--color-accent-border); border-radius: 12px; background: linear-gradient(var(--color-accent), transparent), var(--raise); animation: ask-in 160ms ease-out; }
+.question-review__heading { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 14px; }
+.question-review__heading > svg { flex-shrink: 0; color: var(--color-accent-foreground); margin-top: 2px; }
+.question-review__eyebrow { display: block; font-size: 12px; color: var(--color-foreground-subtlest); margin-bottom: 2px; }
+.question-review__heading h3 { font: 600 14px/1.5 var(--display); }
+.question-review__options { display: flex; flex-direction: row; flex-wrap: wrap; gap: 8px; }
+.question-review__option { flex: 1 1 150px; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 10px 12px; text-align: left; border: 1px solid var(--color-border); border-radius: 9px; background: var(--color-surface); transition: background 120ms, border-color 120ms; }
+.question-review__option:hover { background: var(--color-surface-hover); border-color: var(--color-border-hover); }
+.question-review__option.is-selected { border-color: var(--color-accent-border); background: var(--color-accent); }
+.question-review__option-heading { display: flex; align-items: flex-start; gap: 8px; width: 100%; font-size: 13px; font-weight: 600; }
+.question-review__number { display: inline-flex; justify-content: center; align-items: center; flex: 0 0 18px; height: 18px; margin-top: 1px; border: 1px solid var(--color-border-hover); border-radius: 5px; color: var(--color-foreground-subtle); font: 10.5px var(--mono); }
+.question-review__option.is-selected .question-review__number { border-color: var(--color-accent-border); color: var(--color-accent-foreground); }
+.question-review__description { font-size: 12px; line-height: 1.6; color: var(--color-foreground-subtle); }
+.question-review__custom { margin-top: 14px; }
+.question-review__custom label { display: block; font-size: 12px; color: var(--color-foreground-subtle); margin-bottom: 6px; }
+.question-review .question-review__custom textarea { display: block; width: 100%; min-height: 62px; max-height: 190px; padding: 9px 11px; resize: vertical; font-size: 13px; line-height: 1.6; background: var(--well); color: var(--color-foreground); border: 1px solid var(--color-input-border); border-radius: 8px; outline: none; }
+.question-review .question-review__custom textarea:focus { border-color: var(--color-input-border-focused); }
+.question-review .question-review__custom textarea::placeholder { color: var(--color-foreground-subtlest); }
+.question-review__actions { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
+.question-review__actions > span { margin-right: auto; font-size: 12px; color: var(--color-foreground-subtlest); }
+.question-review__skip,
+.question-review__submit { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 7px; font-size: 12.5px; }
+.question-review__skip { color: var(--color-foreground-subtle); }
+.question-review__skip:hover { background: var(--color-hover); color: var(--color-foreground); }
+.question-review__submit { background: var(--action-bg); color: var(--action-fg); font-weight: 600; }
+.question-review__submit:hover:not(:disabled) { background: var(--action-hover); }
+.question-review__submit:active:not(:disabled) { background: var(--action-active); }
+.question-review__submit:disabled { background: var(--color-surface-hover); color: var(--color-foreground-subtlest); }
+.question-review button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }

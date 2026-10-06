@@ -1,0 +1,4 @@
+data: {"candidates": [{"content": {"parts": [{"text": "**Comparing two files**\n\nBoth files are needed, so I will read them together.","thought": true}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 80,"totalTokenCount": 80,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 80}]},"modelVersion": "gemini-3-flash-preview","responseId": "Rb5CaPKsFYGMz7IP3oXUqQg"}
+
+data: {"candidates": [{"content": {"parts": [{"functionCall": {"name": "read_file","args": {"path": "a.ts"}},"thoughtSignature": "CiQBjz1rXyPARALLELSIGNATUREAAAAAAAAAAAAAAAAAAAAAAAA="},{"functionCall": {"name": "read_file","args": {"path": "b.ts"}}}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 80,"candidatesTokenCount": 34,"totalTokenCount": 190,"thoughtsTokenCount": 76,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 80}]},"modelVersion": "gemini-3-flash-preview","responseId": "Rb5CaPKsFYGMz7IP3oXUqQg"}
+

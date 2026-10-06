@@ -4,7 +4,7 @@
  *  - `system` is a top-level string/blocks (Anthropic has no 'system' array role)
  *  - 'tool' role messages become user messages carrying `tool_result` blocks
  *  - assistant `tool_use` parts pass through as native `tool_use` blocks
- *  - `max_tokens` is REQUIRED (defaults to 4096)
+ *  - `max_tokens` is REQUIRED (16,384 when the caller sets none)
  * Kept SDK-free so it is unit-testable in isolation.
  */
 import { extractText } from '../../builders'
@@ -13,7 +13,7 @@ import type { AIRequest } from '../../types/request'
 import type { ContentSource, MessageContentPart } from '../../types/content'
 import type { ToolChoice, ToolDefinition } from '../../types/tools'
 
-const DEFAULT_MAX_TOKENS = 4096
+const DEFAULT_MAX_TOKENS = 16_384
 
 // --- Native wire shapes ---
 
@@ -73,7 +73,7 @@ export interface AnthParams {
   stream?: boolean
   metadata?: { user_id?: string }
   /** Adaptive extended thinking (current models: type "adaptive"). */
-  thinking?: { type: 'adaptive' }
+  thinking?: { type: 'adaptive'; display?: 'summarized' | 'omitted' | 'updates' }
   /** Reasoning depth / token budget (GA on current models). */
   output_config?: { effort: AnthEffort }
   [key: string]: unknown
@@ -112,6 +112,15 @@ function toImageBlock(source: ContentSource): AnthImage | undefined {
   return undefined
 }
 
+/**
+ * Adapters that put their own signature in `ReasoningPart.signature` tag it
+ * (`gemini:...`) so no other provider replays it. Anthropic signatures are
+ * base64 and never hold a colon.
+ */
+function isForeignSignature(signature: string): boolean {
+  return signature.includes(':')
+}
+
 /** Map unified content parts to native Anthropic content blocks. */
 export function toAnthBlocks(parts: MessageContentPart[]): AnthBlock[] {
   const out: AnthBlock[] = []
@@ -127,6 +136,11 @@ export function toAnthBlocks(parts: MessageContentPart[]): AnthBlock[] {
       }
       case 'tool_use':
         out.push({ type: 'tool_use', id: part.id, name: part.name, input: part.input })
+        break
+      case 'reasoning':
+        // Only blocks Anthropic signed can be replayed; unsigned text is display-only.
+        if (part.redacted) out.push({ type: 'redacted_thinking', data: part.redacted } as unknown as AnthBlock)
+        else if (part.signature && !isForeignSignature(part.signature)) out.push({ type: 'thinking', thinking: part.text, signature: part.signature } as unknown as AnthBlock)
         break
       case 'tool_result': {
         const content: Array<AnthText | AnthImage> = []
@@ -187,11 +201,12 @@ export function toAnthMessages(request: AIRequest): AnthMessage[] {
       // Folded into top-level system; skip in the array.
       continue
     }
-    if (msg.role === 'tool') {
-      messages.push({ role: 'user', content: toAnthBlocks(msg.content) })
-      continue
-    }
-    messages.push({ role: msg.role, content: toAnthBlocks(msg.content) })
+    const content = toAnthBlocks(msg.content)
+    // A turn that held only parts Anthropic cannot take (reasoning written by
+    // another provider, say) would go out empty, which the API rejects.
+    if (content.length === 0) continue
+    // 'tool' role messages are user messages carrying tool_result blocks.
+    messages.push({ role: msg.role === 'tool' ? 'user' : msg.role, content })
   }
   return messages
 }
@@ -240,12 +255,55 @@ export function toAnthropicParams(request: AIRequest, stream: boolean): AnthPara
   // rejected, so we express depth via output_config.effort instead.
   const effort = toAnthEffort(params.reasoningEffort)
   if (effort !== undefined) {
-    body.thinking = { type: 'adaptive' }
+    // display:'summarized' streams readable reasoning tokens; the default
+    // ('omitted' on current models) looks like a long silent pause.
+    body.thinking = { type: 'adaptive', display: 'summarized' }
     body.output_config = { effort }
   }
 
   if (stream) body.stream = true
   return body
+}
+
+/**
+ * The 400s Anthropic documents for a history that cannot carry thinking: the
+ * latest assistant thinking no longer matches what the model produced, a
+ * signature does not verify for this model, account or prefix, or (manual
+ * extended thinking only; adaptive drops the rule) a tool turn written by
+ * another provider has no leading thinking block. Messages are for people, so
+ * only stable fragments are matched.
+ */
+const THINKING_HISTORY_ERROR =
+  /Expected `thinking` or `redacted_thinking`|must start with a thinking block|`redacted_thinking` blocks in the latest assistant message cannot be modified|Invalid `signature` in `thinking` block/i
+
+export function isThinkingHistoryError(message: string): boolean {
+  return THINKING_HISTORY_ERROR.test(message)
+}
+
+const THINKING_BLOCK_TYPES = new Set(['thinking', 'redacted_thinking'])
+
+/**
+ * The same request without thinking: no `thinking` parameter and no thinking
+ * blocks in the history, which is the documented way past the 400s above. The
+ * parameter is omitted rather than sent as `disabled`: Opus 5.5, Sonnet 5.5 and
+ * the Fable and Mythos models reject `disabled`, while every model accepts no
+ * parameter. Where thinking is on by default it stays on, and the API runs a
+ * turn whose history has no thinking blocks without them. The history keeps
+ * every other block. Undefined when the request holds no thinking, so there is
+ * nothing to retry.
+ */
+export function withoutThinking(body: AnthParams): AnthParams | undefined {
+  let changed = body.thinking !== undefined
+  const messages: AnthMessage[] = []
+  for (const message of body.messages) {
+    const content = message.content.filter((block) => !THINKING_BLOCK_TYPES.has(block.type))
+    if (content.length !== message.content.length) changed = true
+    // A turn that was only thinking has nothing left to say.
+    if (content.length > 0) messages.push(content.length === message.content.length ? message : { ...message, content })
+  }
+  if (!changed) return undefined
+  const { thinking: _thinking, ...rest } = body
+  return { ...rest, messages }
 }
 
 /** Map an Anthropic stop_reason to the unified StopReason. */
@@ -264,18 +322,41 @@ export function mapStopReason(reason: string | null | undefined): StopReason {
 }
 
 export interface AnthUsage {
-  input_tokens?: number
-  output_tokens?: number
+  input_tokens?: number | null
+  output_tokens?: number | null
   cache_read_input_tokens?: number | null
+  cache_creation_input_tokens?: number | null
+  /** Split of the cache writes by lifetime; the 1-hour share is billed at twice the input price. */
+  cache_creation?: { ephemeral_5m_input_tokens?: number | null; ephemeral_1h_input_tokens?: number | null } | null
 }
 
-/** Merge Anthropic usage counts (message_start carries input, message_delta carries output). */
+function tokenCount(value: number | null | undefined): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined
+}
+
+/**
+ * Anthropic reports disjoint uncached, cache-read, and cache-write input counts.
+ * Normalize their sum to the inclusive inputTokens used by context and cost UI.
+ * Message deltas contain cumulative counters, so replace only present fields;
+ * adding deltas would count the same cached prompt repeatedly.
+ */
 export function mapAnthUsage(usage: AnthUsage | null | undefined, prev?: Usage): Usage | undefined {
   if (!usage) return prev
   const out: Usage = { ...prev }
-  if (usage.input_tokens !== undefined) out.inputTokens = usage.input_tokens
-  if (usage.output_tokens !== undefined) out.outputTokens = usage.output_tokens
-  if (usage.cache_read_input_tokens != null) out.cachedInputTokens = usage.cache_read_input_tokens
+  const previousUncached = prev?.inputTokens === undefined ? undefined
+    : Math.max(0, prev.inputTokens - (prev.cachedInputTokens ?? 0) - (prev.cacheWriteInputTokens ?? 0))
+  const uncached = tokenCount(usage.input_tokens) ?? previousUncached
+  const cached = tokenCount(usage.cache_read_input_tokens)
+  const cacheWrite = tokenCount(usage.cache_creation_input_tokens)
+  const cacheWrite1h = tokenCount(usage.cache_creation?.ephemeral_1h_input_tokens)
+  const output = tokenCount(usage.output_tokens)
+  if (cached !== undefined) out.cachedInputTokens = cached
+  if (cacheWrite !== undefined) out.cacheWriteInputTokens = cacheWrite
+  if (cacheWrite1h !== undefined) out.cacheWrite1hInputTokens = cacheWrite1h
+  if (output !== undefined) out.outputTokens = output
+  if (uncached !== undefined || out.cachedInputTokens !== undefined || out.cacheWriteInputTokens !== undefined) {
+    out.inputTokens = (uncached ?? 0) + (out.cachedInputTokens ?? 0) + (out.cacheWriteInputTokens ?? 0)
+  }
   if (out.inputTokens !== undefined || out.outputTokens !== undefined) {
     out.totalTokens = (out.inputTokens ?? 0) + (out.outputTokens ?? 0)
   }
