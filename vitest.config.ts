@@ -15,7 +15,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['packages/**/*.test.ts', 'src/**/*.test.ts'],
+    include: ['packages/**/*.test.ts', 'src/**/*.test.ts', 'scripts/**/*.test.mjs'],
     // Several tests start real processes, shells and git repositories. On a shared CI runner an occasional one is
     // slow enough to miss a timing window, so CI gives each test two more tries. A test that is really broken still
     // fails all three.

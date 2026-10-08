@@ -24,7 +24,7 @@ Chat requests always go through the gateway and a provider adapter. A local mode
 |---|---|---|
 | Core | `packages/core` | Unified request, response and stream types, `AIGateway`, the retry engine, stream and error normalization, secret redaction, the model registry, the provider adapters, the subagent tool, and a generic tool-loop runner. Pure TypeScript with no Electron or DOM imports. |
 | Local | `packages/local` | Hardware profiling, memory and speed estimates, the compatibility check, the benchmark runner, the download queue, the local runtimes (Ollama and a mock) and a short model catalog. |
-| Main | `src/main` | The Electron main process: IPC handlers, `ProviderManager`, `ChatService` (the agent loop, tools, permissions, plans, summarizing, budget, hooks), `LocalService`, credentials, SQLite, settings, logging, the MCP client, shell and background tasks, type-check diagnostics, change review and notifications. |
+| Main | `src/main` | The Electron main process: IPC handlers, `ProviderManager`, `ChatService` (the agent loop, tools, permissions, plans, summarizing, budget, hooks), `LocalService`, credentials, SQLite, settings, logging, the MCP client, shell and background tasks, type-check diagnostics, change review, notifications, the update service (`src/main/updates`) and the other agents a model can consult (`src/main/peers`). |
 | Preload | `src/preload` | The typed `window.cubex` bridge. Context isolation and the sandbox are on, so the renderer has no Node access. |
 | Renderer | `src/renderer` | The React UI, built with Vite, with state in zustand. |
 | Shared | `src/shared` | The IPC contract (`ipc.ts`), the settings types, and pure helpers used by both processes (policies, provider presets, attachment rules). |
@@ -95,7 +95,7 @@ Several folders are scanned with `import.meta.glob`, so a feature adds a file an
 | A local runtime | Implement `LocalRuntime` in `packages/local/src/runtimes` and register it in `LocalService`. |
 | A tool | Create an `ExecutableTool` (a definition, a default permission of allow, ask or deny, and `execute`) and register it in `ChatService.start`. Mutating tools should ask. `ToolRunner` in core is a reusable loop for other callers. |
 | IPC handlers | Add a module in `src/main/ipcModules/` that exports `register(ctx)`. Declare the channel in `IPC` and the method in `CubexAPI` in `src/shared/ipc.ts`, and bridge it in `src/preload/index.ts`. `src/main/ipcContract.test.ts` fails when a channel has no handler or no bridge, or is handled twice. |
-| A settings section | Add a file in `src/renderer/src/views/settings/sections/` that exports `section` (an id, a title, an order and a component). |
+| A settings section | Add a file in `src/renderer/src/views/settings/sections/` that exports `section` (an id, a title, the page it belongs to, an order and a component). The pages are listed in `views/settings/pages.ts`, and a new feature needs no new page unless it wants one. |
 | A right-hand panel tab | Add `<Name>Tab.tsx` in `src/renderer/src/components/panelTabs/` that exports `tab`. |
 | Preview sample data | Add a file in `src/renderer/src/lib/seeds/` that exports `seed`. Seeds load only in development and are left out of production builds. |
 | Model metadata | `ModelRegistry` merges what an adapter's `getModels()` returns with manual entries. |

@@ -42,6 +42,7 @@ New IPC handlers, settings sections, panel tabs and preview sample data are each
 - Run `npm run lint`, `npm run typecheck`, `npm test` and `npm run build` before you push. CI runs the same four commands on Windows for every push and pull request to `main`, and they must pass.
 - Describe what changed, how you tested it, and any known limitations.
 - The repository normalizes line endings to LF (`.gitattributes`), so you do not need to convert files by hand.
+- Releases are cut by a maintainer, from a tag on `main`. You do not need to bump the version or edit `CHANGELOG.md`, but a line there about a change people will notice is welcome. [docs/RELEASING.md](docs/RELEASING.md) explains the process.
 
 ## Security issues
 

@@ -20,6 +20,7 @@ Some things ask even when the mode would allow them:
 - Writes under a protected folder (`.git`, `.cubex`, `.claude`, `.agents`, `.codex`, `.vscode`, `.husky`) ask in every mode except Bypass, because changes there can alter how git or other tools execute.
 - A tool call that Cubex had to recover from the model's text, instead of receiving it as a real tool call, always asks, even in Bypass.
 - `web_fetch` to a host that is not on the built-in list of documentation sites asks once per host per turn.
+- `consult_agent` asks before the first message to each other agent in a reply, with the whole message in front of you. Bypass approves it, and a saved rule never does.
 
 A PreToolUse hook can still block a call in every mode, and the workspace path checks always apply.
 
@@ -74,6 +75,7 @@ File, shell, task and git tools need a project folder. The others work without o
 | `exit_plan_mode`, `read_plan` | Submit and recall plans | Plan review |
 | `skill` | Load a skill's instructions | No |
 | `delegate_to_subagent` | Hand a research task to a subagent | No |
+| `consult_agent` | Ask another agent you set up for its view, and talk it through | Once per agent in a reply |
 | `mcp__<server>__<tool>` | A tool from an MCP server | Yes |
 
 Calls that only read and need no approval (`read_file`, `list_files`, `glob_files`, `search_files`, `read_command_output`, `skill`, `web_search`, and `web_fetch` to an approved host) can run side by side, up to four at a time. Anything that changes something runs alone, in order. If the model repeats an identical call more than three times, or repeats a call that already failed without anything changing, Cubex skips it and tells the model to change approach. More than six `web_search`, `web_fetch` or `search_files` calls in one turn are skipped the same way.
@@ -190,6 +192,8 @@ Cubex can summarize older messages so a long task keeps fitting. **Summarize ear
 **Skills** are Markdown workflows the model loads on demand. See [SKILLS.md](SKILLS.md).
 
 **Subagents.** `delegate_to_subagent` hands a self-contained research task to an isolated child that sees only the task and context it is given. The child can use `read_file`, `list_files`, `glob_files`, `search_files`, `read_plan` and `skill`. It cannot edit files, run commands, use the network, ask you anything or delegate further, and its file reads do not satisfy the parent's read-before-edit rule. By default it gets five research rounds followed by one report, 16 tool calls and 120 seconds. A tool result is capped at 16,000 characters, all tool results at 96,000, and the report at 24,000. Parent cancellation stops it. Its tool rows are labelled **Subagent**. Role profiles in `.cubex/agents/*.md` or `.claude/agents/*.md` (a `name` and `description` in the frontmatter, the prompt as the body) give the model named roles to delegate to.
+
+**Other agents.** `consult_agent` lets the model send a message to another agent you added under **Other agents** in Settings and turned on for the chat: Claude Code, Antigravity, another program, or a model of one of your providers. It talks the question through for up to the number of messages you set, and reports what was agreed and what is open. See [OTHER_AGENTS.md](OTHER_AGENTS.md).
 
 **MCP servers.** Under **MCP servers** in Settings, add a command, a JSON array of arguments and optional environment variables. For example, `["-y", "@modelcontextprotocol/server-filesystem", "C:\\My Project"]` passes the folder as one argument. The command is an executable, not a shell command line. Malformed JSON, non-string entries, null characters and oversized input are rejected with an inline error. Only servers that speak MCP over standard input and output are supported. Cubex connects when a turn starts, keeps the connection between turns, reconnects a dead one, and restarts a server when its command, arguments or variables change. **Test** starts the server and lists its tools. Tools appear to the model as `mcp__<server>__<tool>` and always ask. Variables marked **Secret** are kept in the operating system's credential store, never in the settings file, and a server whose secret is missing is not started. A server only receives variables you set on its entry plus the cleaned environment described above.
 

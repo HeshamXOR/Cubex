@@ -10,7 +10,7 @@ npx vitest run -t "Local Only"             # tests whose name matches
 npm run test:cov                           # coverage report (see the note below)
 ```
 
-`vitest.config.ts` runs the tests in a Node environment, enables globals, and picks up `packages/**/*.test.ts` and `src/**/*.test.ts`. The aliases `@core`, `@local` and `@shared` resolve as they do in the app. There are no DOM or component tests: the renderer is tested through its plain TypeScript (store logic, view models, helpers), not by mounting React.
+`vitest.config.ts` runs the tests in a Node environment, enables globals, and picks up `packages/**/*.test.ts`, `src/**/*.test.ts` and `scripts/**/*.test.mjs`. The aliases `@core`, `@local` and `@shared` resolve as they do in the app. There are no DOM or component tests: the renderer is tested through its plain TypeScript (store logic, view models, helpers), not by mounting React.
 
 Coverage uses the V8 provider, which needs the `@vitest/coverage-v8` package. It is not listed in `package.json`, so run `npm install -D @vitest/coverage-v8` before the first `npm run test:cov`.
 
@@ -46,6 +46,9 @@ Coverage uses the V8 provider, which needs the `@vitest/coverage-v8` package. It
 | Skills and subagents | `src/main/skills.test.ts`, `packages/core/src/gateway/SubagentTool.test.ts` |
 | Hooks and MCP (client, launch, environment and secrets, tool names) | `src/main/hooks.test.ts`, `src/main/mcp` |
 | Notifications | `src/main/notifications` |
+| Updates: reading a release, the feed, download, verification, install, scheduling | `src/main/updates`, `src/shared/updates.test.ts`, `src/shared/version.test.ts`, `src/main/ipcModules/updates.test.ts` |
+| Other agents: settings checks, the tool, starting programs, reading output | `src/shared/peers.test.ts`, `src/main/peers`, `src/main/ChatService.peers.test.ts` |
+| Release tooling: the changelog, the tag check, the release text, the local feed | `scripts/*.test.mjs` |
 | Persistence and transcripts | `src/main/db.*.test.ts`, `src/shared/messageTranscript.test.ts` |
 | IPC contract | `src/main/ipcContract.test.ts`, `src/main/ipcModules/registry.test.ts` |
 | Local: estimation, compatibility, benchmark runner, download queue and guards, Ollama runtime | `packages/local/src` |
@@ -94,6 +97,8 @@ Flags go in the query string and combine with `seed`:
 | `pull=hold`, `queue`, `stall`, `nospace`, `fail` or `slow`, `runtime=down`, `hw=slow`, `error`, `none`, `nogpu`, `long` or `analyzefail` | Local model downloads and the Hardware screen |
 | `providers=empty`, `many`, `nokey`, `testfail`, `testslow` or `savefail`, `presets=many` or `fail` | Providers and Presets screens |
 | `about=error`, `openfail` or `source` | The About page |
+| `update=available`, `downloading`, `ready`, `error`, `portable`, `noinstaller`, `skipped`, `uptodate`, `checking`, `failed`, `long`, `cut`, `empty` or `none`, with `busy=1` | The update card, window and Settings page in each state. `window.__updates` drives the simulation from a script |
+| `agents=none`, `configured` or `thread`, `agentstest=fail` or `slow` | Other agents in Settings and in a chat |
 
 Each seed file in `src/renderer/src/lib/seeds` describes its own flags in the comment at the top. The preview also exposes `window.__store`, the app's zustand store, so you can switch screens from the console, for example `__store.getState().setView('hardware')`.
 
@@ -101,4 +106,4 @@ The seed data is development-only. It is excluded from production builds, so the
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every push and pull request to `main`, in one Windows job: `npm ci`, `npm run lint`, `npm run typecheck`, `npm test` and `npm run build`. It does not build installers. Run the same four commands locally before opening a pull request.
+`.github/workflows/ci.yml` runs on every push and pull request to `main`, in one Windows job: `npm ci`, `npm run lint`, `npm run typecheck`, `npm test` and `npm run build`. It does not build installers. Run the same four commands locally before opening a pull request. `.github/workflows/release.yml` runs when a version tag is pushed: it repeats lint, type check and tests, builds the installer and publishes it ([RELEASING.md](RELEASING.md)).

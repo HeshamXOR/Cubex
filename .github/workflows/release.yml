@@ -1,0 +1,150 @@
+name: Release
+
+# A release is made by pushing a tag such as v0.2.0 on a commit that is on main. Nothing here runs for a branch push or a
+# pull request. docs/RELEASING.md has the steps before the tag, and what to do when a step here fails.
+#
+# Started by hand (Actions, Release, Run workflow) it builds the installer and keeps it as a download of the run, and
+# publishes nothing.
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Check, build and package
+    runs-on: windows-latest
+    timeout-minutes: 45
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The history is needed to check that the tag is on main.
+          fetch-depth: 0
+          # The build runs the install scripts of other people's packages, so it gets no token to keep.
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Check that this release is ready
+        id: release
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            tag="$GITHUB_REF_NAME"
+            node scripts/release.mjs check "$tag"
+          else
+            # A run started by hand has no tag. It tries the version in package.json, and does not need a release date yet.
+            tag="v$(node scripts/release.mjs version)"
+            node scripts/release.mjs check "$tag" --allow-undated
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Check that the tag is on main
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME is not on main. Releases are made from main."
+            exit 1
+          fi
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+
+      - name: Build the installer
+        shell: bash
+        run: npm run dist:win -- --publish never
+
+      - name: Write the release notes and keep the installer
+        shell: bash
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          installer="release/Cubex-Setup-$VERSION.exe"
+          if [ ! -f "$installer" ]; then
+            echo "::error::$installer was not built."
+            ls release
+            exit 1
+          fi
+          mkdir upload
+          cp "$installer" upload/
+          # The publish job reads GitHub's answers with this same script, so it takes the copy that was checked here.
+          cp scripts/release.mjs upload/
+          sha256sum "$installer" | cut -d ' ' -f 1 > upload/installer.sha256
+          node scripts/release.mjs notes "$VERSION" --installer "$installer" > upload/notes.md
+          # Two programs hashed the same file. If they disagree, nothing should be published.
+          grep -q "$(cat upload/installer.sha256)" upload/notes.md
+          echo "Installer: $(du -h "$installer" | cut -f 1), SHA-256 $(cat upload/installer.sha256)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ steps.release.outputs.version }}
+          path: upload/*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish the release
+    needs: build
+    # Only a pushed tag publishes. A run started by hand ends after the build, even when it was started on a tag.
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ needs.build.outputs.tag }}
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-${{ needs.build.outputs.version }}
+          path: files
+
+      # The release starts as a draft, so nobody is offered it until its installer has been checked. A release that
+      # already exists for this tag makes this step fail, and nothing is overwritten.
+      - name: Create the release as a draft
+        run: |
+          gh release create "$TAG" "files/Cubex-Setup-$VERSION.exe" \
+            --draft --verify-tag \
+            --title "Cubex $VERSION" \
+            --notes-file files/notes.md
+
+      # Cubex installs an update only when GitHub's record of the installer carries its SHA-256, and that record is
+      # made from the file GitHub received. Compare it with the file that was built before anyone is offered it.
+      - name: Check what GitHub recorded for the installer
+        run: |
+          expected="sha256:$(cat files/installer.sha256)"
+          recorded=""
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            recorded="$(gh api "repos/$GH_REPO/releases?per_page=20" | node files/release.mjs digest "$TAG" "Cubex-Setup-$VERSION.exe" || true)"
+            if [ -n "$recorded" ]; then break; fi
+            sleep 5
+          done
+          if [ "$recorded" != "$expected" ]; then
+            echo "::error::GitHub recorded '${recorded:-nothing}' for the installer, and the build made '$expected'. The release was left as a draft. See docs/RELEASING.md."
+            exit 1
+          fi
+          echo "GitHub recorded $recorded, which is the file that was built."
+
+      - name: Publish the release
+        run: gh release edit "$TAG" --draft=false --latest

@@ -53,11 +53,14 @@ store, and conversations stay in a local database.
 
 Cubex is built and tested on Windows 10 and 11 (x64).
 
-1. Download `Cubex-Setup-0.1.0.exe` from the [latest release](https://github.com/HeshamXOR/Cubex/releases/latest).
+1. Download `Cubex-Setup-<version>.exe` from the [latest release](https://github.com/HeshamXOR/Cubex/releases/latest).
 2. Run it. The installer lets you choose the folder, and adds Start menu and desktop shortcuts.
 3. If Windows SmartScreen shows "Windows protected your PC", select **More info**, then **Run anyway**. The
    installer is not code-signed yet, so Windows does not recognize the publisher. Compare the file with the
    SHA-256 checksum in the release notes if you want to be sure it is the one published here.
+
+From version 0.2.0 on, Cubex tells you when a newer version is out, shows what changed and installs it when you
+choose. Version 0.1.0 has no updater, so install a newer one by hand once. See [Updates](docs/UPDATES.md).
 
 macOS and Linux targets are configured in the repository but have not been tested. To try them, see
 [Build from source](#build-from-source).
@@ -115,6 +118,12 @@ Cubex ships 17 provider presets:
 - **Safe file edits.** An edit is rejected when the file changed since Cubex last read it. Paths outside the
   project folder, including through symlinks, are refused.
 - **Research subagents.** Cubex can hand a bounded, read-only subtask to a subagent and show what it did.
+- **Second opinions.** Add Claude Code, Antigravity, any command line program or a model from one of your providers as
+  another agent, and turn it on for a chat. Cubex can then talk a question through with it, for as many messages as you
+  allow, until the two agree or the limit is reached. You read and approve what is sent, and the conversation shows who
+  answered and whether they agreed. A program starts in an empty folder, so it sees only the message, unless you let
+  Claude Code read the project, and Claude Code is never allowed to change a file. [Other agents](docs/OTHER_AGENTS.md)
+  has the details.
 - **Queue messages.** Keep typing while Cubex works. Messages wait in a queue and send when the turn ends.
   `Esc` stops the running turn.
 - **Go back.** Restore code and conversation, only the conversation, or only the code, to any earlier message.
@@ -204,6 +213,9 @@ downloads.
   The taskbar button flashes and shows a badge until you are back.
 - Text and source files can be attached to a message. Unsupported formats say so instead of failing quietly.
 - Light and dark themes, with reduced motion respected.
+- Settings has a page for each topic, listed on the left, and the command palette finds a page by what is on it.
+- Cubex looks for a new release about every six hours, shows what changed, and downloads, checks and installs it
+  when you choose. You can skip a version, turn the checks off or check by hand. See [Updates](docs/UPDATES.md).
 
 ## Privacy and security
 
@@ -212,7 +224,13 @@ downloads.
   OS cannot encrypt, Cubex refuses to save a key and reads it from an environment variable instead.
 - **No telemetry.** Cubex sends nothing about you or your usage anywhere.
 - **Where requests go.** Only to the providers you configure, and wherever the tools you allow reach: web
-  search through DuckDuckGo, page fetches, MCP servers you add and Ollama downloads.
+  search through DuckDuckGo, page fetches, MCP servers you add and Ollama downloads. Cubex also looks at GitHub's
+  releases for a newer version about every six hours, with a request that carries only the app's name and version
+  and that you can switch off, and it sends messages to the other agents you turn on.
+- **Updates.** The installer comes from GitHub, and Cubex runs it only after its size and SHA-256 match what GitHub
+  recorded for the release, checked again right before it runs. The installer is not code-signed yet.
+- **Other agents.** The messages you approve go to the agent you chose, and most programs pass them on to their own
+  cloud service. A program runs in an empty folder, so it sees only the message. Local-only mode turns programs off.
 - **Local data.** Conversations, plans and command output are kept in a local SQLite database and files in
   `cubex-data`, inside Cubex's application data folder. They are not encrypted by Cubex, and command output can
   contain anything a command printed. Set `CUBEX_DATA_DIR` to keep the data somewhere else.
@@ -240,7 +258,7 @@ npm run dev
 |---|---|
 | `npm run dev` | Starts Cubex in development with hot reload |
 | `npm run dev:web` | Serves only the interface in a browser with demo data, for UI work without Electron |
-| `npm test` | Runs the Vitest suite, about 4,500 tests, with no credentials or GPU needed |
+| `npm test` | Runs the Vitest suite, more than 5,000 tests, with no credentials or GPU needed |
 | `npm run typecheck` | Strict TypeScript check of the main process and the interface |
 | `npm run lint` | Runs ESLint |
 | `npm run build` | Compiles main, preload and renderer into `out/` |
@@ -270,10 +288,11 @@ better-sqlite3 and Vitest. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) walks th
 
 ## Status
 
-Cubex is at version 0.1.0. About 4,500 automated tests cover it, but it is young. What to know before you
+Cubex is a 0.x project. More than 5,000 automated tests cover it, but it is young. What to know before you
 rely on it:
 
-- Windows x64 is the only platform that has been built and tested. The installer is unsigned.
+- Windows x64 is the only platform that has been built and tested. The installer is unsigned, and only a copy set up
+  by it can update itself.
 - Sessions work directly in your project folder. There are no isolated worktrees yet, so do not run two
   sessions that change the same files at the same time.
 - File restore points live in memory. After Cubex restarts you can still restore the conversation, but not the
@@ -285,6 +304,7 @@ rely on it:
 - Local benchmarks have an engine in `packages/local` but no interface in this release.
 - Desktop notifications, taskbar flashing and the badge are covered by unit tests, but have not been checked by
   hand in a packaged build.
+- Other agents were tested with stand-in programs, not yet with the real Claude Code and Antigravity.
 
 Found something wrong? Please [open an issue](https://github.com/HeshamXOR/Cubex/issues) with what you did and
 what you saw.
@@ -293,13 +313,11 @@ what you saw.
 
 Ideas that are being considered, with no dates attached:
 
-- A second opinion: ask another model to critique a plan or a diff, for a bounded number of rounds, and report
-  where the two disagree instead of forcing them to agree.
 - Git worktrees per session, so sessions can run side by side on one project.
 - Restore points that survive a restart.
 - Built-in prices for cloud models, so the spending caps work with every provider.
 - MCP over HTTP and SSE.
-- A benchmark page for local models, and signed installers for more platforms.
+- A benchmark page for local models, and signed installers.
 
 ## Documentation
 
@@ -312,7 +330,10 @@ Ideas that are being considered, with no dates attached:
 | [Local models](docs/LOCAL_MODELS.md) | Runtimes, downloads and the model catalog |
 | [Hardware analyzer](docs/HARDWARE_ANALYZER.md) | How hardware is detected and estimates are made |
 | [Benchmarks](docs/BENCHMARKS.md) | How the benchmark engine measures |
-| [Security](docs/SECURITY.md) | Credentials, sandboxing and the permission model |
+| [Security](docs/SECURITY.md) | Credentials, sandboxing, the permission model, updates and other agents |
+| [Updates](docs/UPDATES.md) | What the update window shows, what Cubex checks before it installs, and how to try it without publishing |
+| [Other agents](docs/OTHER_AGENTS.md) | Setting up Claude Code, Antigravity, a program or a model, what each can see, and what leaves your PC |
+| [Releasing](docs/RELEASING.md) | Cutting a release, what the workflow does, and what to do when it fails |
 | [Development](docs/DEVELOPMENT.md) | Setup, scripts and project layout |
 | [Testing](docs/TESTING.md) | The test suite and how to extend it |
 

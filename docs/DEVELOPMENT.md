@@ -26,6 +26,9 @@ npm run dist:win     # Windows installer (NSIS) in release/
 npm run dist:linux   # AppImage and deb
 npm run dist:mac     # dmg for x64 and arm64
 npm run dist         # installer for the current platform
+
+node scripts/release.mjs check v0.2.0   # is the repository ready to release this version?
+node scripts/dev-update-feed.mjs        # a release feed on this computer, to try updates (UPDATES.md)
 ```
 
 For a first run without any account, add the **Offline demo** provider from the Providers screen. It needs no key and exercises the streaming, retry and tool pipeline against simulated replies.
@@ -49,6 +52,7 @@ src/
 agent-skills-library/   bundled skills, read directly in development and from the packaged app
 docs/                   these documents
 resources/              app icons
+scripts/                release and update tooling (release.mjs, dev-update-feed.mjs) and manual QA scripts
 ```
 
 [ARCHITECTURE.md](ARCHITECTURE.md) explains how the layers fit together and where each kind of extension goes.
@@ -73,6 +77,7 @@ Cubex does not load `.env` files. Set these in the environment that starts the a
 | `CUBEX_DATA_DIR` | Use this folder instead of the default data folder. Point it at a scratch folder when testing so your real conversations and settings are untouched. |
 | `CUBEX_MOCK_LOCAL=1` | Register the mock local runtime (see [LOCAL_MODELS.md](LOCAL_MODELS.md)). |
 | `CUBEX_OPENAI_API_KEY`, `CUBEX_ANTHROPIC_API_KEY`, `CUBEX_GEMINI_API_KEY`, `CUBEX_OPENAI_COMPAT_API_KEY` | A key for a provider of that kind when no key is stored for it. Meant for development. A key saved in the app wins. |
+| `CUBEX_UPDATE_FEED` | Read releases from this address instead of GitHub, to try the update window without publishing. Only an `http` or `https` address on `127.0.0.1`, `localhost` or `[::1]` is taken, and anything else is ignored. See [UPDATES.md](UPDATES.md#trying-it-without-publishing). |
 
 The in-app secure store is the normal way to keep a key. See [SECURITY.md](SECURITY.md).
 
@@ -97,7 +102,7 @@ Four folders are scanned with `import.meta.glob`, so a feature adds a file and e
 
 1. Main-process handlers: a module in `src/main/ipcModules/` that exports `register(ctx)`.
 2. The contract: add the channel to `IPC` and the method to `CubexAPI` in `src/shared/ipc.ts`, and bridge it in `src/preload/index.ts`.
-3. UI: a settings section in `src/renderer/src/views/settings/sections/`, or a right-hand panel tab in `src/renderer/src/components/panelTabs/`.
+3. UI: a settings section in `src/renderer/src/views/settings/sections/`, which names the page of Settings it belongs to, or a right-hand panel tab in `src/renderer/src/components/panelTabs/`.
 4. Preview data: a file in `src/renderer/src/lib/seeds/` that exports `seed`, so the browser preview can show the feature.
 
 `src/main/ipcContract.test.ts` fails when a channel is missing a handler or a bridge, so step 2 cannot be forgotten silently.
@@ -123,7 +128,7 @@ npm run dist:win
 
 builds the Windows installer into `release/` as `Cubex-Setup-<version>.exe` (NSIS, per-user by default, with a choice of install folder). The installer is unsigned, so Windows SmartScreen shows a warning on first run: choose **More info**, then **Run anyway**.
 
-CI does not build installers. The Windows installer is built locally with `npm run dist:win` and attached to a GitHub release by hand. The Linux (AppImage, deb) and macOS (dmg) targets are configured and unverified.
+CI does not build installers. A release does: pushing a tag such as `v0.2.0` runs `.github/workflows/release.yml`, which builds the installer and publishes it as a GitHub release. [RELEASING.md](RELEASING.md) has the steps. The installer must be called `Cubex-Setup-<version>.exe`, because that is the name the updater looks for ([UPDATES.md](UPDATES.md)). The Linux (AppImage, deb) and macOS (dmg) targets are configured and unverified.
 
 Native modules are unpacked from the app archive (`asarUnpack: **/*.node`). The bundled skills library is packaged from `agent-skills-library/` and read from the archive at run time.
 
