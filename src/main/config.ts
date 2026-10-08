@@ -3,6 +3,8 @@ import { DEFAULT_TIMEOUT_CONFIG } from '@core/types'
 import { configPath } from './paths'
 import { DEFAULT_SETTINGS, SETTINGS_SCHEMA_VERSION, type AppSettings } from '@shared/settings'
 import { normalizeAiPolicy } from '@shared/contextPolicy'
+import { normalizePeerSettings } from '@shared/peers'
+import { normalizeUpdateSettings } from '@shared/updates'
 
 /**
  * App settings persisted as a plain JSON file (contains NO secrets — those live
@@ -23,9 +25,9 @@ function deepMerge<T>(base: T, patch: Partial<T>): T {
   return out as T
 }
 
-/** Compaction and budget keys always leave here in their canonical shape (one auto switch, valid caps). */
+/** Compaction and budget keys, the other agents and the update choices always leave here in their canonical shape (one auto switch, valid caps, only agents that pass the checks, a skipped version that is a version). */
 function canonical(settings: AppSettings): AppSettings {
-  return { ...settings, ai: normalizeAiPolicy(settings.ai) }
+  return { ...settings, ai: normalizeAiPolicy(settings.ai), peers: normalizePeerSettings(settings.peers), updates: normalizeUpdateSettings(settings.updates) }
 }
 
 /**

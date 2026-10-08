@@ -144,4 +144,4 @@ function BudgetSettingsBody(): JSX.Element | null {
   )
 }
 
-export const section: SettingsSection = { id: 'budget', title: 'Budget', order: 210, Component: BudgetSettingsBody }
+export const section: SettingsSection = { id: 'budget', title: 'Budget', page: 'context', order: 210, Component: BudgetSettingsBody }

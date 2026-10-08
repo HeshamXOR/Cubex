@@ -9,7 +9,7 @@ export const WEB_TOOLS: ReadonlySet<string> = new Set(['web_fetch', 'web_search'
 const KIND: Record<string, string> = {
   read_file: 'Read', write_file: 'Write', edit_file: 'Edit', multi_edit: 'Edit', apply_patch: 'Patch',
   remove_file: 'Remove', delete_file: 'Remove', list_files: 'List', search_files: 'Search', glob_files: 'Find',
-  run_command: 'Run', web_fetch: 'Fetch', web_search: 'Web', skill: 'Skill', delegate_to_subagent: 'Subagent',
+  run_command: 'Run', web_fetch: 'Fetch', web_search: 'Web', skill: 'Skill', delegate_to_subagent: 'Subagent', consult_agent: 'Ask',
   exit_plan_mode: 'Plan', read_plan: 'Read plan', ask_user_question: 'Question', read_command_output: 'Read output'
 }
 

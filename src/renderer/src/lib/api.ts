@@ -1,4 +1,5 @@
 import type { ChatEvent, CubexAPI, PullProgress } from '../../../shared/ipc'
+import type { UpdateState } from '../../../shared/updates'
 import { seededApi } from './seeds'
 
 /**
@@ -21,6 +22,7 @@ function browserStub(): CubexAPI {
   const empty = async (): Promise<never[]> => []
   const noop = async (): Promise<void> => undefined
   const unavailable = { ok: false, message: 'Not available in browser preview (run the Electron app).' }
+  const idleUpdates: UpdateState = { currentVersion: '0.0.0', canInstall: false, check: { status: 'idle' } }
   return {
     listProviders: empty,
     saveProvider: async (cfg) => cfg,
@@ -135,7 +137,17 @@ function browserStub(): CubexAPI {
     appInfo: async () => ({ version: '0.0.0', packaged: false, electron: '', chrome: '', node: '', platform: 'browser', arch: '', osRelease: '', dataDir: '', logsDir: '' }),
     openAppFolder: async () => unavailable.message,
     saveMcpSecret: async () => ({ ok: false, message: unavailable.message }),
-    forgetMcpSecrets: noop
+    forgetMcpSecrets: noop,
+    getPeersStatus: async () => ({ peers: [], presets: [], localOnly: false }),
+    testPeer: async () => ({ ok: false, durationMs: 0, error: unavailable.message }),
+    getUpdateState: async () => idleUpdates,
+    checkForUpdates: async () => ({ ...idleUpdates, check: { status: 'failed' as const, error: unavailable.message } }),
+    downloadUpdate: async () => idleUpdates,
+    cancelUpdateDownload: async () => idleUpdates,
+    installUpdate: async () => ({ ok: false as const, reason: 'failed' as const, message: unavailable.message }),
+    skipUpdate: async () => idleUpdates,
+    openUpdatePage: noop,
+    onUpdateState: () => () => undefined
   }
 }
 
@@ -256,17 +268,7 @@ const isSeed = import.meta.env.DEV && typeof location !== 'undefined' && /[?&]se
 export const isBrowserPreview = !window.cubex
 export const api: CubexAPI = window.cubex ?? (isSeed ? seededStub() : browserStub())
 
-export function formatBytes(bytes: number | undefined): string {
-  if (bytes === undefined || bytes <= 0) return '—'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let v = bytes
-  let i = 0
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024
-    i++
-  }
-  return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${units[i]}`
-}
+export { formatBytes } from './format'
 
 export function formatCost(n: number, currency = 'USD'): string {
   const sym = currency === 'USD' ? '$' : ''

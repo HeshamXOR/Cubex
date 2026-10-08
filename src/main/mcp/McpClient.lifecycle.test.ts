@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { mkdtempSync, readFileSync, existsSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { McpClient, type McpServerSpec } from './McpClient'
+import { McpClient, setMcpClientVersion, type McpServerSpec } from './McpClient'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const fixture = join(here, '__fixtures__', 'richServer.mjs')
@@ -57,6 +57,17 @@ describe('handshake', () => {
     expect(log[0]).toMatchObject({ method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'Cubex' } } })
     expect(log[1]).toMatchObject({ method: 'notifications/initialized' })
     expect(log[2]).toMatchObject({ method: 'tools/list' })
+  })
+
+  it('tells the server which version of Cubex is running', async () => {
+    const logFile = join(tmp, 'h-version.log')
+    setMcpClientVersion('9.8.7')
+    try {
+      await make(spec({ logFile })).connect()
+      expect(readLog(logFile)[0]).toMatchObject({ method: 'initialize', params: { clientInfo: { name: 'Cubex', version: '9.8.7' } } })
+    } finally {
+      setMcpClientVersion('0.0.0')
+    }
   })
 
   it('accepts an older protocol version the server negotiates down to', async () => {

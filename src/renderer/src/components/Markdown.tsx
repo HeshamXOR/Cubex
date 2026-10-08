@@ -13,6 +13,8 @@ import './markdown.css'
 
 /** True for the block of an answer that is still being written. */
 const LiveContext = createContext(false)
+/** Whether inline code that names a file of the open project opens it. Text that is not about this project turns it off. */
+const PathLinksContext = createContext(true)
 
 /** A live block that mounts already this long was restored, not typed, so it should not animate. */
 const RESTORED_BLOCK = 160
@@ -88,8 +90,9 @@ const REMARK = [remarkGfm]
  */
 function InlineCode({ className, children }: { className?: string; children?: ReactNode }): JSX.Element {
   const live = useContext(LiveContext)
+  const paths = useContext(PathLinksContext)
   const code = <code className={className}>{children}</code>
-  return !live && typeof children === 'string' ? <PathLink text={children}>{code}</PathLink> : code
+  return paths && !live && typeof children === 'string' ? <PathLink text={children}>{code}</PathLink> : code
 }
 
 const COMPONENTS = {
@@ -143,7 +146,7 @@ const HAS_REFERENCE_DEFINITIONS = /^ {0,3}\[[^\]\n]+\]:\s*\S/m
  * repaired so every prefix renders like the finished answer: no raw pipes,
  * no half-open fences, no cursor. Only the block being written re-renders.
  */
-export function Markdown({ text, streaming = false }: { text: string; streaming?: boolean }): JSX.Element {
+export function Markdown({ text, streaming = false, paths = true }: { text: string; streaming?: boolean; /** Inline code that names a file of the open project links to it. Off for text about something else, such as release notes. */ paths?: boolean }): JSX.Element {
   // Hide any tool-call XML the model streamed as text (fs_read/<invoke> etc.);
   // the harness executes those calls separately — the raw markup is never shown.
   const clean = useMemo(() => stripXmlToolMarkup(text), [text])
@@ -155,10 +158,10 @@ export function Markdown({ text, streaming = false }: { text: string; streaming?
     [source]
   )
   return (
-    <>
+    <PathLinksContext.Provider value={paths}>
       {blocks.map((block, index) => (
         <MarkdownBlock key={index} source={block} live={!settled && index === blocks.length - 1} />
       ))}
-    </>
+    </PathLinksContext.Provider>
   )
 }

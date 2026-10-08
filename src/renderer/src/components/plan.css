@@ -68,7 +68,7 @@
 .plan-review__markdown li > ol { margin-bottom: 8px; }
 .plan-review__markdown .contains-task-list { padding-left: 0; list-style: none; }
 .plan-review__markdown .task-list-item { padding-left: 0; }
-.plan-review__markdown .task-list-item input { accent-color: var(--color-brand); margin-right: 8px; }
+.plan-review__markdown .task-list-item input { accent-color: var(--action-bg); margin-right: 8px; }
 .plan-review__markdown code { font: 12.5px var(--mono); padding: 1px 5px; border-radius: 5px; background: var(--code-chip); color: var(--code-chip-fg); }
 .plan-review__markdown pre { max-width: 100%; overflow: auto; margin: 14px 0; }
 .plan-review__markdown .codeblock code { border: 0; padding: 0; background: transparent; border-radius: 0; }

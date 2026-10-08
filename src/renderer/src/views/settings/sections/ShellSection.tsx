@@ -104,4 +104,4 @@ function ShellPicker(): JSX.Element {
   )
 }
 
-export const section: SettingsSection = { id: 'shell', title: 'Shell', order: 100, Component: ShellPicker }
+export const section: SettingsSection = { id: 'shell', title: 'Shell', page: 'tools', order: 100, Component: ShellPicker }

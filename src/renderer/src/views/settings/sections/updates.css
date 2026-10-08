@@ -1,0 +1,30 @@
+/* The Updates settings group: the version, the last look, the release on offer and the switch for automatic checks. */
+/* The group is already a card, so the first row has no line above it and the last has none below: the next block brings its own. */
+.updset__facts { margin: 0; padding: 0; }
+.updset__row { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; align-items: center; min-height: 40px; padding: 5px 0; font-size: 12.5px; }
+.updset__row + .updset__row { border-top: 1px solid var(--color-border); }
+.updset__row dt { color: var(--color-foreground); }
+.updset__row dd { margin: 0; min-width: 0; font-size: 12.5px; color: var(--color-foreground-body); overflow-wrap: anywhere; }
+.updset__status { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.updset__status > span { min-width: 0; }
+.updset__status .btn { flex: none; }
+.updset__link {
+  padding: 0;
+  border-radius: 3px;
+  color: var(--color-foreground);
+  text-decoration: underline;
+  text-decoration-color: var(--color-border-hover);
+  text-underline-offset: 3px;
+}
+.updset__link:hover { text-decoration-color: currentColor; }
+/* What sits between the facts and the switch keeps 12px clear above and below, so the switch's own line never touches it. */
+.updset .callout { margin: 12px 0; }
+.updset .setgroup__note { margin: 12px 0; }
+/* The release on offer, wide: the same card as the sidebar, with room for its buttons beside the words. */
+.upd--page { margin: 12px 0; padding: 14px 16px 12px; font-size: 12.5px; }
+.upd--page .upd__title { font-size: 13.5px; }
+.upd--page .upd__detail + .upd__detail { margin-top: 4px; }
+@container settings (max-width: 520px) {
+  .updset__row { grid-template-columns: minmax(0, 1fr); gap: 2px; align-items: start; }
+  .updset__status { flex-wrap: wrap; justify-content: flex-start; }
+}

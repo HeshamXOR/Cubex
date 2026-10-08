@@ -104,4 +104,4 @@ function TimeoutSettings(): JSX.Element | null {
   )
 }
 
-export const section: SettingsSection = { id: 'timeouts', title: 'Timeouts', order: 90, Component: TimeoutSettings }
+export const section: SettingsSection = { id: 'timeouts', title: 'Timeouts', page: 'models', order: 90, Component: TimeoutSettings }

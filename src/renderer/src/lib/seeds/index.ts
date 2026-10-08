@@ -9,6 +9,12 @@ import type { CubexAPI } from '../../../../shared/ipc'
  * method when it needs shared sample data.
  */
 export interface PreviewSeed {
+  /**
+   * Seeds apply in ascending order (default 0, ties by file name), so a later one wins where two replace the same API
+   * method. A seed whose flag has to win over the defaults that every other seed provides, such as the saved settings,
+   * sets a higher number.
+   */
+  order?: number
   /** Store state for the URL flags, as plain data. Runs once, after the first loads. */
   state?: (flags: URLSearchParams) => Record<string, unknown> | undefined
   /** Preview-only replacements for API methods. They win over the defaults. */
@@ -22,7 +28,7 @@ const modules: Record<string, { seed?: PreviewSeed }> = import.meta.env.DEV
   : {}
 
 const seeds: PreviewSeed[] = Object.entries(modules)
-  .sort(([a], [b]) => a.localeCompare(b))
+  .sort(([a, x], [b, y]) => (x.seed?.order ?? 0) - (y.seed?.order ?? 0) || a.localeCompare(b))
   .map(([, mod]) => mod.seed)
   .filter((seed): seed is PreviewSeed => !!seed)
 

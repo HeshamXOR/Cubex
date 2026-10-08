@@ -29,6 +29,7 @@ import { useSessionStates, type SessionState } from '../lib/useSessionStates'
 import { CubexMark } from '../theme/Logo'
 import type { ConversationSummary } from '../../../shared/ipc'
 import { InlineRename } from './InlineRename'
+import { UpdateLink, UpdateNotice } from './UpdateNotice'
 import { UsageButton } from './UsageButton'
 
 /** Sessions shown under a project before "Show more". */
@@ -316,7 +317,10 @@ export function Sidebar(): JSX.Element {
         )}
       </div>
 
+      <UpdateNotice />
+
       <div className="side-foot">
+        <UpdateLink />
         <UsageButton />
         <button className={`side-link ${view === 'providers' ? 'on' : ''}`} onClick={() => setView('providers')} aria-current={view === 'providers' ? 'page' : undefined}>
           <Cloud size={15} />

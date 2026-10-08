@@ -10,6 +10,7 @@ import {
   History,
   ImageIcon,
   Maximize2,
+  MessagesSquare,
   Paperclip,
   Plus,
   Shield,
@@ -27,6 +28,7 @@ import { api } from '../../lib/api'
 import { registerComposer } from '../../lib/composerFocus'
 import { PLACEHOLDERS, situationOf } from '../../lib/composerLayout'
 import { plural } from '../../lib/format'
+import { openSettingsGroup } from '../../lib/settingsLink'
 import { matchesShortcut } from '../../lib/shortcuts'
 import { useDensity, useFittedText } from '../../lib/useFit'
 import { useMenuKeys } from '../../lib/useMenuKeys'
@@ -86,6 +88,8 @@ export function Composer({ modelOpen, setModelOpen }: ComposerProps): JSX.Elemen
   const cancel = useStore((s) => s.cancel)
   const longContext = useStore((s) => s.longContext)
   const toggleLongContext = useStore((s) => s.toggleLongContext)
+  const chatPeers = useStore((s) => s.peers)
+  const togglePeer = useStore((s) => s.togglePeer)
   const permissionMode = useStore((s) => s.permissionMode)
   const setPermissionMode = useStore((s) => s.setPermissionMode)
   const cyclePermissionMode = useStore((s) => s.cyclePermissionMode)
@@ -115,6 +119,11 @@ export function Composer({ modelOpen, setModelOpen }: ComposerProps): JSX.Elemen
   const restoring = useRestore((s) => s.restoring)
 
   const availableProviders = providers.filter((provider) => selectableProvider(provider, settings))
+  // Other agents the model may ask: those that are on in Settings, and the ones this chat turned on among them.
+  const agentList = (settings?.peers?.list ?? []).filter((entry) => entry.enabled)
+  const programsOff = !!settings?.privacy.localOnly
+  const agentsOn = agentList.filter((entry) => chatPeers.includes(entry.id) && !(programsOff && entry.kind === 'cli'))
+  const agentsLabel = agentsOn.length === 1 ? agentsOn[0]!.name : agentsOn.length === 2 ? `${agentsOn[0]!.name}, ${agentsOn[1]!.name}` : `${agentsOn.length} agents`
   const activeModelInfo = activeProviderId ? models[activeProviderId]?.find((m) => m.id === activeModel) : undefined
   const activeKind = providers.find((p) => p.id === activeProviderId)?.kind
   const effortModel = activeModelInfo ?? { id: activeModel ?? '' }
@@ -487,6 +496,30 @@ export function Composer({ modelOpen, setModelOpen }: ComposerProps): JSX.Elemen
                     </>
                   )}
                   <div className="menu__sep" />
+                  <div className="menu__label">Other agents</div>
+                  {agentList.length === 0 ? (
+                    <button className="menu__item" role="menuitem" onClick={() => { setPlusOpen(false); openSettingsGroup('agents') }}>
+                      <MessagesSquare size={15} />
+                      <span>
+                        <span className="menu__t">Set up other agents</span>
+                        <span className="menu__s">Let the model ask Claude Code or another model.</span>
+                      </span>
+                    </button>
+                  ) : agentList.map((entry) => {
+                    const blocked = programsOff && entry.kind === 'cli'
+                    const on = chatPeers.includes(entry.id) && !blocked
+                    return (
+                      <button key={entry.id} className="menu__item menu__item--toggle" role="menuitemcheckbox" aria-checked={on} aria-disabled={blocked || undefined} onClick={() => { if (!blocked) togglePeer(entry.id) }}>
+                        <MessagesSquare size={15} />
+                        <span>
+                          <span className="menu__t">{entry.name}</span>
+                          <span className="menu__s">{blocked ? 'Off in local-only mode' : entry.kind === 'cli' ? 'Program on this computer' : 'Model'}</span>
+                        </span>
+                        <span className={`switchdot ${on ? 'on' : ''}`} />
+                      </button>
+                    )
+                  })}
+                  <div className="menu__sep" />
                   <div className="menu__label">Prompt history</div>
                   {history.count === 0 ? (
                     <div className="menu__model-note">Prompts you send are saved here for each project. Press Up in the composer to bring one back.</div>
@@ -540,6 +573,12 @@ export function Composer({ modelOpen, setModelOpen }: ComposerProps): JSX.Elemen
               </>
             )}
           </div>
+
+          {agentsOn.length > 0 && (
+            <button className="cb" onClick={() => setPlusOpen(true)} title="Other agents the model may ask in this chat. Click to change." aria-label={`Other agents in this chat: ${agentsLabel}. Change`}>
+              <MessagesSquare size={14} /><span className="cb__label">{agentsLabel}</span>
+            </button>
+          )}
 
           {!workspace && (
             <button className="cb" onClick={() => void pickWorkspace()} title="Choose a project folder for Cubex to read and edit">

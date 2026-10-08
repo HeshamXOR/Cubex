@@ -32,6 +32,10 @@
 .toolrow__diff { display: inline-flex; align-items: center; gap: 6px; flex: none; margin-left: auto; font: 12px/1 var(--mono); font-variant-numeric: tabular-nums; }
 .diff-add { color: var(--color-diff-added-foreground); }
 .diff-del { color: var(--color-diff-removed-foreground); }
+.toolrow__peer { display: inline-flex; align-items: center; gap: 10px; flex: none; margin-left: auto; font-size: 12.5px; color: var(--color-foreground-subtlest); }
+.toolrow__verdict { display: inline-flex; align-items: center; gap: 4px; color: var(--color-foreground-subtle); }
+/* Text for assistive technology sits between the two, so they are siblings but not neighbors. */
+.toolrow__peer ~ .toolrow__chev { margin-left: 8px; }
 .toolrow__phase { flex: none; margin-left: auto; font-size: 12.5px; color: var(--color-foreground-subtlest); }
 .toolrow__phase--error { color: var(--color-destructive); }
 .toolrow__phase--waiting { color: var(--color-warning); }
@@ -69,6 +73,33 @@
   color: var(--color-foreground-subtle);
 }
 .toolrow__output:hover { background: var(--color-hover); color: var(--color-foreground); }
+
+/* What another agent said, as the prose it is. The well matches the output of a command so the two read as one family. */
+.toolrow__reply {
+  max-height: 400px;
+  margin: 2px 0 8px 24px;
+  padding: 4px 14px 12px;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--well);
+  font-size: 13px;
+}
+
+/* The two halves of a consultation: what was sent, quietly, and what came back. */
+.toolrow__label { margin: 8px 0 3px; font-size: 12px; color: var(--color-foreground-subtlest); }
+.toolrow__quote {
+  max-height: 140px;
+  margin: 0 0 4px;
+  padding: 2px 10px;
+  overflow: auto;
+  border-left: 2px solid var(--color-border);
+  color: var(--color-foreground-subtle);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 
 /* An inline diff inside a row, for edits that have no review panel behind them. */
 .toolrow__diffview {

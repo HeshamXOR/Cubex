@@ -38,6 +38,10 @@ import { loadSkills, skillsCatalog, createSkillTool } from './skills'
 import { invokeSkill } from './skillInvocation'
 import { SKILL_SOURCE_LABEL, skillTurnText } from '@shared/skillInvocation'
 import { loadAgentProfiles } from './agents'
+import { CONSULT_TOOL, cleanPeerIds, enabledPeers, type ModelPeer, type PeerConfig } from '@shared/peers'
+import { consultApprovalText, consultDisplay, consultPeerId, consultRisk, consultTitle, createConsultTool, type ModelAsk } from './peers/consultTool'
+import { PEER_TIMEOUT_MS, type PeerRun } from './peers/peerRunner'
+import { PeerTranscripts } from './peers/transcript'
 import { runHooks } from './hooks'
 import { McpManager } from './mcp/McpManager'
 import { enabledMcpSpecs } from './mcp/specs'
@@ -173,13 +177,14 @@ function toWireError(error: NormalizedAIError): NormalizedAIError {
 }
 
 /** The request settings a turn carries over to the next turn the main process starts for the person. */
-type TurnSettings = Pick<ChatStartRequest, 'policy' | 'systemPrompt' | 'subagentEnabled' | 'fileToolsEnabled' | 'permissionMode' | 'longContext'>
+type TurnSettings = Pick<ChatStartRequest, 'policy' | 'systemPrompt' | 'subagentEnabled' | 'fileToolsEnabled' | 'permissionMode' | 'longContext' | 'peers'>
 
 /** What the renderer may change when it sends review comments: the model and the permission mode shown in its composer. */
 export interface ReviewSendOverrides {
   target?: RoutingTarget
   permissionMode?: PermissionMode
   longContext?: boolean
+  peers?: string[]
   systemPrompt?: string
 }
 
@@ -199,6 +204,10 @@ export class ChatService {
   private disposed = false
   /** Hosts the user approved for web_fetch, per stream (turn). */
   private readonly approvedFetchHosts = new Map<string, Set<string>>()
+  /** Other agents the user approved the model talking to, per stream (turn): the first message asks, the rest of the talk does not. */
+  private readonly approvedPeers = new Map<string, Set<string>>()
+  /** What each task has said to each other agent, so a later message continues the talk. */
+  private readonly peerTranscripts = new PeerTranscripts()
   /** Tasks whose older turns are being summarized: the /compact command and the automatic trigger. */
   private readonly compaction: CompactionCoordinator
   /** `ai.budget`: what the turn, the task and the day have cost, checked before every model request. */
@@ -292,7 +301,7 @@ export class ChatService {
     this.compaction.rememberPolicy(req.conversationId, req.policy)
     this.lastTurn.set(req.conversationId, {
       policy: req.policy, systemPrompt: req.systemPrompt, subagentEnabled: req.subagentEnabled,
-      fileToolsEnabled: req.fileToolsEnabled, permissionMode: req.permissionMode, longContext: req.longContext
+      fileToolsEnabled: req.fileToolsEnabled, permissionMode: req.permissionMode, longContext: req.longContext, peers: req.peers
     })
     // How much one reply may write is settled here, so every request of the turn carries a number.
     const policy = this.withOutputLimits(req.policy)
@@ -377,6 +386,19 @@ export class ChatService {
           onResponse: (response) => this.captureUsage({ type: 'completed', response }, req.conversationId)
         })
         tools.set(sub.definition.name, sub)
+      }
+      // Other agents the chat turned on: one tool, offered only when there is someone to ask.
+      const peers = this.turnPeers(req.peers)
+      if (peers.length > 0) {
+        const consult = createConsultTool({
+          conversationId: req.conversationId,
+          ...(workspace ? { workspace } : {}),
+          peers,
+          maxRounds: getSettings().peers?.maxRounds ?? 3,
+          transcripts: this.peerTranscripts,
+          askModel: (peer, ask, signal) => this.askModelPeer(peer, ask, req.conversationId, signal)
+        })
+        tools.set(consult.definition.name, consult)
       }
       // Read once per turn: the shell the model is told about is the one run_command uses, and a
       // changed setting applies from the next turn.
@@ -538,6 +560,11 @@ export class ChatService {
       }
     }
     return out
+  }
+
+  /** How many turns are generating right now, in any task. Restarting Cubex would stop them. */
+  get runningTurns(): number {
+    return this.active.size
   }
 
   /** True while any stream of this task is generating. */
@@ -1083,6 +1110,7 @@ export class ChatService {
       this.active.delete(streamId)
       this.eventStreams.delete(streamId)
       this.approvedFetchHosts.delete(streamId)
+      this.approvedPeers.delete(streamId)
       this.budget.endTurn(conversationId)
       // The turn is over, however it ended. Stop hooks only observe.
       void runHooks(getSettings().hooks, { event: 'Stop', cwd: workspace }, workspace)
@@ -1099,6 +1127,71 @@ export class ChatService {
   private fetchNeedsApproval(streamId: string, call: ToolCall): boolean {
     const host = call.name === 'web_fetch' ? fetchHost(call.input) : undefined
     return !!host && !PREAPPROVED_FETCH_HOSTS.includes(host) && !this.approvedFetchHosts.get(streamId)?.has(host)
+  }
+
+  /**
+   * A message to another agent leaves for a program or a service, so the first one to each agent in a turn stops for the
+   * person, with the whole message in front of them. They are not asked again for the rest of that talk in the same turn.
+   * A call to an agent that is not offered in this turn sends nothing, so it is not asked about either.
+   */
+  private consultNeedsApproval(streamId: string, tools: Map<string, ExecutableTool>, call: ToolCall): boolean {
+    if (call.name !== CONSULT_TOOL) return false
+    const id = consultPeerId(call.input)
+    const schema = tools.get(CONSULT_TOOL)?.definition.inputSchema as { properties?: { agent?: { enum?: unknown } } } | undefined
+    const offered = schema?.properties?.agent?.enum
+    return id !== undefined && Array.isArray(offered) && offered.includes(id) && !this.approvedPeers.get(streamId)?.has(id)
+  }
+
+  private approvePeer(streamId: string, call: ToolCall): void {
+    const id = consultPeerId(call.input)
+    if (!id) return
+    const approved = this.approvedPeers.get(streamId) ?? new Set<string>()
+    approved.add(id)
+    this.approvedPeers.set(streamId, approved)
+  }
+
+  /**
+   * The agents a turn may ask: the ones the chat turned on that exist and are on in settings. Programs are not offered in
+   * local-only mode, since nearly all of them send the message to a cloud service; a model follows the rule for providers.
+   */
+  private turnPeers(requested: readonly string[] | undefined): PeerConfig[] {
+    const settings = getSettings()
+    return enabledPeers(settings.peers, cleanPeerIds(requested)).filter((peer) => peer.kind === 'model' || !settings.privacy.localOnly)
+  }
+
+  /**
+   * One question to a model that is another agent in a talk: a request of its own with no tools and no view of the
+   * project, billed and counted like any other request. A failure is a result, so the model can say so to the person.
+   */
+  async askModelPeer(peer: ModelPeer, ask: ModelAsk, conversationId: string | undefined, signal?: AbortSignal): Promise<PeerRun> {
+    const started = Date.now()
+    const failed = (error: string, hint?: string): PeerRun => ({ ok: false, reply: '', error, ...(hint ? { hint } : {}), durationMs: Date.now() - started })
+    const target: RoutingTarget = { providerId: peer.providerId, model: peer.model }
+    if (conversationId && !this.isLocal(target)) {
+      const blocked = this.budget.blocker(conversationId)
+      if (blocked) return failed(blocked)
+    }
+    const messages: AIMessage[] = [
+      ...ask.history.flatMap((entry) => [userMessage(entry.message), assistantMessage(entry.reply)]),
+      userMessage(ask.message)
+    ]
+    const controller = new AbortController()
+    const onAbort = (): void => controller.abort(signal?.reason)
+    signal?.addEventListener('abort', onAbort, { once: true })
+    const timer = setTimeout(() => controller.abort(new Error('The model did not answer in time.')), PEER_TIMEOUT_MS)
+    try {
+      const response = await this.gateway.send({ model: peer.model, system: ask.system, messages }, this.withOutputLimits(this.policyFor(target)), { signal: controller.signal })
+      this.captureUsage({ type: 'completed', response }, conversationId)
+      const text = response.text.trim()
+      return text ? { ok: true, reply: text, durationMs: Date.now() - started } : failed(`${peer.name} returned no text.`)
+    } catch (error) {
+      if (signal?.aborted) return failed('Cancelled.')
+      if (controller.signal.aborted) return failed(`${peer.name} did not answer in time.`)
+      return failed(error instanceof Error ? error.message : String(error), 'Check the provider in Settings, then try again.')
+    } finally {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+    }
   }
 
   /** Whether this call may run beside the read-only calls around it: never one that could prompt, mutate or is special. */
@@ -1137,6 +1230,7 @@ export class ChatService {
     const fromText = call.id.startsWith(XML_CALL_PREFIX)
     const host = call.name === 'web_fetch' ? fetchHost(call.input) : undefined
     const fetchNeedsApproval = this.fetchNeedsApproval(streamId, call)
+    const consultNeedsApproval = this.consultNeedsApproval(streamId, tools, call)
     const mutating = tool.defaultPermission === 'ask' && !readOnlyExec
 
     // Plan mode: reads/searches/read-only probes are fine, but nothing may mutate.
@@ -1157,7 +1251,7 @@ export class ChatService {
     // Ask gate. Auto-approve when: bypass (everything), acceptEdits (edits outside
     // protected paths), or a confined read-only probe. Calls the harness recovered
     // from free text are never auto-approved: quoted examples are not intent.
-    const askable = (tool.defaultPermission === 'ask' && !readOnlyExec) || fetchNeedsApproval
+    const askable = (tool.defaultPermission === 'ask' && !readOnlyExec) || fetchNeedsApproval || consultNeedsApproval
     if (askable) {
       const auto = !fromText && !(protectedTarget && mode !== 'bypass') &&
         (mode === 'bypass' || (isEdit && mode === 'acceptEdits'))
@@ -1167,7 +1261,8 @@ export class ChatService {
         const risks = [
           protectedTarget && 'Protected path: changes here can alter how git, Cubex or other tools execute.',
           fromText && 'This call was parsed from model text, not a native tool call.',
-          hostRisk
+          hostRisk,
+          consultNeedsApproval && consultRisk(call.input, getSettings().peers?.list ?? [], workspace)
         ].filter((risk): risk is string => typeof risk === 'string')
         // A saved "Always allow" rule approves silently, but never a call that carries risks. The
         // outbound-host notice is the thing a host rule approves, so it alone does not block one.
@@ -1186,6 +1281,7 @@ export class ChatService {
           approved.add(host)
           this.approvedFetchHosts.set(streamId, approved)
         }
+        if (consultNeedsApproval) this.approvePeer(streamId, call)
       }
     }
 
@@ -1215,6 +1311,8 @@ export class ChatService {
       const files = result.isError ? undefined : parseFileActivities(result.metadata)
       // New compiler errors an edit introduced, attached by the file tools as metadata.
       const diagnostics = result.isError ? undefined : sanitizeDiagnosticsSummary(result.metadata?.diagnostics)
+      // A finished consultation shows who answered and what they said, not the wrapper the model gets.
+      const consulted = call.name === CONSULT_TOOL && !result.isError ? consultDisplay(result.metadata) : undefined
       const outputId = result.metadata?.commandOutputId
       let output: ReturnType<CommandOutputStore['get']> = null
       if (call.name === 'run_command' && conversationId && typeof outputId === 'string') {
@@ -1229,7 +1327,8 @@ export class ChatService {
           name: call.name,
           phase: result.isError ? 'error' : 'done',
           title,
-          detail: toolDisplayDetail(text, !!output, !!result.isError),
+          detail: consulted ? consulted.reply.slice(0, 4000) : toolDisplayDetail(text, !!output, !!result.isError),
+          ...(consulted ? { peer: consulted.peer } : {}),
           ...(diff ? { added: diff.added, removed: diff.removed } : {}),
           ...(diffBody ? { diff: diffBody } : {}),
           ...(files ? { files } : {}),
@@ -1413,6 +1512,7 @@ export class ChatService {
       fileToolsEnabled: last?.fileToolsEnabled ?? true,
       subagentEnabled: last?.subagentEnabled ?? true,
       longContext: overrides.longContext ?? last?.longContext,
+      peers: overrides.peers ?? last?.peers,
       systemPrompt: overrides.systemPrompt ?? last?.systemPrompt
     }
   }
@@ -1572,6 +1672,7 @@ export class ChatService {
     this.compaction.forget(conversationId)
     this.budget.forget(conversationId)
     this.lastTurn.delete(conversationId)
+    this.peerTranscripts.forgetConversation(conversationId)
     this.forgotten.add(conversationId)
     for (const [label, drop] of [
       ['plans', () => this.plans.deleteConversation(conversationId)],
@@ -1638,6 +1739,8 @@ function describeToolCall(call: ToolCall): string {
       return `Search "${typeof input.query === 'string' ? input.query : ''}"`
     case 'delegate_to_subagent':
       return `Subagent · ${typeof input.task === 'string' ? input.task.slice(0, 100) : 'Research'}`
+    case CONSULT_TOOL:
+      return consultTitle(call.input, getSettings().peers?.list ?? [])
     case 'skill':
       return `Skill: ${typeof input.name === 'string' ? input.name : ''}`.trim()
     case 'git_status':
@@ -1691,6 +1794,9 @@ function permissionDetail(call: ToolCall): string {
   } else if (call.name === 'apply_patch' && typeof input.patch === 'string') {
     // The reviewer reads the patch itself, with real line breaks, not a JSON-escaped string.
     text = input.patch
+  } else if (call.name === CONSULT_TOOL) {
+    // What is approved is what is sent: the whole message, to the agent named, with real line breaks.
+    text = consultApprovalText(call.input, getSettings().peers?.list ?? [])
   } else {
     try { text = JSON.stringify(input, null, 2) ?? '' } catch { text = String(input) }
   }

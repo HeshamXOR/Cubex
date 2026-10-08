@@ -18,6 +18,8 @@ import type {
 import type { AppSettings } from './settings'
 import type { HookTestRequest, HookTestResult, McpSecretForgetRequest, McpSecretSaveRequest, McpSecretSaveResult, McpServerStatus, McpTestRequest, McpTestResult } from './policy'
 import type { ReadFileOptions, WorkspaceBrowseOptions, WorkspaceFileResult, WorkspaceListing, WorkspacePathStat } from './workspaceFile'
+import type { PeerActivity, PeerConfig, PeerTestResult, PeersOverview } from './peers'
+import type { UpdateInstallRequest, UpdateInstallResult, UpdateState } from './updates'
 
 // ---------------------------------------------------------------------------
 // Persisted domain objects (stored in SQLite, main process)
@@ -47,6 +49,8 @@ export interface ConversationComposer {
   longContext?: boolean
   /** The cap on one answer, in tokens. 0 is Automatic. */
   maxTokens?: number
+  /** Ids of the other agents the model may ask in this chat (see shared/peers.ts). */
+  peers?: string[]
 }
 
 export interface Conversation {
@@ -318,6 +322,8 @@ export interface ChatStartRequest {
   permissionMode?: PermissionMode
   /** Opt into a provider's 1M-context beta (for gated long-context models). */
   longContext?: boolean
+  /** Ids of the other agents this chat turned on. Only agents that exist and are on in settings are offered to the model. */
+  peers?: string[]
   /** Attachments (image/file content parts) to include with the user message. */
   attachments?: MessageContentPart[]
   /**
@@ -411,6 +417,8 @@ export interface ToolActivity {
   outputConversationId?: string
   /** Set on a run_command that started a background task and on the task_* calls; matches BackgroundTask.id. */
   taskId?: string
+  /** Set on a finished consult_agent call: who was asked, which message of the talk it was, and the verdict. */
+  peer?: PeerActivity
 }
 
 export interface CommandOutputArtifact {
@@ -1067,6 +1075,33 @@ export interface CubexAPI {
   saveMcpSecret(request: McpSecretSaveRequest): Promise<McpSecretSaveResult>
   /** Delete the stored values of a server's secret variables, after they are removed or the server is. */
   forgetMcpSecrets(request: McpSecretForgetRequest): Promise<void>
+
+  // Other agents
+  /** Which of the saved agents can be used on this computer, and whether the programs the Add menu offers are installed. */
+  getPeersStatus(): Promise<PeersOverview>
+  /**
+   * Send an agent a short test message the way a chat would and report what came back. The agent is the one on the
+   * page, saved or not. A failure is a result with a reason; the promise rejects only for a malformed request.
+   */
+  testPeer(peer: PeerConfig): Promise<PeerTestResult>
+
+  // Updates
+  /** What is known about newer versions of Cubex. The first call also starts the periodic checks of a running copy. */
+  getUpdateState(): Promise<UpdateState>
+  /** Look for a newer version now. Resolves once GitHub has answered; a failed look is in the state, not a rejection. */
+  checkForUpdates(): Promise<UpdateState>
+  /** Download the installer of the update on offer and check it. Progress arrives through `onUpdateState`. */
+  downloadUpdate(): Promise<UpdateState>
+  /** Stop the download and delete what arrived. */
+  cancelUpdateDownload(): Promise<UpdateState>
+  /** Run the downloaded installer and quit. Refused while work is running, unless `force` is set. */
+  installUpdate(request?: UpdateInstallRequest): Promise<UpdateInstallResult>
+  /** Do not announce this version again. A newer one is announced. */
+  skipUpdate(version: string): Promise<UpdateState>
+  /** Open the page of the release on offer, in the browser. */
+  openUpdatePage(): Promise<void>
+  /** The update state changed: a look ended, a download moved on. Returns the unsubscribe function. */
+  onUpdateState(cb: (state: UpdateState) => void): () => void
 }
 
 /** Facts about this installation, shown in Settings under About and used for bug reports. */
@@ -1190,5 +1225,17 @@ export const IPC = {
   openAppFolder: 'app:open-folder',
   // policy-mcp: server environment
   mcpSaveSecret: 'mcp:save-secret',
-  mcpForgetSecrets: 'mcp:forget-secrets'
+  mcpForgetSecrets: 'mcp:forget-secrets',
+  // other agents
+  peersStatus: 'peers:status',
+  peersTest: 'peers:test',
+  // updates
+  updatesGet: 'updates:get',
+  updatesCheck: 'updates:check',
+  updatesDownload: 'updates:download',
+  updatesCancel: 'updates:cancel',
+  updatesInstall: 'updates:install',
+  updatesSkip: 'updates:skip',
+  updatesOpenPage: 'updates:open-page',
+  updatesState: 'updates:state'
 } as const

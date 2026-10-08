@@ -1,6 +1,7 @@
 import { isAbsolute } from 'node:path'
 import type { ReasoningEffort, RoutingTarget } from '@core/types'
 import { IPC, type PermissionMode, type ReviewComment, type ReviewScope } from '@shared/ipc'
+import { cleanPeerIds } from '@shared/peers'
 import type { ReviewSendOverrides } from '../ChatService'
 import type { IpcContext } from './context'
 
@@ -151,6 +152,11 @@ function parseOverrides(value: unknown): ReviewSendOverrides {
   if (value.longContext !== undefined) {
     if (typeof value.longContext !== 'boolean') throw new Error('The long-context setting is invalid.')
     overrides.longContext = value.longContext
+  }
+  if (value.peers !== undefined) {
+    const peers = cleanPeerIds(value.peers)
+    if (!peers) throw new Error('The list of other agents is invalid.')
+    overrides.peers = peers
   }
   if (value.systemPrompt !== undefined) {
     if (typeof value.systemPrompt !== 'string' || value.systemPrompt.length > MAX_SYSTEM_PROMPT) throw new Error('The system prompt is invalid.')

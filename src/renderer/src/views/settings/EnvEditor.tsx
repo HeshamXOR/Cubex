@@ -117,7 +117,8 @@ function EnvRow({ draft, index, problems, idBase, disabled, focusName, onPatch, 
           type="button"
           className={`switch ${draft.secret ? 'switch--on' : ''}`}
           onClick={onToggle}
-          aria-pressed={draft.secret}
+          role="switch"
+          aria-checked={draft.secret}
           aria-label={`Keep ${label} secret`}
           disabled={disabled}
         />

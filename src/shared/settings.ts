@@ -2,6 +2,8 @@ import type { RetryPolicy, TimeoutConfig } from '@core/types'
 import { DEFAULT_RETRY_POLICY, DEFAULT_TIMEOUT_CONFIG } from '@core/types'
 import type { ShellId } from './ipc'
 import { DEFAULT_COMPACTION_THRESHOLD } from './contextPolicy'
+import { DEFAULT_PEER_SETTINGS, type PeerSettings } from './peers'
+import { DEFAULT_UPDATE_SETTINGS, type UpdateSettings } from './updates'
 
 export type ThemeMode = 'dark' | 'light' | 'system'
 
@@ -101,6 +103,10 @@ export interface AppSettings {
   shell?: ShellSettings
   /** When Cubex shows a desktop notification (notify-files). */
   notifications?: NotificationSettings
+  /** Other agents the model may consult: programs and models, and how long a conversation with one may run. */
+  peers?: PeerSettings
+  /** Whether Cubex looks for new versions, and the one version the person skipped. */
+  updates?: UpdateSettings
   /** About the stored file itself, not a preference. */
   meta?: SettingsMeta
 }
@@ -198,6 +204,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   diagnostics: { afterEdit: 'errors' },
   shell: { preferred: 'auto' },
   notifications: DEFAULT_NOTIFICATIONS,
+  peers: DEFAULT_PEER_SETTINGS,
+  updates: DEFAULT_UPDATE_SETTINGS,
   meta: { schemaVersion: SETTINGS_SCHEMA_VERSION }
 }
 

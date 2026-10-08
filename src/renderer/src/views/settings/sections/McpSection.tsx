@@ -281,8 +281,9 @@ function ServerRow({ server, status, checking, unknown, onToggle, onRemove, onSa
           type="button"
           className={`switch ${server.enabled ? 'switch--on' : ''}`}
           onClick={onToggle}
-          aria-pressed={server.enabled}
-          aria-label={`${server.enabled ? 'Disable' : 'Enable'} ${server.name}`}
+          role="switch"
+          aria-checked={server.enabled}
+          aria-label={`Enable ${server.name}`}
           title={server.enabled ? 'On' : 'Off'}
         />
         <div className="prow__title">
@@ -461,4 +462,4 @@ function McpSection(): JSX.Element {
   )
 }
 
-export const section: SettingsSection = { id: 'mcp', title: 'MCP servers', order: 310, Component: McpSection }
+export const section: SettingsSection = { id: 'mcp', title: 'MCP servers', page: 'tools', order: 310, Component: McpSection }

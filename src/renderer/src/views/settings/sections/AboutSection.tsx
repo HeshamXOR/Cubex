@@ -121,4 +121,4 @@ function AboutDetails(): JSX.Element {
   )
 }
 
-export const section: SettingsSection = { id: 'about', title: 'About', order: 900, placement: 'end', Component: AboutDetails }
+export const section: SettingsSection = { id: 'about', title: 'About', page: 'about', order: 900, Component: AboutDetails }

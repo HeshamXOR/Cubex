@@ -72,4 +72,4 @@ function DiagnosticsSettings(): JSX.Element {
   )
 }
 
-export const section: SettingsSection = { id: 'diagnostics', title: 'Type checking', order: 110, Component: DiagnosticsSettings }
+export const section: SettingsSection = { id: 'diagnostics', title: 'Type checking', page: 'tools', order: 110, Component: DiagnosticsSettings }

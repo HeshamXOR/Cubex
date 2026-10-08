@@ -3,6 +3,9 @@ import { useStore } from './state/store'
 import { isBrowserPreview } from './lib/api'
 import { CommandPalette } from './components/CommandPalette'
 import { ShortcutSheet } from './components/ShortcutSheet'
+import { UpdateDialog } from './components/UpdateDialog'
+import { UpdateAnnouncer } from './components/UpdateNotice'
+import { useUpdates } from './state/updates'
 import { matchesShortcut } from './lib/shortcuts'
 import { Sidebar } from './components/Sidebar'
 import { TitleBar } from './components/TitleBar'
@@ -107,6 +110,9 @@ export function App(): JSX.Element {
       }, 150))
     }
   }, [])
+
+  // The main process owns the state of updates and pushes every change; this listens for the whole life of the window.
+  useEffect(() => useUpdates.getState().start(), [])
 
   // Global shortcuts: new session and search and commands. The keys come from lib/shortcuts.ts, which the shortcut sheet lists.
   useEffect(() => {
@@ -242,6 +248,8 @@ export function App(): JSX.Element {
       </div>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <ShortcutSheet />
+      <UpdateDialog />
+      <UpdateAnnouncer />
     </div>
     </ChangesProvider>
   )

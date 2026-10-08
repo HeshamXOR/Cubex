@@ -1,0 +1,36 @@
+/* Other agents: the choices for adding one, and the command a program is started with. */
+.agents__choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; margin-top: 8px; }
+.agentchoice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-foreground);
+  text-align: left;
+}
+.agentchoice:hover:not(:disabled) { background: var(--color-hover); }
+.agentchoice:disabled { opacity: 0.5; cursor: default; }
+.agentchoice__title { font-weight: 500; font-size: var(--ui-font-size); }
+.agentchoice__text { font-size: 12px; line-height: 1.5; color: var(--color-foreground-subtle); text-wrap: pretty; }
+.agentchoice__state { margin-top: 4px; font-size: 12px; color: var(--color-foreground-subtlest); }
+
+.agents__new { margin-top: 12px; }
+.agents__editor { margin-top: 10px; }
+.agents__command {
+  display: block;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--well);
+  font: 12px/1.6 var(--mono);
+  color: var(--color-foreground-subtle);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.agents__reply { white-space: pre-wrap; overflow-wrap: anywhere; }
+.agents__found { min-width: 0; overflow-wrap: anywhere; }
+.agents__privacy { margin-top: 14px; }

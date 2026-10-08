@@ -6,6 +6,7 @@ import { initDb, closeDb } from './db'
 import { getSettings } from './config'
 import { installContextMenu } from './contextMenu'
 import { logger } from './logger'
+import { setMcpClientVersion } from './mcp/McpClient'
 import { loadWindowState, trackWindow, windowPlacement } from './windowShell'
 
 // Windows resolves bare program names from the current directory before PATH.
@@ -143,6 +144,7 @@ app.on('second-instance', () => {
 
 app.whenReady().then(() => {
   if (!primaryInstance) return
+  setMcpClientVersion(app.getVersion())
   initDb()
   lockDownSession()
   // Frameless window with its own chrome; the default menu only adds reload/devtools accelerators.

@@ -23,6 +23,7 @@ export function reviewRequest(): Partial<ChatStartRequest> | undefined {
     },
     // Plan mode left on from planning would refuse the edits the comments ask for, so the main process chooses the mode then.
     ...(state.permissionMode !== 'plan' ? { permissionMode: state.permissionMode } : {}),
-    longContext: state.longContext
+    longContext: state.longContext,
+    peers: state.peers
   }
 }

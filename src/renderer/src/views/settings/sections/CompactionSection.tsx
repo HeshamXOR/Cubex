@@ -75,4 +75,4 @@ function CompactionSettingsBody(): JSX.Element | null {
   )
 }
 
-export const section: SettingsSection = { id: 'compaction', title: 'Summarizing', order: 200, Component: CompactionSettingsBody }
+export const section: SettingsSection = { id: 'compaction', title: 'Summarizing', page: 'context', order: 200, Component: CompactionSettingsBody }

@@ -38,6 +38,13 @@ export interface McpServerSpec {
   maxResultChars?: number
 }
 
+/** What servers are told this client's version is. The main process sets it to the running app's version at start. */
+let reportedVersion = '0.0.0'
+
+export function setMcpClientVersion(version: string): void {
+  reportedVersion = version
+}
+
 export interface McpClientOptions {
   startupTimeoutMs?: number
   shutdownGraceMs?: number
@@ -243,7 +250,7 @@ export class McpClient {
         {
           protocolVersion: '2025-11-25',
           capabilities: {},
-          clientInfo: { name: 'Cubex', version: '0.1.0' }
+          clientInfo: { name: 'Cubex', version: reportedVersion }
         },
         { timeoutMs: this.startupTimeout }
       )) as { protocolVersion?: string; serverInfo?: { name: string; version?: string } } | undefined

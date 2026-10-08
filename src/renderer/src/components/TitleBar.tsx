@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { PanelLeft, Search } from 'lucide-react'
 import { api } from '../lib/api'
 import { CubexMark } from '../theme/Logo'
+import { UpdateTitleButton } from './UpdateNotice'
 
 interface TitleBarProps {
   onSearch: () => void
@@ -53,6 +54,7 @@ export function TitleBar({ onSearch, sideOpen, onToggleSide }: TitleBarProps): J
         <span>Search sessions, files and commands</span>{' '}
         <kbd>Ctrl K</kbd>
       </button>
+      {!sideOpen && <UpdateTitleButton />}
       <Caption maximized={maximized} onToggle={() => void api.windowToggleMaximize().then(setMaximized)} />
     </header>
   )

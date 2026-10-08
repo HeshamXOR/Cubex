@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { basename, compactTokens, formatSeconds, plural, shortTime, splitPath } from './format'
+import { basename, compactTokens, formatBytes, formatSeconds, plural, shortTime, splitPath } from './format'
 
 describe('paths', () => {
   it('takes the last segment with either separator', () => {
@@ -58,5 +58,20 @@ describe('formatSeconds', () => {
     expect(formatSeconds(800)).toBe('0.8s')
     expect(formatSeconds(6_000)).toBe('6s')
     expect(formatSeconds(72_000)).toBe('1m 12s')
+  })
+})
+
+describe('formatBytes', () => {
+  it('writes a size in the unit a person reads', () => {
+    expect(formatBytes(512)).toBe('512 B')
+    expect(formatBytes(1536)).toBe('1.5 KB')
+    expect(formatBytes(89_484_330)).toBe('85 MB')
+    expect(formatBytes(3 * 1024 ** 3)).toBe('3.0 GB')
+  })
+
+  it('shows a dash when there is nothing to show', () => {
+    expect(formatBytes(undefined)).toBe('—')
+    expect(formatBytes(0)).toBe('—')
+    expect(formatBytes(-4)).toBe('—')
   })
 })

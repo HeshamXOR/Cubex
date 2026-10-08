@@ -104,4 +104,4 @@ function PermissionsSection(): JSX.Element {
   )
 }
 
-export const section: SettingsSection = { id: 'permissions', title: 'Permissions', order: 300, Component: PermissionsSection }
+export const section: SettingsSection = { id: 'permissions', title: 'Permissions', page: 'permissions', order: 300, Component: PermissionsSection }

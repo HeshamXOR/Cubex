@@ -38,6 +38,7 @@ import { namedSkill, useSkills } from './skills'
 import { isSkillLoadFailure, skillTurnText } from '../../../shared/skillInvocation'
 import type { HarnessState } from '../status/StatusIndicator'
 import type { ExtraPanelTab } from '../components/panelTabs/registry'
+import type { SettingsPageId } from '../views/settings/pages'
 
 /** The right-hand panel's tabs: three built in, the rest registered in components/panelTabs. */
 export type PanelTab = 'changes' | 'plan' | 'details' | ExtraPanelTab
@@ -104,6 +105,9 @@ export interface SendOptions {
 interface CubexState {
   view: ViewId
   setView: (v: ViewId) => void
+  /** The page of Settings that is open. It lives here so a link elsewhere in the app can open Settings on a page. */
+  settingsPage: SettingsPageId
+  setSettingsPage: (page: SettingsPageId) => void
   /** Text queued to be appended into the composer (e.g. an @file mention). */
   composerInsert?: string
   appendToComposer: (text: string) => void
@@ -173,6 +177,9 @@ interface CubexState {
   cyclePermissionMode: () => void
   longContext: boolean
   toggleLongContext: () => void
+  /** Ids of the other agents the model may ask in the open chat. Each chat keeps its own. */
+  peers: string[]
+  togglePeer: (id: string) => void
   /** Pending tool-permission request awaiting the user's decision. */
   pendingPermission?: PermissionAsk
   resolvePermission: (id: string, decision: PermissionDecision) => void
@@ -336,8 +343,8 @@ function effortModelFor(state: CubexState, providerId?: string, modelId?: string
  * What a conversation records about the composer: its provider and model, and the choices that belong to them.
  * Keys stay present when empty so that saving them clears what an earlier model left behind.
  */
-function selectionPatch(s: Pick<CubexState, 'activeProviderId' | 'activeModel' | 'activePresetId' | 'effort' | 'longContext' | 'maxTokens'>): Pick<Conversation, 'providerId' | 'model' | 'presetId' | 'composer'> {
-  const composer: ConversationComposer = { longContext: s.longContext, maxTokens: s.maxTokens, ...(s.effort ? { effort: s.effort } : {}) }
+function selectionPatch(s: Pick<CubexState, 'activeProviderId' | 'activeModel' | 'activePresetId' | 'effort' | 'longContext' | 'maxTokens' | 'peers'>): Pick<Conversation, 'providerId' | 'model' | 'presetId' | 'composer'> {
+  const composer: ConversationComposer = { longContext: s.longContext, maxTokens: s.maxTokens, ...(s.peers.length > 0 ? { peers: s.peers } : {}), ...(s.effort ? { effort: s.effort } : {}) }
   return { providerId: s.activeProviderId, model: s.activeModel, presetId: s.activePresetId, composer }
 }
 
@@ -371,6 +378,7 @@ function selectionFor(state: CubexState, conversation: Conversation): Partial<Cu
     // A chat from before choices were kept has none stored: it starts from the model's default.
     effort: normalizeEffortFor(provider.kind, conversation.composer ? conversation.composer.effort : defaultEffortFor(provider.kind, info), info),
     longContext: conversation.composer?.longContext ?? false,
+    peers: conversation.composer?.peers ?? [],
     maxTokens: conversation.composer?.maxTokens ?? state.settings?.ai.maxOutputTokens ?? state.maxTokens
   }
 }
@@ -378,6 +386,8 @@ function selectionFor(state: CubexState, conversation: Conversation): Partial<Cu
 export const useStore = create<CubexState>((set, get) => ({
   view: 'chat',
   setView: (v) => set({ view: v }),
+  settingsPage: 'general',
+  setSettingsPage: (page) => set({ settingsPage: page }),
   composerInsert: undefined,
   appendToComposer: (text) => set((s) => ({ composerInsert: (s.composerInsert ?? '') + text })),
   consumeComposerInsert: () => set({ composerInsert: undefined }),
@@ -736,6 +746,11 @@ export const useStore = create<CubexState>((set, get) => ({
     set((s) => ({ longContext: !s.longContext }))
     persistSelection()
   },
+  peers: [],
+  togglePeer: (id) => {
+    set((s) => ({ peers: s.peers.includes(id) ? s.peers.filter((entry) => entry !== id) : [...s.peers, id] }))
+    persistSelection()
+  },
   pendingPermission: undefined,
   resolvePermission: (id, decision) => {
     void api.resolvePermission(id, decision)
@@ -910,6 +925,7 @@ export const useStore = create<CubexState>((set, get) => ({
         messageId: userMsg.id,
         permissionMode: s.permissionMode,
         longContext: s.longContext,
+        ...(s.peers.length > 0 ? { peers: s.peers } : {}),
         ...(attachments.length ? { attachments } : {}),
         ...(systemPrompt ? { systemPrompt } : {}),
         ...(invoked ? { skill: invoked.skill } : {})

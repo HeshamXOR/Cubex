@@ -107,7 +107,7 @@
 .commit__row:hover { background: var(--color-hover); color: var(--color-foreground); }
 .commit__row[aria-checked='true'] { color: var(--color-foreground); }
 .commit .chk { margin: 0; }
-.chk.part { background: var(--color-brand); border-color: var(--color-brand); }
+.chk.part { background: var(--action-bg); border-color: var(--action-bg); color: var(--action-fg); }
 .tag--done { color: var(--color-success); background: var(--color-confirmation-surface); }
 
 .commit__err {

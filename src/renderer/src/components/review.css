@@ -99,7 +99,7 @@
   transition: background 0.1s, border-color 0.1s;
 }
 .chk:hover { border-color: var(--color-foreground-subtlest); }
-.chk.on { background: var(--color-brand); border-color: var(--color-brand); }
+.chk.on { background: var(--action-bg); border-color: var(--action-bg); color: var(--action-fg); }
 .rf-undo {
   flex: none;
   display: none;

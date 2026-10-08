@@ -4,7 +4,7 @@ import { DEFAULT_NOTIFICATIONS, type NotificationSettings } from '../../../../..
 import { api } from '../../../lib/api'
 import { useStore } from '../../../state/store'
 import type { SettingsSection } from '../registry'
-import { RowShell } from '../rows'
+import { RowShell, Switch } from '../rows'
 import './notifications.css'
 
 type Test = { phase: 'idle' } | { phase: 'sending' } | { phase: 'sent' } | { phase: 'blocked'; reason: string }
@@ -16,7 +16,7 @@ const SENT_HINT = 'Sent. If nothing showed up, check your system notification se
 function SwitchRow({ label, hint, on, disabled, onChange }: { label: string; hint: string; on: boolean; disabled?: boolean; onChange: (next: boolean) => void }): JSX.Element {
   return (
     <RowShell label={label} hint={hint}>
-      <button type="button" className={`switch ${on ? 'switch--on' : ''}`} onClick={() => onChange(!on)} aria-label={label} aria-pressed={on} disabled={disabled} />
+      <Switch label={label} on={on} disabled={disabled} onChange={onChange} />
     </RowShell>
   )
 }
@@ -102,4 +102,4 @@ function NotificationSettingsGroup(): JSX.Element {
   )
 }
 
-export const section: SettingsSection = { id: 'notifications', title: 'Notifications', order: 400, Component: NotificationSettingsGroup }
+export const section: SettingsSection = { id: 'notifications', title: 'Notifications', page: 'notifications', order: 400, Component: NotificationSettingsGroup }

@@ -77,3 +77,43 @@ describe('compaction and budget settings', () => {
     expect(getSettings().ai.budget).toEqual({ action: 'warn' })
   })
 })
+
+describe('update settings', () => {
+  const storedUpdates = (): unknown => (JSON.parse(readFileSync(paths.file, 'utf8')) as { updates?: unknown }).updates
+
+  it('start with automatic checks on and no version skipped, also for a file from before they existed', async () => {
+    writeFileSync(paths.file, JSON.stringify({ general: { theme: 'dark' } }))
+    const { getSettings } = await load()
+    expect(getSettings().updates).toEqual({ auto: true })
+  })
+
+  it('turn automatic checks off without losing the version that was skipped', async () => {
+    const { getSettings, updateSettings } = await load()
+    updateSettings({ updates: { auto: true, skippedVersion: 'v0.2.0' } })
+    // The Settings page sends only the switch it changed.
+    updateSettings({ updates: { auto: false } })
+    expect(getSettings().updates).toEqual({ auto: false, skippedVersion: '0.2.0' })
+    expect(storedUpdates()).toEqual({ auto: false, skippedVersion: '0.2.0' })
+  })
+
+  it('forget the skipped version when it is saved as an empty string', async () => {
+    const { getSettings, updateSettings } = await load()
+    updateSettings({ updates: { auto: true, skippedVersion: '0.2.0' } })
+    updateSettings({ updates: { auto: true, skippedVersion: '' } })
+    expect(getSettings().updates).toEqual({ auto: true })
+    expect(storedUpdates()).toEqual({ auto: true })
+  })
+
+  it('repair a damaged stored block instead of failing', async () => {
+    writeFileSync(paths.file, JSON.stringify({ updates: { auto: 'sometimes', skippedVersion: '../../x', channel: 'nightly' } }))
+    const { getSettings } = await load()
+    expect(getSettings().updates).toEqual({ auto: true })
+  })
+
+  it('keep the choice through an unrelated save', async () => {
+    const { getSettings, updateSettings } = await load()
+    updateSettings({ updates: { auto: false, skippedVersion: '0.3.0' } })
+    updateSettings({ general: { ...getSettings().general, theme: 'light' } })
+    expect(getSettings().updates).toEqual({ auto: false, skippedVersion: '0.3.0' })
+  })
+})

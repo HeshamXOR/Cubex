@@ -157,7 +157,21 @@ const api: CubexAPI = {
 
   // MCP server environment (policy-mcp)
   saveMcpSecret: (request) => invoke(IPC.mcpSaveSecret, request),
-  forgetMcpSecrets: (request) => invoke(IPC.mcpForgetSecrets, request)
+  forgetMcpSecrets: (request) => invoke(IPC.mcpForgetSecrets, request),
+
+  // Other agents
+  getPeersStatus: () => invoke(IPC.peersStatus),
+  testPeer: (peer) => invoke(IPC.peersTest, peer),
+
+  // Updates
+  getUpdateState: () => invoke(IPC.updatesGet),
+  checkForUpdates: () => invoke(IPC.updatesCheck),
+  downloadUpdate: () => invoke(IPC.updatesDownload),
+  cancelUpdateDownload: () => invoke(IPC.updatesCancel),
+  installUpdate: (request) => invoke(IPC.updatesInstall, request),
+  skipUpdate: (version) => invoke(IPC.updatesSkip, version),
+  openUpdatePage: () => invoke(IPC.updatesOpenPage),
+  onUpdateState: (cb) => subscribe(IPC.updatesState, cb)
 }
 
 contextBridge.exposeInMainWorld('cubex', api)

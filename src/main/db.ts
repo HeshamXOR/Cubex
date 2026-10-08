@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3'
 import { dbPath } from './paths'
 import { normalizeMessageTranscriptJson } from '@shared/messageTranscript'
+import { cleanPeerIds } from '@shared/peers'
 import type {
   Conversation,
   ConversationComposer,
@@ -333,6 +334,8 @@ function cleanComposer(value: unknown): ConversationComposer | undefined {
   const out: ConversationComposer = {}
   if (typeof raw.effort === 'string' && EFFORTS.includes(raw.effort)) out.effort = raw.effort as ConversationComposer['effort']
   if (typeof raw.longContext === 'boolean') out.longContext = raw.longContext
+  const peers = cleanPeerIds(raw.peers)
+  if (peers) out.peers = peers
   if (typeof raw.maxTokens === 'number' && Number.isInteger(raw.maxTokens) && raw.maxTokens >= 0 && raw.maxTokens <= 2_000_000) out.maxTokens = raw.maxTokens
   return Object.keys(out).length > 0 ? out : undefined
 }

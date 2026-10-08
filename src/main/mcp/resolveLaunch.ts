@@ -1,5 +1,5 @@
 import { closeSync, lstatSync, openSync, readSync, statSync } from 'node:fs'
-import { win32 as winPath } from 'node:path'
+import { posix as posixPath, win32 as winPath } from 'node:path'
 
 /**
  * Decides how to start a child process for a command a user typed (an MCP server
@@ -203,4 +203,29 @@ export function resolveLaunch(input: LaunchInput, host: LaunchHost = systemHost)
   if (extension === '.cmd' || extension === '.bat') return resolveBatch(found, args, input, host, exts)
   if (extension === '.exe' || extension === '.com') return { file: found, args, windowsVerbatimArguments: false, mode: 'direct' }
   throw new LaunchError(`"${found}" is not a program Windows can start directly. Use an interpreter such as node or python as the command and pass the script as an argument.`)
+}
+
+/**
+ * The file a command would be started from, or undefined when there is none. On Windows this is the same lookup
+ * resolveLaunch does (PATH and PATHEXT, never the working directory). Elsewhere the system searches PATH when a
+ * process starts, so it is walked here. For showing where a program was found: never for running it.
+ */
+export function locateCommand(input: LaunchInput, host: LaunchHost = systemHost): string | undefined {
+  const command = input.command.trim()
+  if (!command || /[\u0000\r\n]/.test(command)) return undefined
+  const env = input.env ?? process.env
+  if (host.platform === 'win32') {
+    try { return findOnWindows(command, input, host, pathExtensions(env)) } catch { return undefined }
+  }
+  if (/[\\/]/.test(command)) {
+    const file = posixPath.resolve(input.cwd ?? process.cwd(), command)
+    return host.isFile(file) ? file : undefined
+  }
+  for (const directory of (envValue(env, 'PATH') ?? '').split(':')) {
+    // A relative entry would resolve inside the workspace: skip it, as the Windows lookup does.
+    if (!directory || !posixPath.isAbsolute(directory)) continue
+    const file = posixPath.join(directory, command)
+    if (host.isFile(file)) return file
+  }
+  return undefined
 }

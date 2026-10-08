@@ -100,8 +100,9 @@ function HookRow({ hook, onToggle, onRemove }: { hook: HookConfig; onToggle: () 
           type="button"
           className={`switch ${hook.enabled ? 'switch--on' : ''}`}
           onClick={onToggle}
-          aria-pressed={hook.enabled}
-          aria-label={`${hook.enabled ? 'Disable' : 'Enable'} the ${hook.event} hook`}
+          role="switch"
+          aria-checked={hook.enabled}
+          aria-label={`Enable the ${hook.event} hook`}
           title={hook.enabled ? 'On' : 'Off'}
         />
         <div className="prow__title">
@@ -276,4 +277,4 @@ function HooksSection(): JSX.Element {
   )
 }
 
-export const section: SettingsSection = { id: 'hooks', title: 'Hooks', order: 320, Component: HooksSection }
+export const section: SettingsSection = { id: 'hooks', title: 'Hooks', page: 'tools', order: 320, Component: HooksSection }
