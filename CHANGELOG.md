@@ -8,7 +8,7 @@ project can, and the format follows [Keep a Changelog](https://keepachangelog.co
 A version that is not released yet has the word Unreleased where its date goes. Releasing it means writing the date
 there. [docs/RELEASING.md](docs/RELEASING.md) has the whole checklist.
 
-## [0.2.0] - Unreleased
+## [0.2.0] - 2026-10-08
 
 Cubex now updates itself and shows what changed, the agent can ask other agents for a second opinion, and each part
 of Settings has its own page.
