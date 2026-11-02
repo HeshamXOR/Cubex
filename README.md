@@ -24,7 +24,7 @@ and review every change it makes before it lands.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/images/cubex-dark.png">
-    <img src="docs/images/cubex-light.png" width="920" alt="Cubex with a conversation about retrying uploads on the left and a hunk by hunk review of the three edited files on the right.">
+    <img src="docs/images/cubex-light.png" width="920" alt="Cubex with a finished turn about retrying uploads: the conversation in the middle, the run column on the right with the steps of the turn and the three changed files, and the status bar along the bottom.">
   </picture>
 </p>
 
@@ -32,6 +32,11 @@ Cubex is a desktop app for working with a coding agent on your own code. You cho
 from a cloud provider with your own API key or from a runtime on your machine such as Ollama. Cubex reads
 your project, edits files, runs commands and searches the web when you let it, and shows each change as a
 diff that you can keep, undo or comment on, one hunk at a time, before anything is committed.
+
+The window keeps the run in view: a column beside the conversation lists the steps of the turn, the files it
+changed and the commands still running, a status bar along the bottom shows the branch, the model, the context in
+use and what you spent today, and when the agent needs you, the question sits inside the message box. Colour is kept
+for what it means: green and red for lines added and removed, and an amber shield when Cubex is waiting for you.
 
 There is no account, no Cubex server and no telemetry. API keys live in your operating system's credential
 store, and conversations stay in a local database.
