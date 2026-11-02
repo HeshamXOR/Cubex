@@ -3,6 +3,8 @@ import type { ContextUsageDetail, ContextUsageSection, ContextUsageSnapshot } fr
 import { anchoredContextTokens, type AnchorReport } from './contextAnchor'
 import { isSummaryMessageText } from './contextHistory'
 
+export { effectiveContextWindow } from '@shared/longContext'
+
 export interface ContextSystemSource {
   id: string
   label: string
@@ -97,19 +99,6 @@ function finiteCount(value: number | undefined, allowZero = false): number | und
   return Math.floor(value)
 }
 
-/**
- * The window a request can actually use. A model flagged with the gated 1M
- * beta keeps its ordinary 200K window until the user enables that header.
- */
-export function effectiveContextWindow(
-  model: { contextWindow?: number; longContextBeta?: boolean } | undefined,
-  longContextEnabled: boolean
-): number | undefined {
-  const window = finiteCount(model?.contextWindow)
-  if (window === undefined) return undefined
-  return model?.longContextBeta && !longContextEnabled ? Math.min(window, 200_000) : window
-}
-
 /** Headroom over the reserved output for request framing the estimate cannot see. */
 export const CONTEXT_SAFETY_MARGIN_TOKENS = 2_048
 /** Floor for the input budget when a model's output cap is as large as its window. */
@@ -200,7 +189,9 @@ export function estimateContextUsage(request: AIRequest, options: ContextUsageOp
         break
       }
       case 'reasoning':
-        addText(destination, part.text)
+        // Only reasoning a provider signed is handed back to it. Plain thinking text is display-only: the
+        // adapters leave it out of the request, so it does not take up room in the window.
+        if (part.signature !== undefined || part.redacted !== undefined) addText(destination, part.text)
         break
       case 'tool_use':
         // Tool names, arguments, ids and framing are input context too.

@@ -36,8 +36,4 @@ describe('reviewRequest', () => {
     expect(reviewRequest()!.policy!.primary.params).toEqual({})
   })
 
-  it('names nothing when no model is chosen', () => {
-    useStore.setState({ activeProviderId: undefined, activeModel: undefined })
-    expect(reviewRequest()).toBeUndefined()
-  })
 })

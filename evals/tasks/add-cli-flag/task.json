@@ -1,0 +1,5 @@
+{
+  "title": "Add a flag to a small command line tool",
+  "prompt": "Add a --count flag (short form -c) to bin/grep-lite.mjs. With it the tool prints only the number of matching lines instead of the lines themselves. It has to work together with the existing -i flag, and the exit code stays as it is today (0 when at least one line matched, 1 when none did). Update the usage text too.",
+  "timeoutSec": 240
+}

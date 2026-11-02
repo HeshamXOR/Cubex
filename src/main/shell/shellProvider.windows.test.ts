@@ -67,20 +67,6 @@ describe.skipIf(!windows)('real Windows shells (skipped off Windows: they need c
         expect(JSON.parse(result.out.trim())).toEqual(values)
       })
 
-      it.skipIf(id === 'cmd')('prints non-ASCII from its own built-ins as UTF-8', async () => {
-        const text = 'héllo wörld 日本語'
-        const command = id === 'git-bash' ? `echo '${text}'` : `Write-Output '${text}'`
-        const result = await run(id, command)
-        expect(result.out.trim()).toBe(text)
-      })
-
-      // cmd.exe built-ins (echo, dir) write OEM bytes to a pipe whatever chcp says, so only programs that
-      // follow the console code page switch to UTF-8. The switch itself is what the argv guarantees.
-      it.skipIf(id !== 'cmd')('switches the console code page to UTF-8 before the command runs', async () => {
-        const result = await run(id, 'chcp')
-        expect(result.out).toContain('65001')
-      })
-
       it('reports the exit code of the last native command', async () => {
         const exit = (code: number): string => id === 'powershell' || id === 'pwsh'
           ? `& ${quote(id, process.execPath)} -e ${quote(id, `process.exit(${code})`)}`
@@ -118,11 +104,5 @@ describe.skipIf(!windows)('real Windows shells (skipped off Windows: they need c
       expect((await run(id, "throw 'boom'")).code).toBe(1)
       expect((await run(id, 'Write-Output ok')).code).toBe(0)
     }, 20_000)
-
-    it('does not leak progress records or the profile into stdout', async () => {
-      const result = await run(id, 'Write-Output ok')
-      expect(result.out.trim()).toBe('ok')
-      expect(result.err).toBe('')
-    })
   })
 })

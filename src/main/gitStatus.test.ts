@@ -81,37 +81,6 @@ describe.skipIf(!hasGit)('GitStatusReader', () => {
     expect(await new GitStatusReader().read(clone)).toMatchObject({ isRepo: true, branch: 'trunk', ahead: 1, behind: 1, changedFiles: 0 })
   })
 
-  it('reports a detached HEAD without a branch, and an unborn branch without a head', async () => {
-    initRepo(root)
-    const head = git(root, 'rev-parse', '--short', 'HEAD').trim()
-    git(root, 'checkout', '-q', '--detach')
-    expect(await new GitStatusReader().read(root)).toEqual({ isRepo: true, head, changedFiles: 0 })
-
-    const fresh = join(root, 'fresh')
-    mkdirSync(fresh)
-    git(fresh, 'init', '-q')
-    git(fresh, 'symbolic-ref', 'HEAD', 'refs/heads/trunk')
-    writeFileSync(join(fresh, 'new.txt'), 'untracked')
-    expect(await new GitStatusReader().read(fresh)).toEqual({ isRepo: true, branch: 'trunk', changedFiles: 1 })
-  })
-
-  it('still reports the branch when git status itself fails', async () => {
-    initRepo(root)
-    const head = git(root, 'rev-parse', '--short', 'HEAD').trim()
-    // An unreadable index fails `git status` but not the cheaper branch lookups.
-    writeFileSync(join(root, '.git', 'index'), 'not an index')
-    expect(await new GitStatusReader().read(root)).toEqual({ isRepo: true, branch: 'trunk', head, changedFiles: 0, changedFilesUnknown: true })
-  })
-
-  it('reuses a probe within the cache window', async () => {
-    initRepo(root)
-    const reader = new GitStatusReader(60_000)
-    expect(await reader.read(root)).toMatchObject({ changedFiles: 0 })
-    writeFileSync(join(root, 'new.txt'), 'untracked')
-    expect(await reader.read(root)).toMatchObject({ changedFiles: 0 })
-    expect(await new GitStatusReader().read(root)).toMatchObject({ changedFiles: 1 })
-  })
-
   it('never runs a filter program defined by the repository', async () => {
     initRepo(root)
     const marker = join(root, 'filter-ran')

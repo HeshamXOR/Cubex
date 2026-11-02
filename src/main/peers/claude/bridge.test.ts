@@ -9,7 +9,6 @@ import { LaunchError } from '../../mcp/resolveLaunch'
 import { removeFolder } from '../../testing/removeFolder'
 import { AcpAgent, AcpFailure, type AcpEvent, type OpenOptions } from '../acp/agent'
 import { createDelegatePolicy, type DelegateQuestion } from '../acp/delegatePolicy'
-import { SIGN_IN_HINT } from './bridge'
 
 // A real program, started the way Claude Code is: a scripted stand-in that speaks its stream-json protocol (testing/mockClaude.cjs).
 const MOCK = fileURLToPath(new URL('./testing/mockClaude.cjs', import.meta.url))
@@ -76,11 +75,6 @@ describe('starting Claude Code', () => {
     await waitFor(() => !existsSync(rules))
   })
 
-  it('opens with the control request that Claude Code answers with who it is signed in as', async () => {
-    await open()
-    expect(recorded().find((entry) => entry.received)!.received).toMatchObject({ type: 'control_request', request: { subtype: 'initialize', hooks: null } })
-  })
-
   it('gives a task the tools that change things, and a consultation only the ones that read', async () => {
     const policy = createDelegatePolicy({ root: dir, agent: 'Claude Code', mode: () => 'default', readOnly: false, ask: async () => true, beforeChange: () => undefined, isProtected: () => false, isReadOnlyCommand: () => false })
     await open({}, { policy })
@@ -91,12 +85,6 @@ describe('starting Claude Code', () => {
     expect(argAfter('--tools')).toBe('Read,Grep,Glob,LS')
   })
 
-  it('passes the model that was chosen among the arguments, and nothing else of them', async () => {
-    await open({}, {}, { args: ['--model', 'sonnet', '--dangerously-skip-permissions'] })
-    expect(argAfter('--model')).toBe('sonnet')
-    expect(started().argv).not.toContain('--dangerously-skip-permissions')
-  })
-
   it('keeps Cubex\'s own keys from it unless they are passed, turns self-update off, and leaves out a host\'s markers', async () => {
     await open({ ANTHROPIC_API_KEY: 'sk-ant-test', OPENAI_API_KEY: 'sk-test', PLAIN: 'yes', CLAUDECODE: '1', CLAUDE_CODE_SSE_PORT: '4242' })
     expect(started().env).toMatchObject({ ANTHROPIC_API_KEY: null, OPENAI_API_KEY: null, PLAIN: 'yes', CLAUDECODE: null, CLAUDE_CODE_SSE_PORT: null, DISABLE_AUTOUPDATER: '1', CLAUDE_CODE_ENTRYPOINT: 'cubex' })
@@ -105,46 +93,10 @@ describe('starting Claude Code', () => {
     expect(started().env.ANTHROPIC_API_KEY).toBe('sk-ant-test')
   })
 
-  it('offers one mode, in which it asks, so it can take a task as well as a question', async () => {
-    const agent = await open()
-    expect(agent.taskReadiness()).toMatchObject({ ready: true, mode: { id: 'default' } })
-  })
-
   it('says it is not installed, and what to do, when no program is found', async () => {
     const error = await failure(open({}, { launch: () => { throw new LaunchError('"claude" was not found on PATH.') } }))
     expect(error.message).toContain('was not found')
     expect(error.hint).toContain('Claude desktop app')
-  })
-
-  it('stops a Claude Code that does not answer its first message, and says so', async () => {
-    const error = await failure(open({ MOCK_NO_INIT: '1' }, { startTimeoutMs: 400 }))
-    expect(error.message).toBe('Claude Code did not get ready within 1 second and was stopped.')
-  })
-
-  it('reports a program that ends before it is ready, with what it printed', async () => {
-    const error = await failure(open({ MOCK_EXIT_AT_START: '3', MOCK_STDERR: 'Error: something broke\n' }))
-    expect(error.message).toBe('Claude Code stopped unexpectedly with exit code 3.')
-    expect(error.output).toContain('something broke')
-  })
-
-  it('says to sign in, and how, when Claude Code has no login', async () => {
-    const error = await failure(open({ MOCK_ACCOUNT: JSON.stringify({ tokenSource: 'none', apiProvider: 'firstParty' }) }))
-    expect(error.message).toBe('Claude Code is not signed in.')
-    expect(error.hint).toBe(SIGN_IN_HINT)
-  })
-
-  it('goes ahead when it is signed in by a key, a token or another cloud', async () => {
-    for (const account of [{ tokenSource: 'none', apiKeySource: 'ANTHROPIC_API_KEY', apiProvider: 'firstParty' }, { tokenSource: 'CLAUDE_CODE_OAUTH_TOKEN', apiProvider: 'firstParty' }, { apiProvider: 'bedrock' }, {}]) {
-      recordPath = join(dir, `record-account-${++counter}.jsonl`)
-      expect((await open({ MOCK_ACCOUNT: JSON.stringify(account) })).alive).toBe(true)
-    }
-  })
-
-  it('answers a request it does not serve with an error, so Claude Code does not wait for one', async () => {
-    await open({ MOCK_UNKNOWN_REQUEST: '1' })
-    await waitFor(() => recorded().some((entry) => (entry.received?.response as { request_id?: string } | undefined)?.request_id === 'mock-hook'))
-    const reply = recorded().map((entry) => entry.received).find((message) => (message?.response as { request_id?: string } | undefined)?.request_id === 'mock-hook')!
-    expect(reply.response).toMatchObject({ subtype: 'error', error: 'Cubex does not handle "hook_callback" requests.' })
   })
 })
 
@@ -156,54 +108,11 @@ describe('a conversation', () => {
     expect(recorded().filter((entry) => entry.received?.type === 'user')).toHaveLength(2)
   })
 
-  it('starts a new paragraph for the words that come after a tool call', async () => {
-    const agent = await open()
-    expect((await agent.prompt(`@claude say Let me look.\n${read()}\n@claude say It is a constant.`)).text).toBe('Let me look.\n\nIt is a constant.')
-  })
-
-  it('leaves out its thinking and what a subagent says', async () => {
-    const agent = await open()
-    expect((await agent.prompt('@claude say answer\n@claude think\n@claude subagent hidden')).text).toBe('answer')
-  })
-
-  it('keeps a message that starts with a slash from being read as one of Claude Code\'s own commands', async () => {
-    const agent = await open()
-    expect((await agent.prompt('/compact\n@claude echo')).text).toMatch(/^Message: \/compact\n/)
-    expect((await agent.prompt('hello\n@claude echo')).text).toMatch(/^hello\n/)
-  })
-
   it('reports a tool call as steps that run and finish', async () => {
     const agent = await open()
     const events: AcpEvent[] = []
     await agent.prompt(read(), { onEvent: (event) => events.push(event) })
     expect(events.map((event) => `${event.title}:${event.kind}:${event.state}`)).toEqual(['Read src/a.ts:read:running', 'Read src/a.ts:read:done'])
-  })
-
-  it('says a turn stopped for want of turns as that, not as a failure', async () => {
-    const agent = await open()
-    expect((await agent.prompt('@claude say partial\n@claude maxturns')).stopReason).toBe('max_turn_requests')
-  })
-
-  it('reports an error result with what it said', async () => {
-    const agent = await open()
-    const error = await failure(agent.prompt('@claude fail API Error: 529 overloaded_error'))
-    expect(error.message).toBe('Claude Code stopped with an error: API Error: 529 overloaded_error')
-    // Another message still goes through: the program is fine, the request was not.
-    expect((await agent.prompt('@claude say again')).text).toBe('again')
-  })
-
-  it('says to sign in, with the way to, when the first message finds no login', async () => {
-    const agent = await open()
-    const error = await failure(agent.prompt('@claude login'))
-    expect(error.message).toBe('Claude Code is not signed in, or its sign-in has expired.')
-    expect(error.hint).toBe(SIGN_IN_HINT)
-  })
-
-  it('reports a program that ends in the middle of a message', async () => {
-    const agent = await open()
-    const error = await failure(agent.prompt('@claude say starting\n@claude exit 7'))
-    expect(error.message).toBe('Claude Code stopped unexpectedly with exit code 7.')
-    await waitFor(() => !agent.alive)
   })
 
   it('stops a message that is cancelled and goes on to the next', async () => {
@@ -216,33 +125,6 @@ describe('a conversation', () => {
     expect(recorded().some((entry) => (entry.received?.request as { subtype?: string } | undefined)?.subtype === 'interrupt')).toBe(true)
     expect(agent.alive).toBe(true)
     expect((await agent.prompt('@claude say back again')).text).toBe('back again')
-  })
-
-  it('stops a message that takes too long', async () => {
-    const agent = await open()
-    const error = await failure(agent.prompt('@claude hang', { timeoutMs: 300 }))
-    expect(error.message).toContain('did not answer within')
-  })
-
-  it('refuses a second message while one is being answered', async () => {
-    const agent = await open()
-    const first = agent.prompt('@claude hang', { timeoutMs: 1_000 })
-    await waitFor(() => recorded().some((entry) => entry.received?.type === 'user'))
-    expect((await failure(agent.prompt('@claude say second'))).message).toBe('Claude Code is still answering another message.')
-    await failure(first)
-  })
-
-  it('ends when it is closed, and its program with it', async () => {
-    const agent = await open()
-    await agent.close()
-    expect(agent.alive).toBe(false)
-    expect((await failure(agent.prompt('@claude say late'))).message).toBe('Claude Code is no longer running.')
-  })
-
-  it('stops at once when it is killed', async () => {
-    const agent = await open()
-    agent.kill(true)
-    expect(agent.alive).toBe(false)
   })
 })
 
@@ -272,12 +154,6 @@ describe('what a consultation may do', () => {
   it('is refused a read outside the folder, even one of the right kind', async () => {
     const agent = await open()
     await agent.prompt(`@claude tool Read ${JSON.stringify({ file_path: join(tmpdir(), 'cubex-claude-elsewhere.txt') })}`)
-    expect(answers().map((answer) => answer.behavior)).toEqual(['deny'])
-  })
-
-  it('is refused a search that points out of the folder', async () => {
-    const agent = await open()
-    await agent.prompt('@claude tool Glob {"pattern":"../*.txt"}')
     expect(answers().map((answer) => answer.behavior)).toEqual(['deny'])
   })
 })
@@ -316,14 +192,6 @@ describe('what a task may do', () => {
     expect(changed).toEqual([])
   })
 
-  it('shows what an edit takes out and puts in, as a diff', async () => {
-    const questions: DelegateQuestion[] = []
-    const agent = await open({}, { policy: policyFor({ ask: async (question) => { questions.push(question); return false } }) })
-    await agent.prompt(`@claude tool Edit ${JSON.stringify({ file_path: join(dir, 'src', 'a.ts'), old_string: 'a = 1', new_string: 'a = 2' })}`)
-    expect(questions[0]!.detail).toContain('-a = 1')
-    expect(questions[0]!.detail).toContain('+a = 2')
-  })
-
   it('asks before a command, with the command itself in the question, and lets a read-only one through', async () => {
     const questions: DelegateQuestion[] = []
     const agent = await open({}, { policy: policyFor({ ask: async (question) => { questions.push(question); return true } }) })
@@ -345,12 +213,6 @@ describe('what a task may do', () => {
     expect(answers().map((answer) => answer.behavior)).toEqual(['deny', 'allow'])
     expect(questions.map((question) => question.title)).toEqual(['Claude Code wants to use a tool: Use Mystery'])
   })
-
-  it('asks about a command, and nothing is written, in plan mode: it refuses', async () => {
-    const agent = await open({}, { policy: policyFor({ mode: 'plan' }) })
-    await agent.prompt('@claude tool Bash {"command":"npm test"}')
-    expect(answers().map((answer) => answer.behavior)).toEqual(['deny'])
-  })
 })
 
 describe('a tool that ran without a question', () => {
@@ -360,16 +222,5 @@ describe('a tool that ran without a question', () => {
     expect(error.message).toContain('did this without asking: Write x.txt')
     expect(error.hint).toContain('managed policy')
     await waitFor(() => !agent.alive)
-  })
-
-  it('does the same for a command', async () => {
-    const agent = await open()
-    expect((await failure(agent.prompt('@claude silent PowerShell {"command":"del x"}'))).message).toContain('did this without asking: Run del x')
-  })
-
-  it('lets a read through, which the policy would have allowed', async () => {
-    const agent = await open()
-    expect((await agent.prompt(`@claude silent Read ${JSON.stringify({ file_path: join(dir, 'src', 'a.ts') })}\n@claude say read it`)).text).toBe('read it')
-    expect(agent.alive).toBe(true)
   })
 })

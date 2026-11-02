@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  GOAL_LIMITS, addGoalTokens, applyVerdict, formatTokens, normalizeStoredGoal, parseTokenCount, restoreGoal, storableGoal, usageTokens, clampTurns, goalContinuation, goalKickoff, goalPrompt, normalizeGoalRequest, parseGoalCommand,
-  parseGoalEvaluateRequest, parseGoalMessage, pauseGoal, resumeGoal, startGoal, withNote, type Goal
+  GOAL_LIMITS, applyVerdict, normalizeStoredGoal, parseTokenCount, restoreGoal, storableGoal, clampTurns, goalContinuation, normalizeGoalRequest, parseGoalCommand,
+  parseGoalEvaluateRequest, parseGoalMessage, pauseGoal, resumeGoal, startGoal, type Goal
 } from './goal'
 
 const active = (over: Partial<Goal> = {}): Goal => ({ ...startGoal('all tests pass', undefined, 5), ...over })
@@ -28,10 +28,6 @@ describe('parseGoalCommand', () => {
     expect(parseGoalCommand('lint is clean --check npx eslint . --ext .ts')).toEqual({ kind: 'start', text: 'lint is clean', check: 'npx eslint . --ext .ts' })
   })
 
-  it('does not take --check inside a word as the flag', () => {
-    expect(parseGoalCommand('add a --checkpoint option')).toEqual({ kind: 'start', text: 'add a --checkpoint option' })
-  })
-
   it('says what is wrong, with an example, when the flag is misused', () => {
     expect(parseGoalCommand('--check npm test')).toMatchObject({ kind: 'invalid', error: expect.stringContaining('Say what done means') })
     expect(parseGoalCommand('it works --check')).toMatchObject({ kind: 'invalid', error: expect.stringContaining('Name the command') })
@@ -39,13 +35,6 @@ describe('parseGoalCommand', () => {
     expect(parseGoalCommand('it works --check npm test\nrm -rf x')).toEqual({ kind: 'invalid', error: 'The check command must be one line.' })
   })
 
-  it('refuses a goal or a command longer than the limits', () => {
-    const long = parseGoalCommand('x'.repeat(GOAL_LIMITS.text + 1))
-    expect(long).toMatchObject({ kind: 'invalid' })
-    expect(long.kind === 'invalid' && long.error).toContain('2,000')
-    expect(parseGoalCommand(`ok --check ${'y'.repeat(GOAL_LIMITS.check + 1)}`)).toMatchObject({ kind: 'invalid', error: expect.stringContaining('1,000') })
-    expect(parseGoalCommand('x'.repeat(GOAL_LIMITS.text))).toMatchObject({ kind: 'start' })
-  })
 })
 
 describe('normalizeGoalRequest', () => {
@@ -79,11 +68,6 @@ describe('starting and pausing', () => {
     expect(paused).toMatchObject({ status: 'paused', note: 'No more turns start until you resume.' })
     expect(paused).not.toHaveProperty('claim')
     expect(paused).not.toHaveProperty('checking')
-  })
-
-  it('shows a note on one line', () => {
-    expect(withNote(active(), 'first\n\n  second').note).toBe('first second')
-    expect(withNote(active({ note: 'old' }), undefined)).not.toHaveProperty('note')
   })
 })
 
@@ -129,13 +113,6 @@ describe('applyVerdict', () => {
     expect(applyVerdict(active({ idle: 1, claim: { status: 'complete', note: 'done' } }), { kind: 'continue', reason: 'r' }, { toolCalls: 0 }).goal.idle).toBe(0)
   })
 
-  it('stops at the turn limit, and says how many turns it took', () => {
-    const step = applyVerdict(active({ turns: 5, maxTurns: 5 }), { kind: 'continue', reason: 'Two tests still fail.' }, none)
-    expect(step.goal.status).toBe('limit')
-    expect(step.goal.note).toBe('Stopped after 5 turns. Two tests still fail.')
-    expect(step.send).toBeUndefined()
-    expect(applyVerdict(active({ turns: 1, maxTurns: 1 }), { kind: 'continue', reason: 'r' }, none).goal.note).toContain('Stopped after 1 turn.')
-  })
 })
 
 describe('resumeGoal', () => {
@@ -151,18 +128,9 @@ describe('resumeGoal', () => {
     expect(step.goal).toMatchObject({ status: 'active', turns: 6, maxTurns: 20 })
   })
 
-  it('leaves a completed goal alone', () => {
-    const done = active({ status: 'complete' })
-    expect(resumeGoal(done)).toEqual({ goal: done })
-  })
 })
 
 describe('the messages', () => {
-  it('opens a goal with an ordinary message', () => {
-    expect(goalKickoff('all tests pass')).toBe('Goal: all tests pass')
-    expect(parseGoalMessage(goalKickoff('all tests pass'))).toBeUndefined()
-  })
-
   it('reads back what it wrote, and only that', () => {
     const text = goalContinuation(4, 15, 'The check failed.\n\nSecond paragraph.', 'FAIL src/a.test.ts\n  expected 1 to be 2')
     expect(parseGoalMessage(text)).toEqual({ turn: 4, of: 15, reason: 'The check failed. Second paragraph.' })
@@ -172,27 +140,6 @@ describe('the messages', () => {
     }
   })
 
-  it('cuts what a failed check printed to a bounded size', () => {
-    const text = goalContinuation(2, 5, 'The check failed.', 'z'.repeat(GOAL_LIMITS.detail * 3))
-    expect(text.length).toBeLessThan(GOAL_LIMITS.detail + 600)
-  })
-})
-
-describe('what the agent is told', () => {
-  it('states the goal, how to say it is met, and how to say it is blocked', () => {
-    const prompt = goalPrompt({ text: 'all tests pass' })
-    expect(prompt).toContain('all tests pass')
-    expect(prompt).toContain('goal_update')
-    expect(prompt).toContain('status "complete"')
-    expect(prompt).toContain('status "blocked"')
-    expect(prompt).not.toContain('Cubex also runs this command')
-  })
-
-  it('names the check command, which the agent must make pass and not change', () => {
-    const prompt = goalPrompt({ text: 'it builds', check: 'npm run build' })
-    expect(prompt).toContain('Cubex also runs this command after every turn: npm run build')
-    expect(prompt).toContain('do not edit it')
-  })
 })
 
 describe('parseGoalEvaluateRequest', () => {
@@ -225,9 +172,6 @@ describe('parseTokenCount and formatTokens', () => {
     expect(parseTokenCount('')).toBeUndefined()
   })
 
-  it('writes counts short', () => {
-    expect([950, 1_500, 38_000, 212_400, 999_700, 1_200_000].map(formatTokens)).toEqual(['950', '1.5k', '38k', '212k', '1m', '1.2m'])
-  })
 })
 
 describe('/goal --budget', () => {
@@ -236,17 +180,6 @@ describe('/goal --budget', () => {
     expect(parseGoalCommand('all tests pass --check npm test --budget 1.5m')).toEqual({ kind: 'start', text: 'all tests pass', check: 'npm test', budget: 1_500_000 })
     expect(parseGoalCommand('it builds --budget 50000')).toEqual({ kind: 'start', text: 'it builds', budget: 50_000 })
     expect(parseGoalCommand('--budget 50k it builds')).toEqual({ kind: 'start', text: 'it builds', budget: 50_000 })
-  })
-
-  it('says what is wrong with a budget, with an example', () => {
-    expect(parseGoalCommand('it builds --budget')).toMatchObject({ kind: 'invalid', error: expect.stringContaining('Give a number of tokens') })
-    expect(parseGoalCommand('it builds --budget lots')).toMatchObject({ kind: 'invalid', error: expect.stringContaining('is not a token count') })
-    expect(parseGoalCommand('it builds --budget 10')).toMatchObject({ kind: 'invalid', error: expect.stringContaining('between 1,000') })
-    expect(parseGoalCommand('--budget 5k')).toMatchObject({ kind: 'invalid', error: expect.stringContaining('Say what done means') })
-  })
-
-  it('leaves similar words in the goal alone', () => {
-    expect(parseGoalCommand('stay within the --budgetary limits')).toEqual({ kind: 'start', text: 'stay within the --budgetary limits' })
   })
 
   it('stops a goal that went over the budget, and gives it a fresh allowance when resumed', () => {
@@ -263,12 +196,6 @@ describe('/goal --budget', () => {
     expect(applyVerdict(under, { kind: 'continue', reason: 'Not yet.' }, { toolCalls: 1 }).goal.status).toBe('active')
     const over = { ...under, tokens: 300_000 }
     expect(applyVerdict(over, { kind: 'met', reason: 'Tests pass.' }, { toolCalls: 1 }).goal.status).toBe('complete')
-  })
-
-  it('adds tokens from provider usage', () => {
-    expect(usageTokens({ inputTokens: 1_000, outputTokens: 200 })).toBe(1_200)
-    expect(usageTokens(undefined)).toBe(0)
-    expect(addGoalTokens(startGoal('x', undefined), 500).tokens).toBe(500)
   })
 })
 

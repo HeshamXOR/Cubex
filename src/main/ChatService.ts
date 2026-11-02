@@ -7,10 +7,12 @@ import { DEFAULT_RETRY_POLICY } from '@core/types'
 import type {
   AIMessage,
   AIRequest,
+  AIResponse,
   AIStreamEvent,
   ExecutableTool,
   GatewayEvent,
   MessageContentPart,
+  ProviderKind,
   RoutingPolicy,
   RoutingTarget,
   ToolCall,
@@ -20,7 +22,7 @@ import type {
 } from '@core/types'
 import { userMessage, assistantMessage, assistantTurn } from '@core/builders'
 import { parseXmlToolCalls, mapXmlToolCall, stripCodeForToolParsing, type ParsedXmlToolCall } from '@core/tools/xmlToolCalls'
-import type { ChatEvent, ChatStartRequest, PermissionAsk, PermissionDecision, PermissionMode, PermissionRule, PlanAsk, PlanDecision, QuestionAsk } from '@shared/ipc'
+import type { ChatEvent, ChatStartRequest, ContextUsageSnapshot, PermissionAsk, PermissionDecision, PermissionMode, PermissionRule, PlanAsk, PlanDecision, QuestionAsk } from '@shared/ipc'
 import { conversationRepo, usageRepo } from './db'
 import { getSettings } from './config'
 import { createFileTools, parseDiffMarker, parseDiffBody, parseFileActivities, fileMutationPaths } from './tools/fileTools'
@@ -62,7 +64,15 @@ import { logger } from './logger'
 import { dataDir } from './paths'
 import { PlanStore, PlanReviews, planResolutionResult, validatePlanInput } from './plans'
 import { buildHarnessSystemPrompt } from './systemPrompt'
-import { estimateContextUsage, type ContextSystemSource } from './contextUsage'
+import { namesSkill, profileFor, readProfileSetting, toolsToDrop, type HarnessTier } from './modelProfiles'
+import { repairToolCall } from './toolCallRepair'
+import { repoMaps } from './repoMap'
+import { reviewTurn, reviewerTarget } from './turnReviewer'
+import { TurnDiff } from './turnDiff'
+import {
+  ProjectCommandStore, canonicalCheck, detectCheckCommands, isCheckCommand, needsCheck, renderProjectCommands, suggestChecks, worthChecking, type CheckCommand
+} from './projectCommands'
+import { effectiveContextWindow, estimateContextUsage, type ContextSystemSource } from './contextUsage'
 import { ContextAnchorStore } from './contextAnchor'
 import { formatSummaryMessage, selectContext } from './contextHistory'
 import { CompactionCoordinator } from './compactionCoordinator'
@@ -95,6 +105,12 @@ const MAX_TOOL_ITERATIONS = 50
 /** How many times Stop hooks may send the agent back to work in one turn. After that the turn ends, whatever they say. */
 const STOP_HOOK_MAX_CONTINUATIONS = 3
 const STOP_HOOK_CAP_NOTICE = `\n\n_A Stop hook asked for more work ${STOP_HOOK_MAX_CONTINUATIONS} times, so Cubex ended the turn here. Check what the hook's command does when it runs again._`
+/** How long the first request of a task waits for the project map before it goes without one. */
+const PROJECT_MAP_WAIT_MS = 1_500
+/** Added to a reply that ends with edits no check has run since, after the model was asked once to run one. */
+const NOT_CHECKED_NOTICE = '\n\n_These changes were not checked._'
+/** A message that tells the agent not to run anything turns the end-of-turn check off for that turn. */
+const NO_RUN_REQUEST = /\b(?:don['\u2019]?t|do not)\s+run\b/i
 const ITERATION_LIMIT_NOTICE = `\n\n_Cubex paused this turn at the ${MAX_TOOL_ITERATIONS}-request tool-iteration limit. Reply "continue" to keep going._`
 /** Writes here can change how git, Cubex or other agents execute: never auto-approved. */
 const PROTECTED_PATH = /(?:^|[\\/])(?:\.git|\.cubex|\.claude|\.agents|\.codex|\.vscode|\.husky)(?:[\\/]|$)/i
@@ -132,6 +148,35 @@ function canonicalToolInput(value: unknown): string {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return item
     return Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b)))
   }) ?? 'null'
+}
+
+/** The assistant turn with its tool_use blocks carrying the calls as they were mended, so the next request shows what ran. */
+function withCalls(message: AIMessage, calls: readonly ToolCall[]): AIMessage {
+  const byId = new Map(calls.map((call) => [call.id, call]))
+  return {
+    ...message,
+    content: message.content.map((part) => {
+      if (part.type !== 'tool_use') return part
+      const call = byId.get(part.id)
+      return call && (call.name !== part.name || call.input !== part.input) ? { ...part, name: call.name, input: call.input } : part
+    })
+  }
+}
+
+/**
+ * What a reply adds to the history the next request carries. A reply that calls tools stays whole, its thinking
+ * with it; one that ends the turn is kept as its text, which is all the record of a turn keeps.
+ */
+function retainedReply(response: AIResponse): AIMessage | undefined {
+  if (response.toolCalls.length > 0) return assistantTurn(response)
+  return response.text.trim() ? assistantMessage(response.text) : undefined
+}
+
+/** File names for a sentence: "a.ts", "a.ts and b.ts", "a.ts, b.ts and c.ts", "a.ts, b.ts, c.ts and 2 more". */
+function listFiles(paths: readonly string[]): string {
+  if (paths.length <= 1) return paths[0] ?? 'files'
+  if (paths.length <= 3) return `${paths.slice(0, -1).join(', ')} and ${paths[paths.length - 1]}`
+  return `${paths.slice(0, 3).join(', ')} and ${paths.length - 3} more`
 }
 
 /** Match read recovery to a single file; file tools still enforce all access checks. */
@@ -215,6 +260,27 @@ function toWireError(error: NormalizedAIError): NormalizedAIError {
 /** The request settings a turn carries over to the next turn the main process starts for the person. */
 type TurnSettings = Pick<ChatStartRequest, 'policy' | 'systemPrompt' | 'subagentEnabled' | 'fileToolsEnabled' | 'permissionMode' | 'longContext' | 'peers'>
 
+/**
+ * What a task's prompt says about its project, settled on the task's first turn and kept: the same text every turn means a
+ * provider's prompt cache keeps hitting. It is built again after a summary, or when the person changes the task's folder.
+ */
+interface ProjectContext {
+  workspace: string
+  tier: HarnessTier
+  /** False when the map was still being built after the wait: the next turn tries again rather than go without it for good. */
+  settled: boolean
+  map?: string
+  commands?: string
+}
+
+/** What a turn knows about the project's checks and its own edits, for the loop's end-of-turn work. */
+interface TurnChecks {
+  /** The files this turn wrote, as they were before. The reviewer reads the diff. */
+  diff: TurnDiff
+  /** What the project's own files say checks it. */
+  detected: CheckCommand[]
+}
+
 /** What the renderer may change when it sends review comments: the model and the permission mode shown in its composer. */
 export interface ReviewSendOverrides {
   target?: RoutingTarget
@@ -291,6 +357,11 @@ export class ChatService {
   private readonly permissionRules = new PermissionRuleStore(join(dataDir(), 'permission-rules.json'), {
     onError: (error) => logger.warn(`Permission rules: ${String(error)}`)
   })
+  /** The checks that have passed in each project: named in the prompt, and the first thing the end-of-turn check suggests. */
+  private readonly projectCommands = new ProjectCommandStore(join(dataDir(), 'project-commands.json'), {
+    onError: (error) => logger.warn(`Project commands: ${String(error)}`)
+  })
+  private readonly projectContext = new Map<string, ProjectContext>()
   public readonly processManager: ProcessManager
 
   constructor(
@@ -389,6 +460,8 @@ export class ChatService {
         ? 'Saved plans at the start of this turn, newest first (up to 10). Later tool results supersede this catalog.\n' +
           savedPlans.slice(0, 10).map((plan) => JSON.stringify({ id: plan.id, title: plan.title, status: plan.status })).join('\n')
         : undefined
+      // What the turn writes, kept for the reviewer. It lives as long as the turn.
+      const turnDiff = new TurnDiff()
       // The task owns its working folder; switching the global project selector
       // must never redirect a running task's file tools or hooks.
       const workspace = conversationRepo.get(req.conversationId)?.workspacePath
@@ -462,6 +535,7 @@ export class ChatService {
       if (req.fileToolsEnabled && workspace) {
         const turnSeq = this.checkpoints.beginTurn(req.conversationId, req.messageId)
         for (const t of createFileTools(workspace, (p, before, existed, after) => {
+          turnDiff.note(p, before, existed)
           // Review tracking never throws, so it goes first: the edit stays reviewable even if the checkpoint fails.
           this.sessionChanges.record(req.conversationId, p, before, existed, after)
           this.checkpoints.record(req.conversationId, turnSeq, p, before, existed, after)
@@ -504,6 +578,7 @@ export class ChatService {
             ask: (question, signal) => this.askDelegate(streamId, question, signal),
             progress: (activity) => this.emit({ streamId, kind: 'tool', tool: { id: slot.callId, name: DELEGATE_TOOL, phase: 'running', delegate: activity } }),
             recordChange: (path, before, existed) => {
+              turnDiff.note(path, before, existed)
               this.sessionChanges.record(req.conversationId, path, before, existed)
               this.checkpoints.record(req.conversationId, turnSeq, path, before, existed)
             },
@@ -549,6 +624,30 @@ export class ChatService {
         for (const t of mcpTools) tools.set(t.definition.name, t)
       }
 
+      // What this model is shown (see modelProfiles.ts): its own edit tool, and for small and open models a shorter list
+      // and prompt. Only tools nothing else depends on are removed, so plan mode, a goal and the user's MCP tools stay.
+      const modelInfo = this.providers.getModelInfo(policy.primary.providerId, policy.primary.model)
+      let providerKind: ProviderKind | undefined
+      try { providerKind = this.providers.resolve(policy.primary.providerId)?.kind } catch { /* a blocked provider fails the request itself */ }
+      const profile = profileFor({
+        modelId: policy.primary.model,
+        ...(providerKind ? { providerKind } : {}),
+        ...(modelInfo?.displayName ? { displayName: modelInfo.displayName } : {}),
+        ...(modelInfo?.location === 'local' ? { isLocal: true } : {}),
+        ...(modelInfo?.parameterCount ? { parameterCount: modelInfo.parameterCount } : {}),
+        setting: readProfileSetting(getSettings().ai?.harnessProfile)
+      })
+      for (const name of toolsToDrop(tools.keys(), profile, {
+        planMode: (req.permissionMode ?? 'default') === 'plan',
+        skillNamed: req.skill !== undefined || namesSkill(req.userText, skills.map((skill) => skill.name))
+      })) tools.delete(name)
+
+      // The project's map and check commands go in the prompt only for a task that may read its files. Both are settled on the
+      // task's first turn (see ProjectContext), so a slow map costs that turn at most a moment and the prompt then stays put.
+      const detectedChecks = workspace && tools.has('run_command') ? detectCheckCommands(workspace) : []
+      const project = req.fileToolsEnabled && workspace
+        ? await this.projectContextFor(req.conversationId, workspace, profile.tier, detectedChecks, controller.signal) : undefined
+
       // Build a fresh permission section after plan approval; never leave stale
       // read-only instructions in the implementation request.
       const projectInstructions = workspace ? loadProjectInstructions(workspace) : undefined
@@ -562,9 +661,13 @@ export class ChatService {
         mode: nextMode,
         workspace,
         platform: process.platform,
+        tier: profile.tier,
+        parallelTools: profile.parallelTools,
         ...(shellSyntaxNote ? { shellSyntaxNote } : {}),
         userInstructions: req.systemPrompt,
         projectInstructions,
+        ...(project?.map ? { projectMap: project.map } : {}),
+        ...(project?.commands ? { projectCommands: project.commands } : {}),
         skillsCatalog: skillInstructions,
         planContext,
         ...(goal ? { goal } : {}),
@@ -581,6 +684,9 @@ export class ChatService {
         messages,
         ...(system ? { system } : {}),
         ...(tools.size ? { tools: [...tools.values()].map((t) => t.definition) } : {}),
+        // The model's recommended temperature, unless the person set one for it.
+        ...(profile.temperature !== undefined && policy.primary.params?.temperature === undefined && (!modelInfo || modelInfo.capabilities.includes('temperature'))
+          ? { params: { temperature: profile.temperature } } : {}),
         stream: true
       }
       const headers = req.longContext ? { 'x-cubex-long-context': '1' } : undefined
@@ -595,7 +701,7 @@ export class ChatService {
         detail: toolDisplayDetail(`# Skill: ${invoked.skill.name}\nSource: ${SKILL_SOURCE_LABEL[invoked.skill.source]}\n\n${invoked.body}`, false, false)
       } })
       // UserPromptSubmit hooks run first thing in the loop: they can stop the turn or add context.
-      void this.runLoop(streamId, req.conversationId, request, policy, tools, controller, mode, systemForMode, () => systemSources, workspace, headers, autoOutputLimit, req.userText)
+      void this.runLoop(streamId, req.conversationId, request, policy, tools, controller, mode, systemForMode, () => systemSources, workspace, headers, autoOutputLimit, req.userText, { diff: turnDiff, detected: detectedChecks })
       return { streamId }
     } catch (error) {
       controller.abort()
@@ -603,6 +709,32 @@ export class ChatService {
       this.eventStreams.delete(streamId)
       throw error
     }
+  }
+
+  /**
+   * The project map and commands for a task's prompt. The map is raced against PROJECT_MAP_WAIT_MS and left to finish in the
+   * background when it loses, so a big folder delays the first turn by a moment and has its map from the next one. Whatever is
+   * settled is kept for the task until a summary or a new folder resets it.
+   */
+  private async projectContextFor(conversationId: string, workspace: string, tier: HarnessTier, detected: CheckCommand[], signal: AbortSignal): Promise<ProjectContext> {
+    const held = this.projectContext.get(conversationId)
+    if (held?.settled && held.workspace === workspace && held.tier === tier) return held
+    const late = Symbol('late')
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const map = await Promise.race([
+      repoMaps.get(workspace, { maxChars: tier === 'lean' ? 3_000 : 6_000, signal }),
+      new Promise<typeof late>((resolveLate) => { timer = setTimeout(() => resolveLate(late), PROJECT_MAP_WAIT_MS) })
+    ])
+    clearTimeout(timer)
+    const commands = renderProjectCommands(this.projectCommands.list(workspace), detected)
+    const context: ProjectContext = {
+      workspace, tier, settled: map !== late,
+      ...(typeof map === 'string' ? { map } : {}),
+      ...(commands ? { commands } : {})
+    }
+    if (map === late) logger.info('The project map was not ready in time; this turn goes without it')
+    this.projectContext.set(conversationId, context)
+    return context
   }
 
   private loadHistory(conversationId: string): AIMessage[] {
@@ -671,6 +803,7 @@ export class ChatService {
     let started = false
     const result = await this.compaction.compact(conversationId, () => {
       started = true
+      this.projectContext.delete(conversationId)
       this.fireHooks({ event: 'PreCompact', session_id: conversationId, trigger: 'manual', cwd }, cwd)
     })
     if (started) {
@@ -680,6 +813,16 @@ export class ChatService {
       }, cwd)
     }
     return result
+  }
+
+  /** The request function the reviewer runs on: the reviewer's own model, billed and counted like the summary of a compaction. */
+  private reviewSender(target: RoutingTarget, conversationId: string, signal: AbortSignal): (request: AIRequest) => ReturnType<AIGateway['send']> {
+    const routing = this.withOutputLimits(this.policyFor(target))
+    return async (request) => {
+      const response = await this.gateway.send(request, routing, { signal })
+      this.captureUsage({ type: 'completed', response }, conversationId)
+      return response
+    }
   }
 
   /** A local model adds nothing to the bill, so a spending cap never applies to it. */
@@ -778,30 +921,42 @@ export class ChatService {
     workspace?: string,
     headers?: Record<string, string>,
     autoOutputLimit = false,
-    userText = ''
+    userText = '',
+    checks: TurnChecks = { diff: new TurnDiff(), detected: [] }
   ): Promise<void> {
     let currentRequest = baseRequest
     let currentTarget = policy.primary
-    const publishContext = (target: RoutingTarget, measuredInputTokens?: number): number => {
-      const model = this.providers.getModelInfo(target.providerId, target.model)
+    /** The snapshot for a request to `target`; `reply` is a response not yet in the request, to be counted as part of it. */
+    const contextFor = (target: RoutingTarget, measuredInputTokens?: number, reply?: AIMessage): ContextUsageSnapshot => {
       // Models marked with the gated 1M beta use their ordinary 200K window
       // until the user enables that header for this request.
-      const contextWindow = model?.contextWindow && model.longContextBeta && headers?.['x-cubex-long-context'] !== '1'
-        ? Math.min(model.contextWindow, 200_000)
-        : model?.contextWindow
+      const contextWindow = effectiveContextWindow(this.providers.getModelInfo(target.providerId, target.model), headers?.['x-cubex-long-context'] === '1')
       const effectiveRequest: AIRequest = {
         ...currentRequest,
+        ...(reply ? { messages: [...currentRequest.messages, reply] } : {}),
         model: target.model,
         ...(target.params ? { params: { ...currentRequest.params, ...target.params } } : {})
       }
-      const context = estimateContextUsage(effectiveRequest, {
+      return estimateContextUsage(effectiveRequest, {
         provider: target.providerId,
         contextWindow,
         measuredInputTokens,
         ...(this.contextAnchors.get(conversationId) ? { anchor: this.contextAnchors.get(conversationId)! } : {}),
         systemSources: getSystemSources()
       })
+    }
+    /** The newest snapshot of this turn. Only the last one is kept, once, when the turn ends. */
+    let latestContext: ContextUsageSnapshot | undefined
+    /** A snapshot was sent, or a compaction made the stored one stale: the stored snapshot is written when the turn ends. */
+    let contextChanged = false
+    const sendContext = (context: ContextUsageSnapshot): void => {
+      latestContext = context
+      contextChanged = true
       this.emit({ streamId, kind: 'context', context })
+    }
+    const publishContext = (target: RoutingTarget, measuredInputTokens?: number): number => {
+      const context = contextFor(target, measuredInputTokens)
+      sendContext(context)
       return context.estimatedTokens
     }
     const onGateway = (event: GatewayEvent): void => {
@@ -850,8 +1005,8 @@ export class ChatService {
     let outputCuts = 0
     /** How many times a Stop hook has sent the agent back to work this turn. */
     let stopContinuations = 0
-    /** What a Stop hook asked for, from the moment a reply ends until the loop adds it to the turn. */
-    let stopFeedback: string | undefined
+    /** What a Stop hook, the done check or the reviewer asked for, from the moment a reply ends until the loop adds it to the turn. */
+    let endFeedback: string | undefined
     /** The Stop hooks ran when the last reply ended, so the end of the turn does not run them a second time. */
     let stopHooksRan = false
     // What the model did this turn, in order, for the record the next turns read (see turnLog.ts).
@@ -863,6 +1018,30 @@ export class ChatService {
     }
     /** Why the turn ended early, for the person: added to the end of the reply, like the iteration limit. */
     let stoppedNotice = ''
+    // The done check: files written since a check last passed, whether any check ran since the last edit (a failing one has
+    // told the agent what it needs to know), and whether it has been asked once already.
+    const unchecked = new Set<string>()
+    let checkTried = false
+    let checkNudged = false
+    let lastCheck: { command: string; passed: boolean; output: string } | undefined
+    const knownChecks = [...this.projectCommands.list(workspace), ...checks.detected.map((entry) => entry.command)]
+    const checkOptOut = NO_RUN_REQUEST.test(userText)
+    // The reviewer is one more request per turn that changed files, once, and only while it is on in Settings.
+    const reviewer = reviewerTarget({ ai: getSettings().ai ?? {} })
+    let reviewed = false
+    let emptyNudged = false
+    const noteCheckRun = (call: ToolCall, text: string, failed: boolean): void => {
+      const input = (call.input ?? {}) as { command?: unknown; background?: unknown }
+      const command = typeof input.command === 'string' ? input.command : ''
+      if (input.background === true || !isCheckCommand(command, knownChecks)) return
+      // A command that was denied, blocked or never started says nothing about the files.
+      if (failed && !/^(?:Exit code: \d|Command terminated by signal)/.test(text)) return
+      checkTried = true
+      lastCheck = { command, passed: !failed, output: text }
+      if (failed) return
+      unchecked.clear()
+      if (workspace) this.projectCommands.remember(workspace, canonicalCheck(command, checks.detected))
+    }
     const RESEARCH_TOOLS = new Set(['web_search', 'web_fetch', 'search_files'])
     const RESEARCH_CAP = 6
     // Fold a finished call into the repeat/failure bookkeeping and build the tool_result the model receives.
@@ -887,13 +1066,75 @@ export class ChatService {
         }
       } else if (FILE_MUTATION_TOOLS.has(call.name) ||
         (call.name === 'run_command' && !isReadOnlyShellCommand(String((call.input as { command?: string } | null)?.command ?? ''), workspace))) workspaceRevision++
-      if (!result.isError && FILE_MUTATION_TOOLS.has(call.name)) fileEdits++
+      if (!result.isError && FILE_MUTATION_TOOLS.has(call.name)) {
+        fileEdits++
+        checkTried = false
+        for (const path of fileMutationPaths(call.name, call.input)) if (needsCheck(path)) unchecked.add(path)
+      }
+      if (call.name === 'run_command') noteCheckRun(call, rawText, !!result.isError)
       return {
         type: 'tool_result',
         toolUseId: call.id,
         content: [{ type: 'text', text }],
         ...(result.isError ? { isError: true } : {})
       }
+    }
+
+    /**
+     * A reply with no tool call is about to end the turn. Three steps may hold it open, once each per turn: an empty reply
+     * after tool work (the agent is asked to carry on or say where it stands), edits that no check has run since (the agent
+     * is asked to run one), then a second model's review of what the turn changed, which sees the check's output. Each
+     * returns a message that sends the agent back to work. Otherwise the turn ends, with a notice when edits are still
+     * unchecked after the agent was asked.
+     */
+    const beforeEnd = async (closingText: string, iter: number): Promise<{ message: string } | { notice: string }> => {
+      const room = iter < MAX_TOOL_ITERATIONS - 1
+      let notice = ''
+      // Open models sometimes stop with nothing to say after a batch of failed calls, which leaves the person with no answer.
+      if (!closingText.trim() && iter > 0 && !emptyNudged && room) {
+        emptyNudged = true
+        logger.info('Asked the agent to continue after an empty reply')
+        return {
+          message: 'Your last reply was empty. If tool calls failed, read their errors, fix the calls and continue the task. When the task is done, reply with a short summary of what you did.'
+        }
+      }
+      if (!checkOptOut && mode !== 'plan' && tools.has('run_command') && unchecked.size > 0 && !checkTried && worthChecking(unchecked, knownChecks)) {
+        if (!checkNudged && room) {
+          checkNudged = true
+          const best = suggestChecks(this.projectCommands.list(workspace), checks.detected, 1)[0]
+          logger.info(`Asked the agent to run a check after edits to ${unchecked.size} file(s)`)
+          return {
+            message: `You changed ${listFiles([...unchecked])} and have not run a check since. Run ${best ? `\`${best}\` (or the project's relevant check)` : "the project's relevant check"} and fix what fails, then finish.`
+          }
+        }
+        notice = NOT_CHECKED_NOTICE
+      }
+      if (reviewer && !reviewed && room && fileEdits > 0 && workspace && mode !== 'plan' && !controller.signal.aborted &&
+        (this.isLocal(reviewer) || !this.budget.blocker(conversationId))) {
+        reviewed = true
+        const diff = await checks.diff.render(workspace)
+        if (diff.trim() && !controller.signal.aborted) {
+          const id = `review-turn-${streamId}`
+          this.emit({ streamId, kind: 'tool', tool: { id, name: 'review_turn', phase: 'running', title: 'Review' } })
+          const verdict = await reviewTurn({
+            task: userText, diff, finalText: closingText, workspace,
+            // The end of the output is where a test run reports what failed.
+            ...(lastCheck ? { checks: `$ ${lastCheck.command} (${lastCheck.passed ? 'passed' : 'failed'})\n${lastCheck.output.slice(-3_500)}` } : {})
+          }, this.reviewSender(reviewer, conversationId, controller.signal), { signal: controller.signal, model: reviewer.model })
+          if (controller.signal.aborted) {
+            this.emit({ streamId, kind: 'tool', tool: { id, name: 'review_turn', phase: 'error', interrupted: true, title: 'Review', detail: 'Cancelled' } })
+            return { notice: '' }
+          }
+          const revise = verdict.verdict === 'revise'
+          this.emit({ streamId, kind: 'tool', tool: { id, name: 'review_turn', phase: 'done', title: 'Review', detail: revise ? 'Sent fixes' : 'Approved' } })
+          if (revise) {
+            return {
+              message: `A second model reviewed your changes against the task and found problems. This is the reviewer's note, not a message from the user:\n\n${verdict.feedback}\n\nFix what is right. If you disagree with an item, say why in your closing reply. Then finish.`
+            }
+          }
+        }
+      }
+      return { notice }
     }
 
     this.budget.beginTurn(conversationId)
@@ -950,6 +1191,10 @@ export class ChatService {
           autoCompactAttempted = auto.attempted
           if (auto.compacted) {
             this.emit({ streamId, kind: 'compacted', summary: auto.compacted.summary, boundaryMessageId: auto.compacted.boundaryMessageId })
+            this.projectContext.delete(conversationId)
+            // The snapshot before the summary no longer describes the context; the request that follows replaces it.
+            latestContext = undefined
+            contextChanged = true
             if (auto.compacted.history) {
               messages.splice(0, historyLength, ...auto.compacted.history)
               historyLength = auto.compacted.history.length
@@ -988,11 +1233,12 @@ export class ChatService {
           if (event.type === 'completed') {
             // Anchor on what the provider says this exact request cost, paired
             // with our estimate of it, before the reply is appended to `messages`.
-            const estimatedAtReport = publishContext(
-              { ...currentTarget, providerId: event.response.provider, model: event.response.model },
-              event.response.usage?.inputTokens
-            )
-            this.contextAnchors.recordUsage(conversationId, event.response.usage, estimatedAtReport)
+            const reported = { ...currentTarget, providerId: event.response.provider, model: event.response.model }
+            const measured = event.response.usage?.inputTokens
+            this.contextAnchors.recordUsage(conversationId, event.response.usage, contextFor(reported, measured).estimatedTokens)
+            // What the meter shows from here on is the NEXT request: this one, which the provider just measured,
+            // plus the reply that joins the history. Anchored on that measurement, not on the one before it.
+            sendContext(contextFor(reported, measured, retainedReply(event.response)))
             completed = event.response
             lastResponse = event.response
             // Some adapters finish with text that was never streamed. Preserve
@@ -1023,13 +1269,26 @@ export class ChatService {
               if (!controller.signal.aborted) {
                 if (answer.kind === 'continue') {
                   stopContinuations++
-                  stopFeedback = answer.message
+                  endFeedback = answer.message
                   this.emit({ streamId, kind: 'tool', tool: { id: `stop-hook-${stopContinuations}`, name: 'stop_hook', phase: 'done', title: 'Stop hook asked for more work', detail: answer.reason.slice(0, 400) } })
                   continue
                 }
                 if (answer.kind === 'capped') {
                   cutNotice = STOP_HOOK_CAP_NOTICE
                   this.emit({ streamId, kind: 'stream', event: { type: 'text_delta', text: cutNotice } })
+                }
+                // No hook wants more work: the done check and the reviewer get their turn. Only one thing holds the turn
+                // open per round, so a hook that asked above has had its way first.
+                const gate = await beforeEnd(event.response.text, iter)
+                if (!controller.signal.aborted) {
+                  if ('message' in gate) {
+                    endFeedback = gate.message
+                    continue
+                  }
+                  if (gate.notice) {
+                    cutNotice += gate.notice
+                    this.emit({ streamId, kind: 'stream', event: { type: 'text_delta', text: gate.notice } })
+                  }
                 }
               }
             }
@@ -1058,6 +1317,9 @@ export class ChatService {
             messages.splice(0, messages.length, ...recovered.messages)
             if (recovered.compacted) {
               this.emit({ streamId, kind: 'compacted', summary: recovered.compacted.summary, boundaryMessageId: recovered.compacted.boundaryMessageId })
+              this.projectContext.delete(conversationId)
+              latestContext = undefined
+              contextChanged = true
               if (recovered.compacted.history) {
                 messages.splice(0, historyLength, ...recovered.compacted.history)
                 historyLength = recovered.compacted.history.length
@@ -1098,10 +1360,24 @@ export class ChatService {
           addToTurn(...(completed.text.trim() ? [assistantMessage(completed.text)] : []), userMessage(cutOffCallNote(used, raisedTo)))
           continue
         }
-        // A Stop hook asked for more work: the reply so far and the hook's message join the turn, and the model answers again.
-        if (stopFeedback !== undefined && completed) {
-          const feedback = stopFeedback
-          stopFeedback = undefined
+        // Calls the model got slightly wrong (a tool name in another style, "5" for 5, arguments one level too deep) are
+        // mended and run as mended. One that cannot be mended runs nothing: the model is told exactly what was wrong.
+        const unmendable = new Map<string, string>()
+        if (calls.length > 0 && toolDefs) {
+          calls = calls.map((call) => {
+            const repaired = repairToolCall(call, toolDefs)
+            if ('error' in repaired) {
+              unmendable.set(call.id, repaired.error)
+              return call
+            }
+            if (repaired.repairs.length > 0) logger.info(`Mended a ${call.name} call: ${repaired.repairs.join('; ')}`)
+            return repaired.call
+          })
+        }
+        // A Stop hook, the done check or the reviewer asked for more work: the reply so far and the message join the turn, and the model answers again.
+        if (endFeedback !== undefined && completed) {
+          const feedback = endFeedback
+          endFeedback = undefined
           addToTurn(...(completed.text.trim() ? [assistantMessage(completed.text)] : []), userMessage(feedback))
           continue
         }
@@ -1120,7 +1396,7 @@ export class ChatService {
         // replayed in the order the model produced them: signed thinking is only
         // valid where it was generated, and models that think between tool calls
         // reject a turn rebuilt as all thinking first (400).
-        addToTurn(assistantTurn(completed, calls))
+        addToTurn(withCalls(assistantTurn(completed, calls), calls))
         const resultParts: AIMessage['content'] = []
         // Calls in this batch were authored under the old mode. Approval takes
         // effect on the next model request, after it receives the review result.
@@ -1138,6 +1414,12 @@ export class ChatService {
         }
         for (const call of calls) {
           if (controller.signal.aborted) break
+          const unmended = unmendable.get(call.id)
+          if (unmended !== undefined) {
+            this.emit({ streamId, kind: 'tool', tool: { id: call.id, name: call.name, phase: 'error', title: describeToolCall(call), detail: toolDisplayDetail(unmended, false, true) } })
+            resultParts.push({ type: 'tool_result', toolUseId: call.id, isError: true, content: [{ type: 'text', text: unmended }] })
+            continue
+          }
           // exit_plan_mode: pause and present the plan for approval. On approval
           // we switch THIS turn's permission mode so the model implements right
           // away (no second "go ahead" round-trip that would restart research).
@@ -1334,6 +1616,12 @@ export class ChatService {
       if (answered && !this.forgotten.has(conversationId)) {
         try { this.turnLog.save(conversationId, answered, [...turn, ...(closing ? [closing] : [])]) }
         catch (error) { logger.warn(`Could not record the turn: ${error instanceof Error ? error.message : String(error)}`) }
+      }
+      // The meter's last state goes on record once per turn, so the task shows it when it is opened again. After a
+      // compaction with no request following it, this clears the stale snapshot instead.
+      if (contextChanged && !this.forgotten.has(conversationId)) {
+        try { conversationRepo.update(conversationId, { lastContext: latestContext }) }
+        catch (error) { logger.warn(`Could not keep the context snapshot: ${error instanceof Error ? error.message : String(error)}`) }
       }
       this.active.delete(streamId)
       this.eventStreams.delete(streamId)
@@ -1997,6 +2285,7 @@ export class ChatService {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.projectCommands.flush()
     for (const [, c] of this.active) c.abort()
     this.active.clear()
     for (const [, c] of this.goalChecks) c.abort()
@@ -2052,6 +2341,7 @@ export class ChatService {
     }
     this.checkpoints.clear(conversationId)
     this.compaction.forget(conversationId)
+    this.projectContext.delete(conversationId)
     this.workingSets.forget(conversationId)
     this.startedSessions.delete(conversationId)
     this.budget.forget(conversationId)

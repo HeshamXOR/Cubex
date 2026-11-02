@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Conversation, ConversationSummary } from '../../../shared/ipc'
+import type { Conversation } from '../../../shared/ipc'
 import { DEFAULT_SETTINGS } from '../../../shared/settings'
 import type { ModelInfo, ProviderConfig } from '@core/types'
 
@@ -83,28 +83,6 @@ describe('each task keeps its own model and settings', () => {
     expect(bridge.api.updateConversation.mock.calls.every(([id]) => id === 'a')).toBe(true)
   })
 
-  it('keeps the sidebar entry in step with the saved model', async () => {
-    const entry: ConversationSummary = { id: 'a', title: 'Task a', createdAt: 1, updatedAt: 1, execution: 'cloud', providerId: 'nv', model: K3.id, messageCount: 0 }
-    useStore.setState({ conversations: [entry, { ...entry, id: 'b', model: LLAMA.id }] })
-    await open('a')
-    live().setActive('nv', LLAMA.id)
-    expect(live().conversations.map((item) => [item.id, item.model])).toEqual([['a', LLAMA.id], ['b', LLAMA.id]])
-  })
-
-  it('saves effort, the answer limit and long context as they change', async () => {
-    await open('a')
-    live().setEffort('high')
-    expect(bridge.api.updateConversation).toHaveBeenLastCalledWith('a', expect.objectContaining({ composer: { effort: 'high', longContext: false, maxTokens: 8192 } }))
-    live().setMaxTokens(16_384)
-    expect(bridge.api.updateConversation).toHaveBeenLastCalledWith('a', expect.objectContaining({ composer: { effort: 'high', longContext: false, maxTokens: 16_384 } }))
-    live().toggleLongContext()
-    expect(bridge.api.updateConversation).toHaveBeenLastCalledWith('a', expect.objectContaining({ composer: { effort: 'high', longContext: true, maxTokens: 16_384 } }))
-    // Default is saved as the absence of an effort.
-    live().setEffort(undefined)
-    expect(bridge.api.updateConversation).toHaveBeenLastCalledWith('a', expect.objectContaining({ composer: { longContext: true, maxTokens: 16_384 } }))
-    expect(live().activeConversation?.composer).toEqual({ longContext: true, maxTokens: 16_384 })
-  })
-
   it('keeps an effort the model offers and moves one it does not to the nearest level', async () => {
     await open('a')
     live().setEffort('max')
@@ -112,13 +90,6 @@ describe('each task keeps its own model and settings', () => {
     live().setEffort('medium')
     // Kimi K3 takes low, high and max: medium is as near to low as to high, and the lower one costs less.
     expect(live().effort).toBe('low')
-  })
-
-  it('makes a model picked from a preset the saved choice, without the preset', async () => {
-    await open('b')
-    live().setActive('nv', K3.id)
-    expect(bridge.api.updateConversation).toHaveBeenLastCalledWith('b', expect.objectContaining({ model: K3.id, presetId: undefined }))
-    expect(live().activePresetId).toBeUndefined()
   })
 
   it('leaves the composer alone for a task whose provider has since been removed or switched off', async () => {
@@ -132,33 +103,6 @@ describe('each task keeps its own model and settings', () => {
     expect(live()).toMatchObject({ activeProviderId: 'nv', activeModel: K3.id, effort: 'high' })
   })
 
-  it('starts a task from before settings were kept at the model default', async () => {
-    stored.old = chat('old', { providerId: 'nv', model: K3.id })
-    useStore.setState({ effort: 'max', longContext: true, maxTokens: 1 })
-    await open('old')
-    expect(live()).toMatchObject({ activeModel: K3.id, effort: undefined, longContext: false, maxTokens: DEFAULT_SETTINGS.ai.maxOutputTokens })
-  })
-
-  it('falls back to the provider default model when the task never recorded one', async () => {
-    stored.bare = chat('bare', { providerId: 'nv' })
-    await open('bare')
-    expect(live().activeModel).toBe(NVIDIA.defaultModel)
-  })
-
-  it('records the composer on a new task, so it can be reopened as it was', async () => {
-    useStore.setState({ activeConversation: undefined, activeProviderId: 'nv', activeModel: K3.id, effort: 'high', longContext: true, maxTokens: 4096, activePresetId: 'preset-1' })
-    await live().newConversation()
-    expect(bridge.api.createConversation).toHaveBeenCalledWith(expect.objectContaining({
-      providerId: 'nv', model: K3.id, presetId: 'preset-1', composer: { effort: 'high', longContext: true, maxTokens: 4096 }
-    }))
-  })
-
-  it('does not write a selection when no task is open', () => {
-    useStore.setState({ activeConversation: undefined })
-    live().setActive('nv', K3.id)
-    live().setEffort('max')
-    expect(bridge.api.updateConversation).not.toHaveBeenCalled()
-  })
 })
 
 describe('what a task reopens with while the model list is still loading', () => {

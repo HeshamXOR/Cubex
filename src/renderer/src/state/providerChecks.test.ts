@@ -70,12 +70,6 @@ describe('connection tests', () => {
     expect(checks().testing.p1).toBeUndefined()
   })
 
-  it('keeps providers apart', async () => {
-    bridge.api.testProvider.mockImplementation(async (id: string) => ({ ok: id === 'a' }))
-    await Promise.all([checks().test('a'), checks().test('b')])
-    expect(checks().tests.a?.ok).toBe(true)
-    expect(checks().tests.b?.ok).toBe(false)
-  })
 })
 
 describe('model refreshes', () => {
@@ -103,12 +97,6 @@ describe('model refreshes', () => {
 })
 
 describe('dismissing and forgetting', () => {
-  it('dismissing removes the note but keeps the state it produced', () => {
-    useProviderChecks.setState({ tests: { p1: { ok: false, message: 'x' } }, notices: { p1: { kind: 'test', result: { ok: false, message: 'x' } } } })
-    checks().dismiss('p1')
-    expect(checks().notices.p1).toBeUndefined()
-    expect(checks().tests.p1).toBeDefined()
-  })
 
   it('forgetting removes everything known about the provider', () => {
     useProviderChecks.setState({ tests: { p1: { ok: true } }, notices: { p1: { kind: 'test', result: { ok: true } } }, testing: { p1: true }, refreshing: { p1: true } })

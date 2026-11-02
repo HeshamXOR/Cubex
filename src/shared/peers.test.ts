@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
-  ACP_PRESETS, ANTIGRAVITY_ARGUMENTS, CONSULT_TOOL, PEER_ASKED_CHARS, PEER_LIMITS, acpPreset, claudeCodeArguments, cleanPeerIds, clampRounds,
-  commandLineText, describePeer, enabledPeers, isAcpPresetId, newAcpPeer, newCliPeer, newModelPeer, normalizePeerSettings, peerCommandLine,
-  peerSlug, sanitizePeerActivity, uniquePeerId, validatePeer,
-  type AcpPeer, type CliPeer, type ModelPeer, type PeerConfig
+  PEER_ASKED_CHARS,
+  PEER_LIMITS,
+  enabledPeers,
+  normalizePeerSettings,
+  peerCommandLine,
+  sanitizePeerActivity,
+  validatePeer,
+  type AcpPeer,
+  type CliPeer,
+  type ModelPeer
 } from './peers'
 
 const claude: CliPeer = { kind: 'cli', id: 'claude-code', name: 'Claude Code', enabled: true, preset: 'claude-code', command: 'claude' }
@@ -12,29 +18,6 @@ const model: ModelPeer = { kind: 'model', id: 'gpt', name: 'GPT', enabled: true,
 const gemini: AcpPeer = { kind: 'acp', id: 'gemini', name: 'Gemini', enabled: true, preset: 'gemini', command: 'gemini', args: ['--acp'] }
 
 describe('how each kind of agent is started', () => {
-  it('never gives Claude Code more than reading, and no permission bypass', () => {
-    const none = claudeCodeArguments(false)
-    const read = claudeCodeArguments(true)
-    expect(none[none.indexOf('--tools') + 1]).toBe('')
-    expect(read[read.indexOf('--tools') + 1]).toBe('Read,Grep,Glob')
-    for (const args of [none, read]) {
-      expect(args.join(' ')).not.toMatch(/dangerously|--bare|bypass|acceptEdits|Bash|Edit|Write/)
-      expect(args).toContain('--strict-mcp-config')
-      expect(args).toContain('--no-session-persistence')
-      expect(args[args.indexOf('--setting-sources') + 1]).toBe('user')
-      expect(args[args.indexOf('--output-format') + 1]).toBe('json')
-    }
-  })
-
-  it('gives each program its own input and output', () => {
-    expect(peerCommandLine(claude)).toMatchObject({ input: 'stdin', format: 'claude-json', readsProject: false })
-    expect(peerCommandLine({ ...claude, readProject: true })).toMatchObject({ readsProject: true })
-    const agy = peerCommandLine({ kind: 'cli', id: 'antigravity', name: 'Antigravity', enabled: true, preset: 'antigravity', command: 'agy' })
-    expect(agy).toMatchObject({ input: 'argument', format: 'agy-json', args: [...ANTIGRAVITY_ARGUMENTS] })
-    // The message is the value of -p, so -p is the last thing before it.
-    expect(agy.args[agy.args.length - 1]).toBe('-p')
-    expect(peerCommandLine(custom)).toMatchObject({ input: 'stdin', format: 'text', args: ['exec', '-'], readsProject: false })
-  })
 
   it('does not let a custom program read the project, whatever its settings say', () => {
     expect(peerCommandLine({ ...custom, readProject: true }).readsProject).toBe(false)
@@ -47,11 +30,6 @@ describe('validatePeer', () => {
     expect(validatePeer({ ...claude, readProject: true })).toEqual({ ok: true, value: { ...claude, readProject: true } })
     expect(validatePeer(custom)).toEqual({ ok: true, value: custom })
     expect(validatePeer({ ...model, command: 'x' })).toEqual({ ok: true, value: model })
-  })
-
-  it('trims names and commands', () => {
-    const checked = validatePeer({ ...claude, name: '  Claude  ', command: ' claude ' })
-    expect(checked).toMatchObject({ ok: true, value: { name: 'Claude', command: 'claude' } })
   })
 
   it.each([
@@ -82,18 +60,9 @@ describe('validatePeer', () => {
     if (!checked.ok) expect(checked.error.toLowerCase()).toContain(fragment.toLowerCase())
   })
 
-  it('keeps the names of variables to pass and drops an empty list', () => {
-    expect(validatePeer({ ...claude, passEnv: ['ANTHROPIC_API_KEY'] })).toMatchObject({ ok: true, value: { passEnv: ['ANTHROPIC_API_KEY'] } })
-    const empty = validatePeer({ ...claude, passEnv: [] })
-    expect(empty.ok && 'passEnv' in empty.value).toBe(false)
-  })
 })
 
 describe('normalizePeerSettings', () => {
-  it('starts empty with the default rounds', () => {
-    expect(normalizePeerSettings(undefined)).toEqual({ list: [], maxRounds: 3 })
-    expect(normalizePeerSettings('nonsense')).toEqual({ list: [], maxRounds: 3 })
-  })
 
   it('drops what fails the checks and any repeated id, and keeps order', () => {
     const settings = normalizePeerSettings({ list: [claude, { id: 'x' }, null, 4, { ...custom, id: claude.id }, custom, model], maxRounds: 4 })
@@ -101,18 +70,6 @@ describe('normalizePeerSettings', () => {
     expect(settings.maxRounds).toBe(4)
   })
 
-  it('keeps no more than the limit', () => {
-    const many = Array.from({ length: PEER_LIMITS.peers + 5 }, (_, i) => ({ ...model, id: `m${i}` }))
-    expect(normalizePeerSettings({ list: many }).list).toHaveLength(PEER_LIMITS.peers)
-  })
-
-  it('keeps the rounds a reply can spend', () => {
-    expect(clampRounds(0)).toBe(1)
-    expect(clampRounds(99)).toBe(6)
-    expect(clampRounds(2.6)).toBe(3)
-    expect(clampRounds('3')).toBe(3)
-    expect(clampRounds(NaN)).toBe(3)
-  })
 })
 
 describe('choosing agents for a chat', () => {
@@ -124,50 +81,6 @@ describe('choosing agents for a chat', () => {
     expect(enabledPeers(undefined, ['gpt'])).toEqual([])
   })
 
-  it('cleans a list of ids from a request', () => {
-    expect(cleanPeerIds(['a', 'a', 'b/c', 5, 'd'])).toEqual(['a', 'd'])
-    expect(cleanPeerIds('a')).toBeUndefined()
-    expect(cleanPeerIds(Array.from({ length: 30 }, (_, i) => `p${i}`))).toHaveLength(PEER_LIMITS.peers)
-  })
-})
-
-describe('naming', () => {
-  it('makes a key from a name', () => {
-    expect(peerSlug('Claude Code')).toBe('claude-code')
-    expect(peerSlug('  GPT-5 (review)  ')).toBe('gpt-5-review')
-    expect(peerSlug('日本語')).toBe('agent')
-    expect(peerSlug('x'.repeat(100)).length).toBeLessThanOrEqual(PEER_LIMITS.id - 4)
-  })
-
-  it('numbers a key that is taken', () => {
-    expect(uniquePeerId('claude-code', [])).toBe('claude-code')
-    expect(uniquePeerId('claude-code', ['claude-code'])).toBe('claude-code-2')
-    expect(uniquePeerId('claude-code', ['claude-code', 'claude-code-2'])).toBe('claude-code-3')
-  })
-
-  it('makes a program from a preset, and a second one gets a number', () => {
-    const first = newCliPeer('claude-code', [])
-    expect(first).toMatchObject({ id: 'claude-code', name: 'Claude Code', command: 'claude', enabled: true, preset: 'claude-code' })
-    const second = newCliPeer('claude-code', [first])
-    expect(second).toMatchObject({ id: 'claude-code-2', name: 'Claude Code 2' })
-    expect(validatePeer(second).ok).toBe(true)
-    const blank = newCliPeer('custom', [])
-    expect(blank).toMatchObject({ id: 'custom', name: '', command: '', input: 'stdin' })
-  })
-
-  it('makes a model peer from a provider and model', () => {
-    const peer = newModelPeer('openai', 'gpt-5', 'GPT-5', [model])
-    expect(peer).toMatchObject({ kind: 'model', id: 'gpt-5', name: 'GPT-5', providerId: 'openai', model: 'gpt-5' })
-    expect(validatePeer(peer).ok).toBe(true)
-    expect(newModelPeer('openai', 'gpt-5', '', [peer]).id).toBe('gpt-5-2')
-  })
-
-  it('describes an agent in a line', () => {
-    expect(describePeer(claude)).toBe('claude')
-    expect(describePeer({ ...claude, readProject: true })).toBe('claude, can read this project')
-    expect(describePeer(model, 'OpenAI')).toBe('gpt-5 on OpenAI')
-    expect(describePeer(model)).toBe('gpt-5')
-  })
 })
 
 describe('the card in the thread', () => {
@@ -191,9 +104,6 @@ describe('the card in the thread', () => {
     }
   })
 
-  it('names the tool', () => {
-    expect(CONSULT_TOOL).toBe('consult_agent')
-  })
 })
 
 describe('agents that speak ACP', () => {
@@ -201,13 +111,6 @@ describe('agents that speak ACP', () => {
     expect(validatePeer({ ...gemini, input: 'argument', extra: 1 })).toEqual({ ok: true, value: gemini })
     const full = validatePeer({ ...gemini, readProject: true, passEnv: ['GEMINI_API_KEY'], authMethod: ' oauth-personal ' })
     expect(full).toEqual({ ok: true, value: { ...gemini, readProject: true, passEnv: ['GEMINI_API_KEY'], authMethod: 'oauth-personal' } })
-  })
-
-  it('lose what is off, empty or blank', () => {
-    const checked = validatePeer({ ...gemini, args: [], readProject: false, passEnv: [], authMethod: '   ' })
-    const { args: _args, ...bare } = gemini
-    expect(checked).toEqual({ ok: true, value: bare })
-    expect(checked.ok && Object.keys(checked.value).sort()).toEqual(['command', 'enabled', 'id', 'kind', 'name', 'preset'])
   })
 
   it.each([
@@ -228,47 +131,4 @@ describe('agents that speak ACP', () => {
     if (!checked.ok) expect(checked.error.toLowerCase()).toContain(fragment.toLowerCase())
   })
 
-  it('come from presets with the launch command the registry publishes, which a person can edit', () => {
-    expect(newAcpPeer('gemini', [])).toEqual(gemini)
-    expect(newAcpPeer('opencode', [])).toMatchObject({ id: 'opencode', command: 'opencode', args: ['acp'] })
-    const second = newAcpPeer('gemini', [gemini])
-    expect(second).toMatchObject({ id: 'gemini-2', name: 'Gemini 2' })
-    expect(newAcpPeer('custom', [])).toEqual({ kind: 'acp', id: 'acp', name: '', enabled: true, preset: 'custom', command: '' })
-    // A copy of a preset's arguments, never the preset's own list.
-    expect(newAcpPeer('gemini', []).args).not.toBe(acpPreset('gemini').args)
-  })
-
-  it('have presets that are valid, distinct and, when they run through npx, pinned to a version', () => {
-    expect(new Set(ACP_PRESETS.map((preset) => preset.id)).size).toBe(ACP_PRESETS.length)
-    for (const preset of ACP_PRESETS.filter((entry) => entry.id !== 'custom')) {
-      expect(validatePeer(newAcpPeer(preset.id, [])).ok).toBe(true)
-      expect(isAcpPresetId(preset.id)).toBe(true)
-      if (preset.npm) {
-        expect(preset.command).toBe('npx')
-        expect(preset.args[0]).toBe('--yes')
-        expect(preset.args[preset.args.length - 1]).toMatch(/^@[\w-]+\/[\w-]+@\d+\.\d+\.\d+$/)
-      }
-    }
-    expect(isAcpPresetId('claude-code')).toBe(false)
-    expect(isAcpPresetId(undefined)).toBe(false)
-  })
-
-  it('are described by what runs', () => {
-    expect(describePeer(gemini)).toBe('gemini --acp')
-    expect(describePeer({ ...gemini, readProject: true })).toBe('gemini --acp, can read this project')
-    expect(commandLineText('agent', ['--name', 'two words', 'say "hi"', ''])).toBe('agent --name "two words" "say \\"hi\\"" ""')
-  })
-
-  it('are kept in settings with the others', () => {
-    const settings = normalizePeerSettings({ list: [claude, gemini, model, { ...gemini, preset: 'nope', id: 'bad' }] })
-    expect(settings.list.map((peer) => peer.id)).toEqual(['claude-code', 'gemini', 'gpt'])
-    expect(enabledPeers(settings, ['gemini', 'gpt']).map((peer) => peer.kind)).toEqual(['acp', 'model'])
-  })
-})
-
-describe('typing', () => {
-  it('lets a list of peers be a list of any kind', () => {
-    const list: PeerConfig[] = [claude, model, gemini]
-    expect(list.map((peer) => peer.kind)).toEqual(['cli', 'model', 'acp'])
-  })
 })

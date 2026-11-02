@@ -25,6 +25,7 @@ import { COMPOSER_MAX_LENGTH, selectableProvider, useStore } from '../../state/s
 import { useQueue } from '../../state/queue'
 import { useRestore } from '../../state/restore'
 import { api } from '../../lib/api'
+import { effectiveContextWindow } from '@shared/longContext'
 import { registerComposer } from '../../lib/composerFocus'
 import { PLACEHOLDERS, situationOf } from '../../lib/composerLayout'
 import { plural } from '../../lib/format'
@@ -677,7 +678,7 @@ export function Composer({ modelOpen, setModelOpen, ask }: ComposerProps): JSX.E
           <ContextMeter
             key={conversationId ?? 'new'}
             usage={contextUsage}
-            contextWindow={activeModelInfo?.contextWindow}
+            contextWindow={effectiveContextWindow(activeModelInfo, longContext)}
             lastReply={lastReply}
             onCompact={conversationId ? () => void compactActive() : undefined}
             compactBlockedReason={compactBlockedReason}

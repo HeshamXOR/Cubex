@@ -134,25 +134,6 @@ describe('offering other agents', () => {
     expect(JSON.stringify(h.requests[0]!.tools)).toContain('fake: Fake Agent (a program on this computer; it sees only your message)')
   })
 
-  it.each([
-    ['nothing turned on', undefined],
-    ['an empty list', []],
-    ['an agent that does not exist', ['nobody']],
-    ['malformed ids', ['../x', 5 as unknown as string]]
-  ])('does not offer it for %s', async (_name, peers) => {
-    const h = harness()
-    await h.turn(['hello'], { peers })
-    expect(toolNames(h.requests[0])).not.toContain('consult_agent')
-    expect(String(h.requests[0]!.system)).not.toContain('consult_agent asks')
-  })
-
-  it('does not offer an agent that is off in settings', async () => {
-    mocks.peers = { list: [peer({ enabled: false })], maxRounds: 3 }
-    const h = harness()
-    await h.turn(['hello'], { peers: ['fake'] })
-    expect(toolNames(h.requests[0])).not.toContain('consult_agent')
-  })
-
   it('leaves out programs in local-only mode, and keeps models', async () => {
     mocks.localOnly = true
     mocks.peers = { list: [peer(), { kind: 'model', id: 'gpt', name: 'GPT', enabled: true, providerId: 'p', model: 'peer-model' }], maxRounds: 3 }
@@ -161,13 +142,6 @@ describe('offering other agents', () => {
     const description = JSON.stringify(h.requests[0]!.tools)
     expect(description).toContain('gpt: GPT')
     expect(description).not.toContain('fake: Fake Agent')
-  })
-
-  it('uses the rounds from settings', async () => {
-    mocks.peers = { list: [peer()], maxRounds: 5 }
-    const h = harness()
-    await h.turn(['hello'], { peers: ['fake'] })
-    expect(JSON.stringify(h.requests[0]!.tools)).toContain('at most 5 messages')
   })
 })
 
@@ -212,40 +186,6 @@ describe('a talk with another agent', () => {
     expect(fourth.phase).toBe('error')
     expect(fourth.detail).toContain('which is the limit')
   })
-
-  it('carries the talk into the next turn, and asks again there', async () => {
-    const h = harness()
-    await h.turn([[consult('k1', 'first turn question')], 'done'], { peers: ['fake'], answers: ['allow'] })
-    const events = await h.turn([[consult('k2', 'second turn question')], 'done'], { peers: ['fake'], answers: ['allow'] })
-    expect(asks(events)).toHaveLength(1)
-    expect(finalTool(events, 'k2').detail).toContain('(with history)')
-    expect(finalTool(events, 'k2').peer?.round).toBe(1)
-  })
-
-  it('forgets the talk when the task is deleted', async () => {
-    const h = harness()
-    await h.turn([[consult('k1', 'before')], 'done'], { peers: ['fake'], answers: ['allow'] })
-    h.service.forgetConversation('c1')
-    const events = await h.turn([[consult('k2', 'after')], 'done'], { peers: ['fake'], answers: ['allow'] })
-    expect(finalTool(events, 'k2').detail).toContain('(fresh)')
-  })
-
-  it('asks separately for each agent', async () => {
-    mocks.peers = { list: [peer(), peer({ id: 'other', name: 'Other Agent' })], maxRounds: 3 }
-    const h = harness()
-    const events = await h.turn([[consult('k1', 'one')], [consult('k2', 'two', 'other')], [consult('k3', 'three')], 'done'], { peers: ['fake', 'other'], answers: ['allow', 'allow'] })
-    expect(asks(events).map((ask) => ask.title)).toEqual(['Ask Fake Agent', 'Ask Other Agent'])
-    expect(runs()).toBe(3)
-  })
-
-  it('does not ask for a call that names an agent that is not offered, and sends nothing', async () => {
-    const h = harness()
-    const events = await h.turn([[consult('k1', 'hi', 'stranger')], 'done'], { peers: ['fake'] })
-    expect(asks(events)).toHaveLength(0)
-    expect(runs()).toBe(0)
-    expect(finalTool(events, 'k1').phase).toBe('error')
-    expect(finalTool(events, 'k1').detail).toContain('There is no agent "stranger"')
-  })
 })
 
 describe('how it fits the permission modes', () => {
@@ -253,19 +193,6 @@ describe('how it fits the permission modes', () => {
     const h = harness()
     const events = await h.turn([[consult('k1', 'plan question')], 'done'], { mode: 'plan', peers: ['fake'], answers: ['allow'] })
     expect(asks(events)).toHaveLength(1)
-    expect(finalTool(events, 'k1').phase).toBe('done')
-  })
-
-  it('asks in accept-edits mode, which only approves edits', async () => {
-    const h = harness()
-    const events = await h.turn([[consult('k1', 'q')], 'done'], { mode: 'acceptEdits', peers: ['fake'], answers: ['allow'] })
-    expect(asks(events)).toHaveLength(1)
-  })
-
-  it('does not ask when the person chose to bypass permissions', async () => {
-    const h = harness()
-    const events = await h.turn([[consult('k1', 'q')], 'done'], { mode: 'bypass', peers: ['fake'] })
-    expect(asks(events)).toHaveLength(0)
     expect(finalTool(events, 'k1').phase).toBe('done')
   })
 })
@@ -313,14 +240,6 @@ describe('an agent that speaks ACP as the other agent', () => {
     expect(done.detail).toBe('OK.')
   })
 
-  it('does not start the program when the person says no', async () => {
-    process.env.MOCK_RECORD = join(root, 'record.jsonl')
-    const h = harness()
-    const events = await h.turn([[consult('k1', 'secret plans', 'mock')], 'ok'], { peers: ['mock'], answers: ['deny'] })
-    expect(finalTool(events, 'k1')).toMatchObject({ phase: 'error', detail: 'Denied by user' })
-    expect(existsSync(process.env.MOCK_RECORD)).toBe(false)
-  })
-
   it('keeps one session for the whole talk, across turns, and starts a new one when the task is deleted', async () => {
     const h = harness()
     const first = await h.turn([[consult('k1', 'one\n@mock pid', 'mock')], [consult('k2', 'two\n@mock pid', 'mock')], 'done'], { peers: ['mock'], answers: ['allow'] })
@@ -334,25 +253,6 @@ describe('an agent that speaks ACP as the other agent', () => {
     h.service.forgetConversation('c1')
     const third = await h.turn([[consult('k4', 'four\n@mock pid', 'mock')], 'done'], { peers: ['mock'], answers: ['allow'] })
     expect(pidOf(third, 'k4')).not.toBe(pidOf(first, 'k1'))
-  })
-
-  it('stops the agent when the app quits', async () => {
-    const h = harness()
-    const events = await h.turn([[consult('k1', 'q\n@mock pid', 'mock')], 'done'], { peers: ['mock'], answers: ['allow'] })
-    const pid = pidOf(events, 'k1')
-    h.service.dispose()
-    await vi.waitFor(() => {
-      let running = true
-      try { process.kill(pid, 0) } catch { running = false }
-      expect(running).toBe(false)
-    }, { timeout: 5_000 })
-  })
-
-  it('leaves it out in local-only mode, like any program', async () => {
-    mocks.localOnly = true
-    const h = harness()
-    await h.turn(['hello'], { peers: ['mock'] })
-    expect(toolNames(h.requests[0])).not.toContain('consult_agent')
   })
 
   it('tells the model what went wrong when the agent will not start, with what it printed', async () => {

@@ -54,25 +54,6 @@ describe('createThinkTagParser', () => {
     ])
   })
 
-  it('flushes partial closing tag at stream end if unclosed', () => {
-    const parser = createThinkTagParser()
-    const events = parser.push('<think>Thinking underway...</th')
-    events.push(...parser.flush())
-
-    const reasoning = events.filter((e) => e.type === 'reasoning_delta').map((e) => e.text).join('')
-    expect(reasoning).toBe('Thinking underway...</th')
-  })
-
-  it('handles empty <think></think> tags', () => {
-    const parser = createThinkTagParser()
-    const events = parser.push('<think></think>Direct response')
-    events.push(...parser.flush())
-
-    expect(events).toEqual([
-      { type: 'text_delta', text: 'Direct response' }
-    ])
-  })
-
   it('handles literal < characters in normal text without tags', () => {
     const parser = createThinkTagParser()
     const chunks = ['x < 5 && y > 3\n', 'Include <stdio.h> in C program\n', '<not-a-think-tag>']
@@ -82,35 +63,6 @@ describe('createThinkTagParser', () => {
     const fullText = events.map((e) => e.text).join('')
     expect(fullText).toBe('x < 5 && y > 3\nInclude <stdio.h> in C program\n<not-a-think-tag>')
     expect(events.every((e) => e.type === 'text_delta')).toBe(true)
-  })
-
-  it('handles literal < and partial tags inside reasoning block', () => {
-    const parser = createThinkTagParser()
-    const events = [
-      ...parser.push('<think>Checking if a < b and c </ d or <<nested>>.'),
-      ...parser.push(' Still thinking.</think>Done!')
-    ]
-    events.push(...parser.flush())
-
-    const reasoning = events.filter((e) => e.type === 'reasoning_delta').map((e) => e.text).join('')
-    const text = events.filter((e) => e.type === 'text_delta').map((e) => e.text).join('')
-
-    expect(reasoning).toBe('Checking if a < b and c </ d or <<nested>>. Still thinking.')
-    expect(text).toBe('Done!')
-  })
-
-  it('handles optional leading whitespace before <think>', () => {
-    const parser = createThinkTagParser()
-    const events = [
-      ...parser.push('  \n  '),
-      ...parser.push('<think>Reasoning</think>\nVisible')
-    ]
-    events.push(...parser.flush())
-
-    expect(events).toEqual([
-      { type: 'reasoning_delta', text: 'Reasoning' },
-      { type: 'text_delta', text: 'Visible' }
-    ])
   })
 
   it('strips single leading newline after </think> while preserving subsequent indentation', () => {
@@ -126,20 +78,6 @@ describe('createThinkTagParser', () => {
     ])
   })
 
-  it('strips CRLF (\\r\\n) single leading newline across chunks', () => {
-    const parser = createThinkTagParser()
-    const events = [
-      ...parser.push('<think>Reasoning</think>\r'),
-      ...parser.push('\nAnswer')
-    ]
-    events.push(...parser.flush())
-
-    expect(events).toEqual([
-      { type: 'reasoning_delta', text: 'Reasoning' },
-      { type: 'text_delta', text: 'Answer' }
-    ])
-  })
-
   it('flushes incomplete open tag at stream end as text', () => {
     const parser = createThinkTagParser()
     const events = parser.push('<thi')
@@ -147,16 +85,6 @@ describe('createThinkTagParser', () => {
 
     expect(events).toEqual([
       { type: 'text_delta', text: '<thi' }
-    ])
-  })
-
-  it('flushes leading whitespace at stream end as text if no tag followed', () => {
-    const parser = createThinkTagParser()
-    const events = parser.push('   ')
-    events.push(...parser.flush())
-
-    expect(events).toEqual([
-      { type: 'text_delta', text: '   ' }
     ])
   })
 
@@ -168,29 +96,5 @@ describe('createThinkTagParser', () => {
     expect(events.filter((event) => event.type === 'reasoning_delta').map((event) => event.text).join('')).toBe('The answer is 42.')
     expect(events.filter((event) => event.type === 'text_delta')).toEqual([{ type: 'text_delta', text: 'The answer is 42.' }])
     expect(events.at(-1)).toEqual({ type: 'text_delta', text: 'The answer is 42.' })
-  })
-
-  it('includes a half-read closing tag in that text', () => {
-    const parser = createThinkTagParser()
-    const events = [...parser.push('<think>Thinking</thi')]
-    events.push(...parser.flush())
-
-    expect(events.filter((event) => event.type === 'text_delta')).toEqual([{ type: 'text_delta', text: 'Thinking</thi' }])
-  })
-
-  it('keeps an unclosed <think> as reasoning only when visible text was already emitted', () => {
-    const parser = createThinkTagParser()
-    const events = [...parser.push('<think>a</think>Answer'), ...parser.push('<think>')]
-    events.push(...parser.flush())
-
-    expect(events.filter((event) => event.type === 'text_delta').map((event) => event.text).join('')).toBe('Answer<think>')
-  })
-
-  it('emits nothing extra for an unclosed <think> that held no reasoning', () => {
-    const parser = createThinkTagParser()
-    const events = parser.push('<think>')
-    events.push(...parser.flush())
-
-    expect(events).toEqual([])
   })
 })

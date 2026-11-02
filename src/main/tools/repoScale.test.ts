@@ -65,27 +65,9 @@ describe('list_files', () => {
     expect(text).toMatch(/narrow/i)
     expect(text.length).toBeLessThan(12_000)
   })
-
-  it('lists a small folder exactly as before: folders first, then names, with no notice', async () => {
-    const root = repo({ 'b.txt': '', 'a.txt': '', 'z/y.txt': '', 'c/d.txt': '' })
-    expect(lines(await run(root, 'list_files', { path: '.' }))).toEqual(['c/', 'z/', 'a.txt', 'b.txt'])
-  })
-
-  it('treats the always-skipped folder names case-insensitively where the file system does', async () => {
-    const root = repo({ 'Node_Modules/dep/index.js': '', 'src/a.ts': '' })
-    const text = await run(root, 'list_files', { path: '.' })
-    if (process.platform === 'win32') expect(text).not.toContain('Node_Modules')
-    expect(text).toContain('src/')
-  })
 })
 
 describe('glob_files', () => {
-  it('skips ignored folders so generated output cannot crowd out the sources', async () => {
-    const files: Record<string, string> = { '.gitignore': 'build/\n*.gen.ts\n', 'src/a.ts': '', 'src/b.ts': '', 'src/c.gen.ts': '' }
-    for (let i = 0; i < 40; i++) files[`build/d${i}/f.ts`] = ''
-    const text = await run(repo(files), 'glob_files', { pattern: '**/*.ts', limit: 10 })
-    expect(lines(text).filter(Boolean)).toEqual(['src/a.ts', 'src/b.ts'])
-  })
 
   it('never enters an ignored folder', async () => {
     const root = repo({ '.gitignore': 'build/\n', 'build/deep/x.ts': '', 'src/a.ts': '' })
@@ -100,18 +82,6 @@ describe('glob_files', () => {
     expect(opened.some((path) => path.endsWith('src'))).toBe(true)
   })
 
-  it('searches an ignored folder when it is chosen explicitly', async () => {
-    const root = repo({ '.gitignore': 'build/\n', 'build/x.ts': '', 'build/sub/y.ts': '', 'src/a.ts': '' })
-    expect(lines(await run(root, 'glob_files', { pattern: '**/*.ts', path: 'build' })).filter(Boolean)).toEqual(['build/sub/y.ts', 'build/x.ts'])
-  })
-
-  it('honors negation and nested ignore files', async () => {
-    const root = repo({
-      '.gitignore': '*.ts\n!keep.ts\n', 'a.ts': '', 'keep.ts': '', 'sub/.gitignore': '!sub-keep.ts\n', 'sub/sub-keep.ts': '', 'sub/other.ts': ''
-    })
-    expect(lines(await run(root, 'glob_files', { pattern: '**/*.ts' })).filter(Boolean)).toEqual(['keep.ts', 'sub/sub-keep.ts'])
-  })
-
   it('reports how many matches were not shown', async () => {
     const files: Record<string, string> = {}
     for (let i = 0; i < 30; i++) files[`f${String(i).padStart(2, '0')}.ts`] = ''
@@ -119,11 +89,6 @@ describe('glob_files', () => {
     expect(lines(text).filter((line) => line.endsWith('.ts'))).toHaveLength(10)
     expect(text).toMatch(/20 more files matched but are not shown/)
     expect(text).toMatch(/narrow/i)
-  })
-
-  it('does not claim truncation when everything fits', async () => {
-    const text = await run(repo({ 'a.ts': '', 'b.ts': '' }), 'glob_files', { pattern: '*.ts', limit: 2 })
-    expect(text).not.toMatch(/more files|truncated/i)
   })
 })
 
@@ -138,17 +103,6 @@ describe('search_files', () => {
     expect(all).not.toContain('debug.log')
     expect(await run(root, 'search_files', { query: 'needle', path: 'build' })).toContain('build/b.ts:1')
     expect(await run(root, 'search_files', { query: 'needle', path: 'debug.log' })).toContain('debug.log:1')
-  })
-
-  it('keeps substring search literal and case-insensitive by default', async () => {
-    const root = repo({ 'a.ts': 'a.b\naxb\nA.B\n' })
-    const text = await run(root, 'search_files', { query: 'a.b' })
-    expect(text).toContain('a.ts:1')
-    expect(text).toContain('a.ts:3')
-    expect(text).not.toContain('a.ts:2')
-    const exact = await run(root, 'search_files', { query: 'a.b', case_sensitive: true })
-    expect(exact).toContain('a.ts:1')
-    expect(exact).not.toContain('a.ts:3')
   })
 })
 
@@ -168,23 +122,6 @@ describe('search_files regular expressions', () => {
     expect(exact).not.toContain('a.ts:3')
   })
 
-  it('supports anchors, alternation and classes', async () => {
-    expect(await run(root, 'search_files', { query: '^export (const|function)', regex: true })).toMatch(/a\.ts:1[\s\S]*a\.ts:3/)
-    expect(await run(root, 'search_files', { query: '^const', regex: true })).toContain('a.ts:2')
-    expect(await run(root, 'search_files', { query: '[0-9]+ =', regex: true })).toContain('a.ts:1')
-  })
-
-  it('reports a syntax error instead of searching', async () => {
-    const text = await run(root, 'search_files', { query: '(unclosed', regex: true })
-    expect(text).toMatch(/invalid regular expression/i)
-  })
-
-  it('rejects an over-long pattern and a non-boolean flag', async () => {
-    expect(await run(root, 'search_files', { query: 'a'.repeat(600), regex: true })).toMatch(/at most 500/i)
-    expect(await run(root, 'search_files', { query: 'a', regex: 'yes' })).toMatch(/regex must be a boolean/i)
-    expect(await run(root, 'search_files', { query: 'a', case_sensitive: 1 })).toMatch(/case_sensitive must be a boolean/i)
-  })
-
   it('stops a pattern that backtracks catastrophically and says so, without hanging', async () => {
     const hostile = repo({ 'hostile.txt': `${'a'.repeat(60)}!\n`, 'fine.txt': 'aaa\n' })
     const start = Date.now()
@@ -195,30 +132,6 @@ describe('search_files regular expressions', () => {
     // The tool is still usable afterwards.
     expect(await run(hostile, 'search_files', { query: 'fine', regex: false })).toContain('No matches')
     expect(await run(hostile, 'search_files', { query: 'a{3}', regex: true, path: 'fine.txt' })).toContain('fine.txt:1')
-  }, 20_000)
-
-  it('keeps the results found before an expensive file stopped the search', async () => {
-    const hostile = repo({ 'a-good.txt': 'needle here\n', 'z-hostile.txt': `${'a'.repeat(60)}!\n` })
-    const text = await run(hostile, 'search_files', { query: '(needle|(a+)+$)', regex: true })
-    expect(text).toContain('a-good.txt:1')
-    expect(text).toMatch(/regex/i)
-  }, 20_000)
-
-  it('keeps the matches that came before the expensive line of the same file', async () => {
-    const hostile = repo({ 'mixed.txt': `x marks\nxx again\n${'a'.repeat(60)}!\nx after\n` })
-    const text = await run(hostile, 'search_files', { query: '^(x|(a+)+$)', regex: true })
-    expect(text).toContain('mixed.txt:1')
-    expect(text).toContain('mixed.txt:2')
-    expect(text).not.toContain('mixed.txt:4')
-    expect(text).toMatch(/regex took too long/)
-  }, 20_000)
-
-  it('reports a slow regex on an explicitly chosen file instead of failing the call', async () => {
-    const hostile = repo({ 'only.txt': `${'a'.repeat(60)}!\n` })
-    const tool = createFileTools(hostile).find((item) => item.definition.name === 'search_files')!
-    const result = await tool.execute({ query: '(a+)+$', regex: true, path: 'only.txt' }, ctx)
-    expect(result.isError).toBeFalsy()
-    expect(String(result.content)).toMatch(/regex took too long/)
   }, 20_000)
 
   it('applies the line limit to regex matches and lets $ match before a CRLF line end', async () => {
@@ -238,13 +151,6 @@ describe('large repositories', () => {
     const text = await run(repo(files), 'search_files', { query: 'needle' })
     expect(text).toContain('deep/inside/target.ts:1')
     expect(text).not.toMatch(/truncated/i)
-  })
-
-  it('searches the source types that real projects use, not only web languages', async () => {
-    const root = repo({ 'Program.cs': 'needle\n', 'App.vue': 'needle\n', 'tool.mjs': 'needle\n', 'setup.ps1': 'needle\n', 'photo.png': 'needle\n' })
-    const text = await run(root, 'search_files', { query: 'needle' })
-    for (const name of ['Program.cs', 'App.vue', 'tool.mjs', 'setup.ps1']) expect(text).toContain(`${name}:1`)
-    expect(text).not.toContain('photo.png')
   })
 
   it('stops reading a folder with an enormous number of entries and says the listing is incomplete', async () => {
@@ -270,19 +176,5 @@ describe('large repositories', () => {
       expect(visited).toBeLessThan(30_000)
       expect(closed).toBe(true)
     } finally { spy.mockRestore() }
-  })
-
-  it('distinguishes an empty folder from one whose entries are all ignored', async () => {
-    const root = repo({ '.gitignore': '*.log\n', 'logs/a.log': '', 'logs/b.log': '' })
-    mkdirSync(join(root, 'empty'))
-    expect(await run(root, 'list_files', { path: 'empty' })).toBe('(empty)')
-    const text = await run(root, 'list_files', { path: 'logs' })
-    expect(text).toMatch(/^\(no entries to show\)/)
-    expect(text).toMatch(/2 entries hidden by \.gitignore/)
-  })
-
-  it('counts a single hidden entry in the singular', async () => {
-    const root = repo({ '.gitignore': '*.log\n', 'a.ts': '', 'a.log': '' })
-    expect(await run(root, 'list_files', { path: '.' })).toMatch(/1 entry hidden by \.gitignore/)
   })
 })

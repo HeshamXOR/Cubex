@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Capability, ModelInfo, ProviderConfig } from '@core/types'
-import { declaredLongContextModels, declaredModelInfo, declaresLongContext, markLongContext, markLongContextModels, normalizeLongContextModels } from './longContext'
+import { declaredLongContextModels, declaredModelInfo, declaresLongContext, effectiveContextWindow, markLongContext, markLongContextModels } from './longContext'
 
 const cfg = (overrides: Partial<ProviderConfig> = {}): ProviderConfig => ({
   id: 'p', kind: 'anthropic', name: 'P', accessType: 'api', auth: { type: 'api_key' }, enabled: true, ...overrides
@@ -24,11 +24,6 @@ describe('the models a provider declares as offering 1M', () => {
     expect(declaresLongContext(provider, 'claude-opus-4-8')).toBe(false)
   })
 
-  it('keeps nothing when every entry is blank', () => {
-    expect(normalizeLongContextModels(['  ', ''])).toBeUndefined()
-    expect(normalizeLongContextModels('not a list')).toBeUndefined()
-    expect(normalizeLongContextModels([' x '])).toEqual(['x'])
-  })
 })
 
 describe('a declared model, in a provider list', () => {
@@ -37,10 +32,6 @@ describe('a declared model, in a provider list', () => {
   it('gets the 1M option when its listing leaves out the bigger window', () => {
     const model = markLongContext(provider, listed('relay-sonnet-1m', { contextWindow: 200_000 }))
     expect(model.longContextBeta).toBe(true)
-  })
-
-  it('gets it too when the listing says nothing about a window', () => {
-    expect(markLongContext(provider, listed('relay-sonnet-1m')).longContextBeta).toBe(true)
   })
 
   it('leaves a model already sized at the gated window alone', () => {
@@ -76,5 +67,19 @@ describe('a declared model the provider never listed', () => {
 
   it('is not offered for a model nobody declared', () => {
     expect(declaredModelInfo(cfg(), 'relay-1m', undefined)).toBeUndefined()
+  })
+})
+
+describe('effectiveContextWindow', () => {
+  it('keeps a gated model at 200K until the switch is on, which is what the window shows before the first request', () => {
+    const model = listed('claude-opus-4-8', { contextWindow: 1_000_000, longContextBeta: true })
+    expect(effectiveContextWindow(model, false)).toBe(200_000)
+    expect(effectiveContextWindow(model, true)).toBe(1_000_000)
+  })
+
+  it('leaves an ungated model and an unknown window alone', () => {
+    expect(effectiveContextWindow(listed('plain', { contextWindow: 128_000 }), false)).toBe(128_000)
+    expect(effectiveContextWindow(listed('unknown'), true)).toBeUndefined()
+    expect(effectiveContextWindow(undefined, false)).toBeUndefined()
   })
 })

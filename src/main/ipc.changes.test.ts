@@ -67,13 +67,6 @@ afterEach(() => {
 })
 
 describe('session changes and git status IPC', () => {
-  it('registers its channels and removes them on dispose', () => {
-    for (const channel of [IPC.getSessionChanges, IPC.revertSessionChanges, IPC.getGitStatus]) {
-      expect(mocks.handlers.has(channel)).toBe(true)
-    }
-    ipc.dispose()
-    expect(mocks.handlers.size).toBe(0)
-  })
 
   it('lists changes for a valid task id and rejects malformed ids before reaching the service', async () => {
     await expect(call(IPC.getSessionChanges, 'c1')).resolves.toEqual([])

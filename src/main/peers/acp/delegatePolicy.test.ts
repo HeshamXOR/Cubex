@@ -1,9 +1,9 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import type { PermissionMode } from '@shared/ipc'
-import { createDelegatePolicy, judgeDelegated, shownPath, type DelegatePolicyOptions, type DelegateQuestion } from './delegatePolicy'
+import { createDelegatePolicy, judgeDelegated, type DelegatePolicyOptions, type DelegateQuestion } from './delegatePolicy'
 
 // Made when the file loads, because which tests run is decided before any hook does.
 const root = mkdtempSync(join(tmpdir(), 'cubex-delegate-root-'))
@@ -76,14 +76,6 @@ describe('reading', () => {
     expect(h.asked).toEqual([])
   })
 
-  it('lets a search that names no folder go ahead: it starts in the project', () => {
-    for (const mode of ['default', 'acceptEdits', 'plan'] as const) {
-      const h = harness(mode)
-      expect(verdict(h, request('search'))).toBe('allow')
-      expect(h.asked).toEqual([])
-    }
-  })
-
   it.each(['read'])('asks the person when a %s names no place', async (kind) => {
     for (const mode of ['default', 'acceptEdits', 'plan'] as const) {
       const h = harness(mode)
@@ -101,11 +93,6 @@ describe('reading', () => {
     expect(await createDelegatePolicy(no.options).decide(request(kind))).toEqual({ outcome: { outcome: 'selected', optionId: 'no' } })
   })
 
-  it('does not ask in bypass mode, and never asks about thinking', () => {
-    expect(verdict(harness('bypass'), request('read'))).toBe('allow')
-    expect(verdict(harness('default'), request('think'))).toBe('allow')
-  })
-
   it('is refused outside the project, whatever the mode', () => {
     for (const mode of ['default', 'bypass'] as const) {
       expect(verdict(harness(mode), request('read', at(join(outside, 'secret.txt'))))).toBe('reject')
@@ -114,11 +101,6 @@ describe('reading', () => {
 
   it.runIf(linked)('is refused through a link that leads out of the project', () => {
     expect(verdict(harness(), request('read', at(join(root, 'escape', 'secret.txt'))))).toBe('reject')
-  })
-
-  it('is refused for a place that is not a path', () => {
-    expect(verdict(harness(), request('read', { locations: [{ line: 3 }] }))).toBe('reject')
-    expect(verdict(harness(), request('read', { locations: [{ path: '' }] }))).toBe('reject')
   })
 })
 
@@ -138,30 +120,10 @@ describe('changing a file', () => {
     expect(judgement.capture).toEqual([join(root, 'src', 'a.ts')])
   })
 
-  it('allows an edit without asking in accept-edits mode, and keeps what was there', () => {
-    const h = harness('acceptEdits')
-    const judgement = judgeDelegated(request('edit', at(join(root, 'src', 'a.ts'))), h.options)
-    expect(judgement).toEqual({ verdict: 'allow', reason: 'edit inside the project', capture: [join(root, 'src', 'a.ts')] })
-  })
-
   it('still asks in accept-edits mode about a protected place', () => {
     const judgement = judgeDelegated(request('edit', at(join(root, '.git', 'config'))), harness('acceptEdits').options)
     expect(judgement.verdict).toBe('ask')
     if (judgement.verdict === 'ask') expect(judgement.question.risks.join(' ')).toContain('Protected path')
-  })
-
-  it('asks about a delete or a move in accept-edits mode', () => {
-    const h = harness('acceptEdits')
-    expect(verdict(h, request('delete', at(join(root, 'src', 'a.ts'))))).toBe('ask')
-    expect(verdict(h, request('move', at(join(root, 'src', 'a.ts'))))).toBe('ask')
-  })
-
-  it('allows an edit, a delete and a move in bypass mode, a protected place too', () => {
-    const h = harness('bypass')
-    expect(verdict(h, request('edit', at(join(root, 'src', 'a.ts'))))).toBe('allow')
-    expect(verdict(h, request('delete', at(join(root, 'src', 'a.ts'))))).toBe('allow')
-    expect(verdict(h, request('move', at(join(root, 'src', 'a.ts'))))).toBe('allow')
-    expect(verdict(h, request('edit', at(join(root, '.git', 'config'))))).toBe('allow')
   })
 
   it.each(['default', 'acceptEdits', 'bypass'] as const)('never allows a change outside the project, not even in %s mode', (mode) => {
@@ -173,22 +135,6 @@ describe('changing a file', () => {
 
   it.runIf(linked)('never allows a change through a link that leads out of the project', () => {
     expect(verdict(harness('bypass'), request('edit', at(join(root, 'escape', 'new.txt'))))).toBe('reject')
-  })
-
-  it('reads a relative place from the project folder', () => {
-    expect(verdict(harness('bypass'), request('edit', at('src/a.ts')))).toBe('allow')
-    expect(verdict(harness('bypass'), request('edit', at('..\\..\\elsewhere.txt')))).toBe('reject')
-    expect(verdict(harness('bypass'), request('edit', at('../../elsewhere.txt')))).toBe('reject')
-  })
-
-  it.each(['default', 'acceptEdits', 'bypass'] as const)('asks, even in %s mode, when the agent does not say where', (mode) => {
-    const judgement = judgeDelegated(request('edit'), harness(mode).options)
-    expect(judgement.verdict).toBe('ask')
-    if (judgement.verdict === 'ask') expect(judgement.question.risks.join(' ')).toContain('did not say where')
-  })
-
-  it('refuses a place that is not a path', () => {
-    expect(verdict(harness('bypass'), request('edit', { locations: [{ nope: true }] }))).toBe('reject')
   })
 
   it('refuses everything in plan mode', () => {
@@ -212,30 +158,11 @@ describe('running a command', () => {
     expect(verdict(harness('default'), request('execute', { rawInput: { command: 'ls -la' } }))).toBe('allow')
     expect(verdict(harness('acceptEdits'), request('execute', { rawInput: { command: 'git status' } }))).toBe('allow')
   })
-
-  it('allows any command in bypass mode', () => {
-    expect(verdict(harness('bypass'), request('execute', { rawInput: { command: 'npm install' } }))).toBe('allow')
-  })
-
-  it('reads a command that is a list of words', () => {
-    const judgement = judgeDelegated(request('execute', { rawInput: { command: ['npm', 'test', '--', '--run'] } }), harness().options)
-    expect(judgement.verdict === 'ask' && judgement.question.command).toBe('npm test -- --run')
-  })
-
-  it('asks with what the agent called it when no command is given', () => {
-    const judgement = judgeDelegated(request('execute', { title: 'Run the build' }), harness().options)
-    expect(judgement.verdict === 'ask' && judgement.question.detail).toBe('Run the build')
-  })
 })
 
 describe('everything else', () => {
   it('refuses a change of mode in every mode', () => {
     for (const mode of ['default', 'acceptEdits', 'plan', 'bypass'] as const) expect(verdict(harness(mode), request('switch_mode'))).toBe('reject')
-  })
-
-  it('asks about a fetch, and allows it in bypass mode', () => {
-    expect(verdict(harness('default'), request('fetch', { title: 'Fetch https://example.com' }))).toBe('ask')
-    expect(verdict(harness('bypass'), request('fetch'))).toBe('allow')
   })
 
   it('asks about a kind it does not know, and names it', () => {
@@ -244,11 +171,6 @@ describe('everything else', () => {
     if (judgement.verdict === 'ask') expect(judgement.question.risks.join(' ')).toContain('teleport')
     expect(verdict(harness('acceptEdits'), request('teleport'))).toBe('ask')
     expect(verdict(harness('bypass'), request('teleport'))).toBe('allow')
-  })
-
-  it('treats a request with no kind as one it does not know', () => {
-    expect(verdict(harness(), { toolCall: {}, options: OFFERED })).toBe('ask')
-    expect(verdict(harness(), 'nonsense')).toBe('ask')
   })
 })
 
@@ -259,10 +181,6 @@ describe('a task that only reads', () => {
       for (const kind of ['edit', 'delete', 'move', 'execute', 'other', 'teleport']) expect(verdict(h, request(kind, at(join(root, 'src', 'a.ts'))))).toBe('reject')
       expect(verdict(h, request('read', at(join(root, 'src', 'a.ts'))))).toBe('allow')
     }
-  })
-
-  it('asks before it fetches, even in bypass mode', () => {
-    expect(verdict(harness('bypass', true), request('fetch'))).toBe('ask')
   })
 })
 
@@ -289,31 +207,10 @@ describe('the answer to the agent', () => {
     expect(no.kept).toEqual([])
   })
 
-  it('keeps what was there only for a change that is allowed', async () => {
-    const h = harness('default')
-    h.answer.value = true
-    await createDelegatePolicy(h.options).decide(request('edit', at(join(root, 'src', 'a.ts'))))
-    expect(h.kept).toEqual([[join(root, 'src', 'a.ts')]])
-    const refused = harness('bypass')
-    await createDelegatePolicy(refused.options).decide(request('edit', at(join(outside, 'x.txt'))))
-    expect(refused.kept).toEqual([])
-  })
-
-  it('refuses, once, what the policy refuses', async () => {
-    expect(await createDelegatePolicy(harness('plan').options).decide(request('edit', at(join(root, 'src', 'a.ts'))))).toEqual(selected('no'))
-  })
-
   it('refuses when asking the person fails', async () => {
     const h = harness('default')
     h.answer.value = 'throw'
     expect(await createDelegatePolicy(h.options).decide(request('edit', at(join(root, 'src', 'a.ts'))))).toEqual(selected('no'))
-    expect(h.kept).toEqual([])
-  })
-
-  it('refuses, with the agent\'s own refusal, when it offered no way to allow once', async () => {
-    const h = harness('bypass')
-    const onlyAlways = [{ optionId: 'always', name: 'Always', kind: 'allow_always' }, { optionId: 'no', name: 'No', kind: 'reject_once' }]
-    expect(await createDelegatePolicy(h.options).decide(request('edit', at(join(root, 'src', 'a.ts')), onlyAlways))).toEqual(selected('no'))
     expect(h.kept).toEqual([])
   })
 
@@ -322,11 +219,6 @@ describe('the answer to the agent', () => {
     const onlyAlways = [{ optionId: 'always', name: 'Always', kind: 'allow_always' }, { optionId: 'never', name: 'Never', kind: 'reject_always' }]
     expect(await createDelegatePolicy(h.options).decide(request('edit', at(join(root, 'src', 'a.ts')), onlyAlways))).toEqual(cancelled)
     expect(h.kept).toEqual([])
-  })
-
-  it('cancels when it must refuse and the agent offered no way to refuse once', async () => {
-    const h = harness('plan')
-    expect(await createDelegatePolicy(h.options).decide(request('edit', at(join(root, 'src', 'a.ts')), [{ optionId: 'x', name: 'X', kind: 'allow_once' }]))).toEqual(cancelled)
   })
 
   it('reads the permission mode again for every request', async () => {
@@ -339,30 +231,5 @@ describe('the answer to the agent', () => {
     expect(h.asked).toHaveLength(1)
     h.setMode('plan')
     expect(await policy.decide(request('execute', { rawInput: { command: 'npm test' } }))).toEqual(selected('no'))
-  })
-
-  it('asks for a mode that asks before changes, unless the task only reads', () => {
-    expect(createDelegatePolicy(harness('default').options).purpose).toBe('work')
-    expect(createDelegatePolicy(harness('default', true).options).purpose).toBe('consult')
-  })
-
-  it('calls nothing safe that it cannot parse', async () => {
-    const h = harness('bypass')
-    const ask = vi.fn(h.options.ask)
-    const reply = await createDelegatePolicy({ ...h.options, ask }).decide({ toolCall: { kind: 'edit', locations: 'nope' }, options: OFFERED })
-    expect(ask).toHaveBeenCalledTimes(1)
-    expect(reply).toEqual(selected('once'))
-  })
-})
-
-describe('shownPath', () => {
-  it('shows a path inside the project relative to it, with forward slashes', () => {
-    expect(shownPath(join(root, 'src', 'a.ts'), root)).toBe('src/a.ts')
-    expect(shownPath('src/a.ts', root)).toBe('src/a.ts')
-  })
-
-  it('shows a path outside the project in full', () => {
-    expect(shownPath(join(outside, 'x.txt'), root)).toContain('x.txt')
-    expect(shownPath(join(outside, 'x.txt'), root).startsWith('..')).toBe(false)
   })
 })

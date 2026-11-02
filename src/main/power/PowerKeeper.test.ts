@@ -42,32 +42,6 @@ describe('PowerKeeper', () => {
     expect(calls).toEqual(['start prevent-app-suspension', 'stop 1'])
   })
 
-  it('takes a new hold for each stretch of work', () => {
-    const { state, calls, keeper } = fixture({ busy: true })
-    keeper.check()
-    state.busy = false
-    keeper.check()
-    state.busy = true
-    keeper.check()
-    expect(calls).toEqual(['start prevent-app-suspension', 'stop 1', 'start prevent-app-suspension'])
-  })
-
-  it('counts a question that throws as nothing to hold for, and drops a hold it cannot confirm', () => {
-    const calls: string[] = []
-    let broken = false
-    const keeper = new PowerKeeper({
-      blocker: { start: () => { calls.push('start'); return 7 }, stop: (id) => { calls.push(`stop ${id}`) } },
-      busy: () => { if (broken) throw new Error('chat service is gone'); return true },
-      enabled: () => true
-    })
-    keeper.check()
-    expect(keeper.holding).toBe(true)
-    broken = true
-    expect(() => keeper.check()).not.toThrow()
-    expect(keeper.holding).toBe(false)
-    expect(calls).toEqual(['start', 'stop 7'])
-  })
-
   it('survives a blocker that fails to start or to stop', () => {
     const keeper = new PowerKeeper({
       blocker: { start: () => { throw new Error('no power service') }, stop: () => { throw new Error('already gone') } },

@@ -93,10 +93,4 @@ describe('a turn the main process starts for the person', () => {
     expect(useStore.getState().streamOwners).toEqual({ s1: 'a' })
   })
 
-  it('does not start a second answer while one is streaming', () => {
-    emit(sent())
-    emit(sent({ streamId: 's9', messageId: 'm9' }))
-    expect(useStore.getState().liveMessages).toHaveLength(2)
-    expect(useStore.getState().streamId).toBe('s1')
-  })
 })

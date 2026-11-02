@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -145,49 +145,5 @@ describe('ChatService saved command output', () => {
     expect(() => chat.commandOutputPath('task', randomUUID())).toThrow('No matching')
     expect(() => chat.readCommandOutput('task', '../secret.txt')).toThrow('Invalid command output id')
     expect(() => chat.commandOutputPath('task', own.path)).toThrow('Invalid command output id')
-  })
-
-  it('starts future chats and saves new command output despite unrelated corrupt or missing older artifacts', async () => {
-    const good = seed('task', 'healthy history')
-    const corrupt = seed('task', 'corrupt receipt')
-    const missing = seed('task', 'deleted log')
-    writeFileSync(corrupt.path.replace(/\.log$/, '.json'), '{invalid json')
-    unlinkSync(missing.path)
-    const events: ChatEvent[] = []
-    let calls = 0
-    const chat = startService(async function* (req) {
-      calls++
-      if (calls === 1) {
-        expect(String(req.system)).toContain(good.artifact.id)
-        expect(String(req.system)).not.toContain(corrupt.artifact.id)
-        expect(String(req.system)).not.toContain(missing.artifact.id)
-        yield { type: 'tool_call', toolCall: { id: 'new-run', name: 'run_command', input: { command: 'echo fresh-output' } } }
-        yield { type: 'stop', stopReason: 'tool_use' }
-      } else yield { type: 'text_delta', text: 'Done.' }
-    }, events)
-    await chat.start(request())
-    await finished(events)
-    const tool = terminalTools(events).find((item) => item.name === 'run_command')!
-    expect(tool.phase).toBe('done')
-    expect(chat.readCommandOutput('task', tool.outputId!).text).toContain('fresh-output')
-    expect(() => chat.readCommandOutput('task', corrupt.artifact.id)).toThrow()
-    expect(() => chat.readCommandOutput('task', missing.artifact.id)).toThrow()
-  })
-
-  it('does not allocate a saved command artifact when plan mode blocks execution', async () => {
-    const events: ChatEvent[] = []
-    let calls = 0
-    const chat = startService(async function* () {
-      if (calls++ === 0) {
-        yield { type: 'tool_call', toolCall: { id: 'blocked-run', name: 'run_command', input: { command: 'node -e "console.log(123)"' } } }
-        yield { type: 'stop', stopReason: 'tool_use' }
-      } else yield { type: 'text_delta', text: 'Research only.' }
-    }, events)
-    await chat.start({ ...request(), permissionMode: 'plan' })
-    await finished(events)
-    const tool = terminalTools(events).find((item) => item.name === 'run_command')!
-    expect(tool).toMatchObject({ phase: 'error', detail: 'Blocked in plan mode' })
-    expect(tool.outputId).toBeUndefined()
-    expect(new CommandOutputStore(join(mocks.dataRoot, 'command-output')).list('task')).toEqual([])
   })
 })

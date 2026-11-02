@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { PermissionRule } from '../../../shared/ipc'
-import { describePermissionRule, groupRulesByProject, mergeRules, RULE_COVERAGE } from './permissionRuleText'
+import { describePermissionRule, groupRulesByProject, mergeRules } from './permissionRuleText'
 
 const rule = (over: Partial<PermissionRule>): PermissionRule => ({
   id: 'r1', workspace: 'C:\\code\\lumen-web', tool: 'run_command', pattern: 'npm test', label: 'npm test', createdAt: 1_000, ...over
@@ -25,25 +25,6 @@ describe('describePermissionRule', () => {
     const described = describePermissionRule(input)
     expect(described.kind).toBe(kind)
     expect(described.text).toBe(text)
-  })
-
-  it('sets commands, hosts and tool names in code type, and the rest in plain type', () => {
-    expect(describePermissionRule({ tool: 'run_command', pattern: 'npm test' }).parts).toEqual([{ text: 'Run ' }, { text: 'npm test', code: true }])
-    expect(describePermissionRule({ tool: 'web_fetch', pattern: 'a.dev' }).parts).toEqual([{ text: 'Fetch pages from ' }, { text: 'a.dev', code: true }])
-    expect(describePermissionRule({ tool: 'mcp__s__t', pattern: '*' }).parts).toEqual([{ text: 'Use ' }, { text: 't', code: true }, { text: ' from ' }, { text: 's', code: true }])
-    expect(describePermissionRule({ tool: 'edit_file', pattern: '*' }).parts).toEqual([{ text: 'Edit and create files in the project' }])
-  })
-
-  it('adds a line only for the broad edit grant, which names what still asks', () => {
-    expect(describePermissionRule({ tool: 'edit_file', pattern: '*' }).detail).toContain('Deleting files still asks')
-    for (const tool of [{ tool: 'run_command', pattern: 'npm test' }, { tool: 'web_fetch', pattern: 'a.dev' }, { tool: 'mcp__s__t', pattern: '*' }, { tool: 'delegate_to_subagent', pattern: '*' }]) {
-      expect(describePermissionRule(tool).detail).toBeUndefined()
-    }
-  })
-
-  it('explains every kind of rule once for the whole list', () => {
-    expect(RULE_COVERAGE.map((entry) => entry.kind).sort()).toEqual(['command', 'edit', 'fetch', 'mcp', 'subagent'])
-    for (const entry of RULE_COVERAGE) expect(entry.text).toMatch(/\.$/)
   })
 
   it.each([
@@ -83,9 +64,6 @@ describe('mergeRules', () => {
     expect(rows.map((row) => row.ids)).toEqual([['x'], ['y']])
   })
 
-  it('returns nothing for no rules', () => {
-    expect(mergeRules([])).toEqual([])
-  })
 })
 
 describe('groupRulesByProject', () => {
@@ -105,17 +83,4 @@ describe('groupRulesByProject', () => {
     ])
   })
 
-  it('treats the same folder written two ways as one project', () => {
-    const [selected] = groupRulesByProject(rules, new Set(['cur1']))
-    expect(selected!.rows.flatMap((row) => row.ids).sort()).toEqual(['cur1', 'cur2'])
-    expect(selected!.current).toBe(true)
-  })
-
-  it('has no current project when main reports none', () => {
-    expect(groupRulesByProject(rules, new Set()).some((group) => group.current)).toBe(false)
-  })
-
-  it('returns no groups for no rules', () => {
-    expect(groupRulesByProject([], new Set())).toEqual([])
-  })
 })

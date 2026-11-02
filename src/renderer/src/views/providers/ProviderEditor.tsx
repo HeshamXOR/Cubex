@@ -306,6 +306,16 @@ export function ProviderEditor({ initial, isNew, headingLevel, preset, focus, kn
             )}
           </Field>
         )}
+        {draft.kind === 'openai-compat' && !azure && (
+          <Field label="API mode" hint="Cubex switches a model to the Responses API by itself when the server asks for it.">
+            {(aria) => (
+              <select {...aria} className="select" value={draft.apiMode === 'responses' ? 'responses' : 'chat_completions'} onChange={(e) => patch({ apiMode: e.target.value })}>
+                <option value="chat_completions">Chat Completions</option>
+                <option value="responses">Responses</option>
+              </select>
+            )}
+          </Field>
+        )}
         {azure && (
           <Field label="API version" hint="Leave as v1 for current resources. Enter a dated version such as 2024-10-21 only if yours needs one.">
             {(aria) => (

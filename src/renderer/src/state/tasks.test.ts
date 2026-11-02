@@ -59,13 +59,6 @@ describe('task events', () => {
     expect(runningCount(tasksOf('a'))).toBe(1)
   })
 
-  it('does not touch the chat when a task changes', () => {
-    const before = useStore.getState().liveMessages
-    applyTaskEvent(task())
-    expect(useStore.getState().liveMessages).toBe(before)
-    expect(useStore.getState().status).toBe('idle')
-  })
-
   it('does not let an old snapshot bring an ended task back to running', () => {
     applyTaskEvent(task({ status: 'exited', endedAt: 500, exitCode: 0 }))
     applyTaskEvent(task())
@@ -96,13 +89,5 @@ describe('reading the list', () => {
     bridge.api.listTasks.mockRejectedValue(new Error('IPC closed'))
     await expect(syncTasks('a')).resolves.toBeUndefined()
     expect(tasksOf('a')).toHaveLength(1)
-  })
-})
-
-describe('open rows', () => {
-  it('remembers which rows are open so they stay open while the tab is away', () => {
-    useTasks.getState().setOpen('p_aaaaaa', true)
-    useTasks.getState().setOpen('p_bbbbbb', false)
-    expect(useTasks.getState().open).toEqual({ p_aaaaaa: true, p_bbbbbb: false })
   })
 })

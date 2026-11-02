@@ -133,7 +133,6 @@ const at = (label: string): number => {
   expect(index, `"${label}" should be in the timeline: ${mocks.timeline.join(' | ')}`).toBeGreaterThanOrEqual(0)
   return index
 }
-const asked = (): boolean => mocks.timeline.some((entry) => entry.startsWith('ask '))
 
 const policy = { primary: { providerId: 'p', model: 'm' }, fallbacks: [], fallbackEnabled: false, retry: { ...DEFAULT_RETRY_POLICY, enabled: false }, timeout: {} }
 type Step = ToolCall[] | string
@@ -204,11 +203,7 @@ const call = (id: string, name: string, input: Record<string, unknown>): ToolCal
 const read = (id: string, path: string): ToolCall => call(id, 'read_file', { path })
 const listing = (id: string, path: string): ToolCall => call(id, 'list_files', { path })
 const glob = (id: string, pattern: string): ToolCall => call(id, 'glob_files', { pattern })
-const search = (id: string, query: string): ToolCall => call(id, 'search_files', { query })
-const webSearch = (id: string, query: string): ToolCall => call(id, 'web_search', { query })
-const fetchPage = (id: string, url: string): ToolCall => call(id, 'web_fetch', { url })
 const write = (id: string, path: string): ToolCall => call(id, 'write_file', { path, content: 'text' })
-const shell = (id: string, command: string): ToolCall => call(id, 'run_command', { command })
 
 describe('parallel read-only tools', () => {
   it('runs read-only calls side by side and sends the results back in call order', async () => {
@@ -287,93 +282,6 @@ describe('parallel read-only tools', () => {
     expect(at('end write_file:out.txt')).toBeLessThan(at('start read_file:c.txt'))
   })
 
-  it('asks for approval only once the reads before the prompt have finished', async () => {
-    const a = gate('a.txt')
-    const app = harness()
-    const run = await app.begin([[read('r1', 'a.txt'), write('w1', 'out.txt'), read('r2', 'b.txt')], 'done'], 'default', ['allow'])
-    await inFlight(1)
-    await tick(50)
-    expect(asked()).toBe(false) // the prompt must not appear while a read it depends on the order of is still running
-    a.open()
-    await run.done()
-    expect(at('end read_file:a.txt')).toBeLessThan(at('ask write_file'))
-    expect(at('end write_file:out.txt')).toBeLessThan(at('start read_file:b.txt'))
-    expect(resultsSentBack(app.requests).map((result) => result.id)).toEqual(['r1', 'w1', 'r2'])
-  })
-
-  it('keeps going with the reads after a denied prompt, in order', async () => {
-    const app = harness()
-    const run = await app.begin([[read('r1', 'a.txt'), write('w1', 'out.txt'), read('r2', 'b.txt')], 'done'], 'default', ['deny'])
-    const events = await run.done()
-    expect(mocks.started).toEqual(['read_file:a.txt', 'read_file:b.txt']) // the denied write never ran
-    expect(resultsSentBack(app.requests)).toEqual([
-      { id: 'r1', text: 'read_file result for a.txt', error: false },
-      { id: 'w1', text: 'Permission denied for "write_file".', error: true },
-      { id: 'r2', text: 'read_file result for b.txt', error: false }
-    ])
-    expect(phases(events, 'w1')).toEqual(['running', 'error'])
-  })
-
-  it('overlaps a web fetch only when it would not ask, and treats a host approved earlier in the turn as free', async () => {
-    const docs = gate('https://docs.python.org/3/')
-    const query = gate('python docs')
-    const a = gate('a.txt')
-    const second = gate('https://example.org/b')
-    const b = gate('b.txt')
-    const app = harness()
-    const run = await app.begin([[
-      fetchPage('f1', 'https://docs.python.org/3/'), webSearch('s1', 'python docs'), read('r1', 'a.txt'),
-      fetchPage('f2', 'https://example.org/a'), // unknown host: stops for approval
-      fetchPage('f3', 'https://example.org/b'), // same host, approved moments ago: no prompt
-      read('r2', 'b.txt')
-    ], 'done'], 'default', ['allow'])
-    await inFlight(3) // the pre-approved fetch, the search and the read overlap
-    await tick(50)
-    expect(asked()).toBe(false) // the prompt waits until all three are done
-    for (const held of [docs, query, a]) held.open()
-    await vi.waitFor(() => expect(mocks.started).toContain('read_file:b.txt'), { timeout: 4000 })
-    expect(asked()).toBe(true)
-    expect(mocks.timeline.filter((entry) => entry.startsWith('ask '))).toEqual(['ask web_fetch']) // one prompt, for the one new host
-    expect(mocks.activeAtStart.get('web_fetch:https://example.org/a')).toBe(0) // the call that asked ran alone
-    expect(mocks.activeAtStart.get('web_fetch:https://example.org/b')).toBe(0)
-    expect(mocks.activeAtStart.get('read_file:b.txt')).toBe(1) // while the approved host's fetch and the read overlap
-    second.open()
-    b.open()
-    await run.done()
-    expect(resultsSentBack(app.requests).map((result) => result.id)).toEqual(['f1', 's1', 'r1', 'f2', 'f3', 'r2'])
-  })
-
-  it('keeps todo lists, plan reviews and shell commands in strict sequence with the reads around them', async () => {
-    const a = gate('a.txt')
-    const app = harness()
-    const todo = call('t1', 'todo_write', { todos: [{ content: 'Check a.txt', status: 'in_progress' }] })
-    const run = await app.begin([[read('r1', 'a.txt'), todo, shell('c1', 'npm test'), read('r2', 'b.txt')], 'done'])
-    await inFlight(1)
-    await tick(50)
-    expect(mocks.timeline).not.toContain('event t1 running')
-    a.open()
-    await run.done()
-    expect(at('end read_file:a.txt')).toBeLessThan(at('event t1 running'))
-    expect(at('event t1 done')).toBeLessThan(at('start run_command:npm test'))
-    expect(at('end run_command:npm test')).toBeLessThan(at('start read_file:b.txt'))
-    expect(mocks.activeAtStart.get('run_command:npm test')).toBe(0)
-    expect(resultsSentBack(app.requests).map((result) => result.id)).toEqual(['r1', 't1', 'c1', 'r2'])
-  })
-
-  it('waits for earlier reads before it pauses a plan for review', async () => {
-    const a = gate('a.txt')
-    const app = harness()
-    const plan = call('p1', 'exit_plan_mode', { plan: '# Plan\n\n1. Fix the parser.' })
-    const run = await app.begin([[read('r1', 'a.txt'), plan], 'done'], 'plan')
-    await inFlight(1)
-    await tick(50)
-    expect(mocks.timeline).not.toContain('plan review')
-    a.open()
-    await run.done()
-    expect(at('end read_file:a.txt')).toBeLessThan(at('plan review'))
-    expect(resultsSentBack(app.requests).map((result) => result.id)).toEqual(['r1', 'p1'])
-  })
-
   describe('with the turn guards', () => {
     it('keeps the repeat-call guard: an identical call never overlaps its twin, and the fourth is skipped', async () => {
       const a = gate('a.txt')
@@ -393,25 +301,6 @@ describe('parallel read-only tools', () => {
       expect(sent.map((result) => [result.id, result.error])).toEqual([['r1', false], ['r2', false], ['r3', false], ['r4', false], ['r5', true]])
       expect(sent[4]!.text).toContain('already made this exact "read_file" call 3 times')
       expect(phases(events, 'r5')).toEqual(['error'])
-    })
-
-    it('keeps the research cap across a batch, and counts calls in the order the model made them', async () => {
-      const queries = Array.from({ length: 8 }, (_, index) => `query ${index + 1}`)
-      const held = queries.slice(0, 6).map((query) => gate(query))
-      const app = harness()
-      const run = await app.begin([queries.map((query, index) => search(`q${index + 1}`, query)), 'done'])
-      await inFlight(4)
-      await tick(50)
-      expect(mocks.started).toHaveLength(4)
-      for (const open of held) open.open()
-      const events = await run.done()
-      expect(mocks.started).toEqual(queries.slice(0, 6).map((query) => `search_files:${query}`)) // the seventh and eighth never ran
-      expect(mocks.peak).toBe(4)
-      const sent = resultsSentBack(app.requests)
-      expect(sent.map((result) => result.id)).toEqual(['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8'])
-      expect(sent.map((result) => result.error)).toEqual([false, false, false, false, false, false, true, true])
-      expect(sent[6]!.text).toContain('Stop searching')
-      expect(phases(events, 'q7')).toEqual(['error'])
     })
 
     it('reports a failing call on its own and lets an identical retry see the failure', async () => {

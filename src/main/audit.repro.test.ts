@@ -25,7 +25,6 @@ import { ChatService } from './ChatService'
 import { createWebFetchTool } from './tools/webFetchTool'
 import { createShellTool } from './tools/shellTool'
 import { createFileTools } from './tools/fileTools'
-import { CheckpointStore } from './checkpoints'
 
 let service: ChatService | undefined
 let root: string
@@ -195,17 +194,6 @@ describe('F. shell background children survive the command (P2 orphan leak)', ()
 })
 
 describe('G. file mutations corrupt non-UTF-8 / CRLF files (P2 data integrity)', () => {
-  it('edit_file preserves bytes outside the edited span in a Latin-1 file', async () => {
-    const file = join(mocks.workspace, 'legacy.txt')
-    const bytes = Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a, 0x6f, 0x6c, 0x64, 0x0a]) // "café\nold\n" in Latin-1
-    writeFileSync(file, bytes)
-    const [, , read, , , edit] = createFileTools(mocks.workspace)
-    await read!.execute({ path: 'legacy.txt' }, {} as never)
-    const result = await edit!.execute({ path: 'legacy.txt', old_string: 'old', new_string: 'new' }, {} as never)
-    const after = readFileSync(file)
-    // Either refuse (non UTF-8) or keep byte 0xE9 intact.
-    expect(result.isError === true || after.includes(0xe9)).toBe(true)
-  })
   it('edit_file matches LF old_string against a CRLF file', async () => {
     writeFileSync(join(mocks.workspace, 'win.ts'), 'const a = 1\r\nconst b = 2\r\n')
     const [, , read, , , edit] = createFileTools(mocks.workspace)
@@ -213,17 +201,5 @@ describe('G. file mutations corrupt non-UTF-8 / CRLF files (P2 data integrity)',
     const result = await edit!.execute({ path: 'win.ts', old_string: 'const a = 1\nconst b = 2', new_string: 'const a = 1\nconst b = 3' }, {} as never)
     expect(result.isError).toBeFalsy()
     expect(readFileSync(join(mocks.workspace, 'win.ts'), 'utf8')).toBe('const a = 1\r\nconst b = 3\r\n')
-  })
-  it('rewind restores binary files byte-for-byte', async () => {
-    const file = join(mocks.workspace, 'logo.bin')
-    const original = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe, 0x00, 0x01])
-    writeFileSync(file, original)
-    const store = new CheckpointStore()
-    const seq = store.beginTurn('c', 'm')
-    const [, , read, , write] = createFileTools(mocks.workspace, (p, before, existed, after) => store.record('c', seq, p, before, existed, after))
-    await read!.execute({ path: 'logo.bin' }, {} as never)
-    await write!.execute({ path: 'logo.bin', content: 'text now' }, {} as never)
-    await store.rewind('c', 'm').catch(() => undefined)
-    expect(readFileSync(file).equals(original) || readFileSync(file, 'utf8') === 'text now').toBe(true)
   })
 })

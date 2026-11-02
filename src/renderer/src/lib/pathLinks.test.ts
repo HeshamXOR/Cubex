@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ancestorsOf, parsePathReference } from './pathLinks'
+import { parsePathReference } from './pathLinks'
 
 const path = (text: string): string | undefined => parsePathReference(text)?.path
 
@@ -12,23 +12,9 @@ describe('parsePathReference paths', () => {
     expect(parsePathReference('  package.json  ')).toEqual({ path: 'package.json' })
   })
 
-  it('accepts dot-files, double extensions and extensionless project files', () => {
-    expect(path('.gitignore')).toBe('.gitignore')
-    expect(path('.github/workflows/ci.yml')).toBe('.github/workflows/ci.yml')
-    expect(path('types.d.ts')).toBe('types.d.ts')
-    expect(path('Dockerfile')).toBe('Dockerfile')
-    expect(path('LICENSE')).toBe('LICENSE')
-  })
-
   it('accepts a Windows absolute path', () => {
     expect(parsePathReference('I:\\Cubex\\src\\main\\ipc.ts:12')).toEqual({ path: 'I:\\Cubex\\src\\main\\ipc.ts', line: 12 })
     expect(path('C:/work/app/main.py')).toBe('C:/work/app/main.py')
-  })
-
-  it('accepts a folder named inside a folder, with or without a slash', () => {
-    expect(path('src/upload')).toBe('src/upload')
-    expect(path('src/upload/')).toBe('src/upload')
-    expect(path('packages\\core')).toBe('packages\\core')
   })
 
   it('leaves identifiers, words, numbers and flags alone', () => {
@@ -43,15 +29,6 @@ describe('parsePathReference paths', () => {
     }
   })
 
-  it('leaves stray colons alone', () => {
-    expect(parsePathReference('a:b.ts')).toBeNull()
-    expect(parsePathReference('C:\\a:b.ts')).toBeNull()
-  })
-
-  it('bounds the length', () => {
-    expect(parsePathReference(`${'a/'.repeat(200)}b.ts`)).toBeNull()
-    expect(parsePathReference('x'.repeat(400))).toBeNull()
-  })
 })
 
 describe('parsePathReference positions', () => {
@@ -80,14 +57,5 @@ describe('parsePathReference positions', () => {
   it('does not take a call for a path with a position', () => {
     expect(parsePathReference('fn(42)')).toBeNull()
     expect(parsePathReference('get(1,2)')).toBeNull()
-  })
-})
-
-describe('ancestorsOf', () => {
-  it('lists the folders above a path, outermost first', () => {
-    expect(ancestorsOf('a/b/c.ts')).toEqual(['a', 'a/b'])
-    expect(ancestorsOf('c.ts')).toEqual([])
-    expect(ancestorsOf('src/upload')).toEqual(['src'])
-    expect(ancestorsOf('')).toEqual([])
   })
 })

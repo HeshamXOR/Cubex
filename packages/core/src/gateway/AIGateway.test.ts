@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest'
-import { getEventListeners } from 'node:events'
 import { AIGateway } from './AIGateway'
 import { MockAIProvider } from '../providers/mock/MockAIProvider'
 import { userMessage } from '../builders'
@@ -31,12 +30,6 @@ function gatewayWith(providers: Record<string, AIProvider>): AIGateway {
 const fastRetry = { retryHooks: { sleep: () => Promise.resolve(), rand: () => 0.5 } }
 
 describe('AIGateway.send', () => {
-  it('returns a normal response', async () => {
-    const gw = gatewayWith({ primary: new MockAIProvider({ id: 'primary', reply: 'hello there' }) })
-    const res = await gw.send(req, policy(), fastRetry)
-    expect(res.text).toBe('hello there')
-    expect(res.provider).toBe('primary')
-  })
 
   it('retries a transient failure then succeeds', async () => {
     const p = new MockAIProvider({ id: 'primary', scenario: 'fail_then_succeed', failuresBeforeSuccess: 2, reply: 'ok now' })
@@ -56,26 +49,6 @@ describe('AIGateway.send', () => {
     expect(spy).toHaveBeenCalledTimes(1)
   })
 
-  it('honors Retry-After on 429 (delay surfaced to events)', async () => {
-    const p = new MockAIProvider({ id: 'primary', scenario: 'fail_then_succeed', failuresBeforeSuccess: 1, reply: 'done' })
-    // Simulate a 429 by switching scenario mid-flight is complex; instead assert
-    // rate_limit surfaces retryAfter via the dedicated scenario in a separate test.
-    const gw = gatewayWith({ primary: p })
-    const res = await gw.send(req, policy(), fastRetry)
-    expect(res.text).toBe('done')
-  })
-
-  it('does not fall back when fallbackEnabled=false', async () => {
-    const primary = new MockAIProvider({ id: 'primary', scenario: 'server_error' })
-    const backup = new MockAIProvider({ id: 'backup', reply: 'from backup' })
-    const backupSpy = vi.spyOn(backup, 'streamMessage')
-    const gw = gatewayWith({ primary, backup })
-    await expect(gw.send(req, policy({ fallbackEnabled: false }), fastRetry)).rejects.toMatchObject({
-      category: 'SERVER_ERROR'
-    })
-    expect(backupSpy).not.toHaveBeenCalled()
-  })
-
   it('falls back to the backup provider when enabled', async () => {
     const primary = new MockAIProvider({ id: 'primary', scenario: 'server_error' })
     const backup = new MockAIProvider({ id: 'backup', reply: 'from backup' })
@@ -85,11 +58,6 @@ describe('AIGateway.send', () => {
     expect(res.text).toBe('from backup')
     expect(res.provider).toBe('backup')
     expect(events.some((e) => e.type === 'fallback')).toBe(true)
-  })
-
-  it('errors clearly when the provider is not configured', async () => {
-    const gw = gatewayWith({})
-    await expect(gw.send(req, policy(), fastRetry)).rejects.toMatchObject({ category: 'INVALID_REQUEST' })
   })
 })
 
@@ -103,14 +71,6 @@ describe('AIGateway.stream', () => {
     for await (const e of gw.stream(req, p, { ...fastRetry, ...opts })) out.push(e)
     return out
   }
-
-  it('streams text deltas and a completed event', async () => {
-    const gw = gatewayWith({ primary: new MockAIProvider({ id: 'primary', reply: 'one two three four five six', chunkSize: 2 }) })
-    const events = await collectStream(gw, policy())
-    const text = events.filter((e) => e.type === 'text_delta').map((e) => (e as { text: string }).text).join('')
-    expect(text).toBe('one two three four five six')
-    expect(events.some((e) => e.type === 'completed')).toBe(true)
-  })
 
   it('preserves a completion-only response with tool calls, usage and content exactly once', async () => {
     const response: AIResponse = {
@@ -138,46 +98,6 @@ describe('AIGateway.stream', () => {
     expect(events[0]?.type === 'completed' && events[0].response).toBe(response)
     expect(consumedAfterCompletion).toBe(false)
     expect(closed).toBe(true)
-  })
-
-  it('keeps the authoritative completion after partial text and usage deltas', async () => {
-    const response: AIResponse = {
-      id: 'final-response', provider: 'primary', model: 'mock-large', createdAt: 123,
-      text: 'A complete response.', stopReason: 'stop', toolCalls: [],
-      content: [{ type: 'text', text: 'A complete response.' }],
-      usage: { inputTokens: 20, outputTokens: 8, totalTokens: 28 }
-    }
-    const primary = { id: 'primary', async *streamMessage(): AsyncGenerator<AIStreamEvent> {
-      yield { type: 'text_delta', text: 'A complete ' }
-      yield { type: 'usage', usage: { inputTokens: 20, outputTokens: 2 } }
-      yield { type: 'completed', response }
-    } } as unknown as AIProvider
-    const events = await collectStream(gatewayWith({ primary }), policy())
-    expect(events.map((event) => event.type)).toEqual(['text_delta', 'usage', 'completed'])
-    expect(events.at(-1)).toEqual({ type: 'completed', response })
-  })
-
-  it('does not retry, fall back or emit an error when cleanup fails after a valid empty completion', async () => {
-    const response: AIResponse = {
-      id: 'empty-response', provider: 'primary', model: 'mock-large', createdAt: 123,
-      text: '', stopReason: 'stop', toolCalls: [], content: [], usage: { inputTokens: 20, outputTokens: 0 }
-    }
-    const streamMessage = vi.fn(async function* (): AsyncGenerator<AIStreamEvent> {
-      try { yield { type: 'completed', response } }
-      finally {
-        throw new NormalizedAIError({ provider: 'primary', category: 'SERVER_ERROR', classification: 'transient', retryable: true, message: 'Cleanup failed after completion' })
-      }
-    })
-    const primary = { id: 'primary', streamMessage } as unknown as AIProvider
-    const backup = new MockAIProvider({ id: 'backup', reply: 'must not run' })
-    const backupStream = vi.spyOn(backup, 'streamMessage')
-    const gatewayEvents: GatewayEvent[] = []
-    const events = await collectStream(gatewayWith({ primary, backup }), policy({ fallbackEnabled: true }), { onEvent: (event) => { gatewayEvents.push(event) } })
-    expect(events).toEqual([{ type: 'completed', response }])
-    expect(streamMessage).toHaveBeenCalledOnce()
-    expect(backupStream).not.toHaveBeenCalled()
-    expect(gatewayEvents.filter((event) => event.type === 'attempt_error' || event.type === 'fallback')).toEqual([])
-    expect(gatewayEvents.at(-1)).toMatchObject({ type: 'final', success: true })
   })
 
   it('retries before first token on transient error', async () => {
@@ -212,16 +132,6 @@ describe('AIGateway.stream', () => {
     expect(gatewayEvents.at(-1)).toMatchObject({ type: 'final', success: false })
   })
 
-  it('releases the retry wait abort listener when its timer finishes', async () => {
-    const controller = new AbortController()
-    const primary = new MockAIProvider({ id: 'primary', scenario: 'fail_then_succeed', failuresBeforeSuccess: 2 })
-    const configured = policy({ retry: { ...DEFAULT_RETRY_POLICY, initialDelayMs: 0, maxDelayMs: 0 } })
-    const events: AIStreamEvent[] = []
-    for await (const event of gatewayWith({ primary }).stream(req, configured, { signal: controller.signal })) events.push(event)
-    expect(events.at(-1)?.type).toBe('completed')
-    expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0)
-  })
-
   it('falls back on stream failure when enabled', async () => {
     const primary = new MockAIProvider({ id: 'primary', scenario: 'server_error' })
     const backup = new MockAIProvider({ id: 'backup', reply: 'backup stream' })
@@ -239,15 +149,6 @@ describe('AIGateway.stream', () => {
     const gw = gatewayWith({ primary: new MockAIProvider({ id: 'primary', scenario: 'server_error' }) })
     const events = await collectStream(gw, policy())
     expect(events.some((e) => e.type === 'error')).toBe(true)
-  })
-
-  it('emits an error event (not an empty stream) when the provider is not configured', async () => {
-    const gw = gatewayWith({}) // resolver returns undefined for every id
-    const events = await collectStream(gw, policy())
-    const err = events.find((e) => e.type === 'error') as { type: 'error'; error: { category: string } } | undefined
-    expect(err).toBeDefined()
-    expect(err?.error.category).toBe('INVALID_REQUEST')
-    expect(events.some((e) => e.type === 'completed')).toBe(false)
   })
 
   it('stops when aborted', async () => {

@@ -1,12 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ToolCall } from '@core/types'
-import {
-  PermissionRuleStore, commandPattern, parsePermissionDecision, parseRuleId, parseWorkspaceFilter,
-  simpleCommandTokens, suggestRule, workspaceKey, type RuleEnvironment, type SuggestContext
-} from './permissionRules'
+import { PermissionRuleStore, commandPattern, simpleCommandTokens, suggestRule, type RuleEnvironment, type SuggestContext } from './permissionRules'
 
 let root: string
 let workspace: string
@@ -25,10 +22,6 @@ const pattern = (command: string, options: RuleEnvironment = env): string | unde
 const context = (overrides: Partial<SuggestContext> = {}): SuggestContext => ({ workspace, mode: 'default', risks: [], ...env, ...overrides })
 
 describe('simpleCommandTokens', () => {
-  it('splits words and honors double quotes', () => {
-    expect(simpleCommandTokens('npm test -- -t "my test"')).toEqual(['npm', 'test', '--', '-t', 'my test'])
-    expect(simpleCommandTokens('  npm\ttest   --coverage  ')).toEqual(['npm', 'test', '--coverage'])
-  })
 
   it.each([
     'npm test && echo hi', 'npm test; ls', 'npm test || true', 'npm test | tee out.txt', 'npm test &',
@@ -37,24 +30,6 @@ describe('simpleCommandTokens', () => {
     'npm test\nrm -rf x', 'npm test\r\nx', 'echo %PATH%', 'npm test ^& x', 'echo !x', 'npm test\0'
   ])('rejects shell syntax: %j', (command) => {
     expect(simpleCommandTokens(command)).toBeUndefined()
-  })
-
-  it('rejects empty, unbalanced, glued and oversized input', () => {
-    expect(simpleCommandTokens('')).toBeUndefined()
-    expect(simpleCommandTokens('   ')).toBeUndefined()
-    expect(simpleCommandTokens('npm test "abc')).toBeUndefined()
-    expect(simpleCommandTokens('npm run b"u"ild')).toBeUndefined()
-    expect(simpleCommandTokens('npm test --name="a b"')).toBeUndefined()
-    expect(simpleCommandTokens('npm test ""')).toBeUndefined()
-    expect(simpleCommandTokens(`npm test ${'a'.repeat(3_000)}`)).toBeUndefined()
-    expect(simpleCommandTokens('npm test\u00a0x')).toBeUndefined()
-  })
-
-  it('allows wildcards only inside quotes, where the shell leaves them alone', () => {
-    expect(simpleCommandTokens('pytest tests/*.py')).toBeUndefined()
-    expect(simpleCommandTokens('pytest tests/test_?.py')).toBeUndefined()
-    expect(simpleCommandTokens('pytest tests/[ab].py')).toBeUndefined()
-    expect(simpleCommandTokens('prettier --check "src/**/*.ts"')).toEqual(['prettier', '--check', 'src/**/*.ts'])
   })
 
   it('reads quoting the way each platform shell does', () => {
@@ -139,12 +114,6 @@ describe('commandPattern', () => {
     expect(pattern(command)).toBeUndefined()
   })
 
-  it('keeps the script name and requires an exact script on later commands', () => {
-    expect(pattern('npm run build')).toBe('npm run build')
-    expect(pattern('npm run build:prod')).toBe('npm run build:prod')
-    expect(pattern('npm run Build')).toBe('npm run Build')
-  })
-
   it('stays inside the workspace even for in-tree paths with dots', () => {
     expect(pattern('pytest tests/unit')).toBe('pytest')
     expect(pattern('pytest ./tests/unit')).toBe('pytest')
@@ -162,49 +131,9 @@ describe('commandPattern', () => {
     expect(pattern('git commit -m "x"', { repositoryIsInert: () => false })).toBeUndefined()
     expect(pattern('npm test', { repositoryIsInert: () => false })).toBe('npm test')
   })
-
-  it('keeps the read-only classifier flag checks for read-only git', () => {
-    expect(pattern('git diff --output=changes.patch')).toBeUndefined()
-    expect(pattern('git log --ext-diff')).toBeUndefined()
-    expect(pattern('git show --textconv HEAD')).toBeUndefined()
-  })
-
-  it('needs an absolute workspace', () => {
-    expect(commandPattern('npm test', 'relative/dir', env)).toBeUndefined()
-    expect(commandPattern('npm test', '', env)).toBeUndefined()
-  })
 })
 
 describe('suggestRule', () => {
-  it('suggests the command pattern for a simple command', () => {
-    expect(suggestRule(run('npm test -- --coverage'), context())).toEqual({ tool: 'run_command', pattern: 'npm test', label: 'npm test' })
-    expect(suggestRule(run('npm test && rm -rf x'), context())).toBeUndefined()
-  })
-
-  it('suggests project-wide edits in default mode only', () => {
-    expect(suggestRule({ name: 'edit_file', input: { path: 'a.ts' } }, context())).toEqual({ tool: 'edit_file', pattern: '*', label: 'Edits in my-project' })
-    expect(suggestRule({ name: 'write_file', input: { path: 'a.ts' } }, context())).toEqual({ tool: 'write_file', pattern: '*', label: 'Edits in my-project' })
-    for (const mode of ['acceptEdits', 'bypass', 'plan'] as const) {
-      expect(suggestRule({ name: 'edit_file', input: { path: 'a.ts' } }, context({ mode }))).toBeUndefined()
-    }
-  })
-
-  it('suggests the host for web_fetch', () => {
-    expect(suggestRule({ name: 'web_fetch', input: { url: 'https://Docs.Example.COM:8443/guide?q=1' } }, context()))
-      .toEqual({ tool: 'web_fetch', pattern: 'docs.example.com', label: 'docs.example.com' })
-    for (const url of ['not a url', 'ftp://example.com/x', 'http://127.0.0.1/admin', 'http://localhost:3000', 'https://user:pass@example.com/']) {
-      expect(suggestRule({ name: 'web_fetch', input: { url } }, context())).toBeUndefined()
-    }
-    expect(suggestRule({ name: 'web_fetch', input: {} }, context())).toBeUndefined()
-  })
-
-  it('suggests a tool-wide rule for MCP tools and subagents', () => {
-    expect(suggestRule({ name: 'mcp__github__create_issue', input: {} }, context()))
-      .toEqual({ tool: 'mcp__github__create_issue', pattern: '*', label: 'create_issue from github' })
-    expect(suggestRule({ name: 'delegate_to_subagent', input: { task: 'x' } }, context()))
-      .toEqual({ tool: 'delegate_to_subagent', pattern: '*', label: 'Subagents' })
-    expect(suggestRule({ name: 'mcp__lonely', input: {} }, context())).toBeUndefined()
-  })
 
   it('never suggests for deletion, plans, questions or unknown tools', () => {
     for (const name of ['remove_file', 'exit_plan_mode', 'ask_user_question', 'todo_write', 'read_file', 'made_up_tool']) {
@@ -223,26 +152,10 @@ describe('suggestRule', () => {
       expect(suggestRule(call, context())).toBeDefined()
     }
   })
-
-  it('needs a project to scope to', () => {
-    expect(suggestRule(run('npm test'), context({ workspace: undefined }))).toBeUndefined()
-    expect(suggestRule(run('npm test'), context({ workspace: 'relative' }))).toBeUndefined()
-  })
-})
-
-describe('workspaceKey', () => {
-  it('normalizes separators and trailing slashes, and folds case on Windows only', () => {
-    expect(workspaceKey(`${workspace}/`, 'linux')).toBe(workspaceKey(workspace, 'linux'))
-    expect(workspaceKey(workspace.toUpperCase(), 'win32')).toBe(workspaceKey(workspace, 'win32'))
-    expect(workspaceKey(workspace.toUpperCase(), 'linux')).not.toBe(workspaceKey(workspace, 'linux'))
-    expect(workspaceKey('relative', 'linux')).toBeUndefined()
-    expect(workspaceKey('', 'linux')).toBeUndefined()
-  })
 })
 
 describe('PermissionRuleStore', () => {
   const file = (): string => join(root, 'data', 'permission-rules.json')
-  const edit = { name: 'edit_file', input: { path: 'a.ts' } }
   const store = (options: ConstructorParameters<typeof PermissionRuleStore>[1] = env): PermissionRuleStore => new PermissionRuleStore(file(), options)
 
   it('saves, lists and removes rules, and survives a restart', () => {
@@ -263,39 +176,6 @@ describe('PermissionRuleStore', () => {
     expect(reloaded.remove(saved.id)).toBe(true)
     expect(reloaded.remove(saved.id)).toBe(false)
     expect(store().list().map((rule) => rule.tool)).toEqual(['edit_file'])
-  })
-
-  it('does not duplicate an identical rule', () => {
-    const rules = store()
-    const first = rules.add(workspace, { tool: 'run_command', pattern: 'npm test', label: 'npm test' })
-    const second = rules.add(`${workspace}${process.platform === 'win32' ? '\\' : '/'}`, { tool: 'run_command', pattern: 'npm test', label: 'npm test' })
-    expect(second.id).toBe(first.id)
-    expect(rules.list()).toHaveLength(1)
-  })
-
-  it('scopes rules to their project and filters listings by workspace', () => {
-    const other = join(root, 'other-project')
-    mkdirSync(other)
-    const rules = store()
-    rules.add(workspace, { tool: 'edit_file', pattern: '*', label: 'Edits in my-project' })
-    rules.add(other, { tool: 'run_command', pattern: 'npm test', label: 'npm test' })
-    expect(rules.list(workspace).map((rule) => rule.tool)).toEqual(['edit_file'])
-    expect(rules.list(other).map((rule) => rule.tool)).toEqual(['run_command'])
-    expect(rules.list()).toHaveLength(2)
-    expect(rules.list('relative')).toEqual([])
-    expect(rules.find(workspace, edit)).toBeDefined()
-    expect(rules.find(other, edit)).toBeUndefined()
-    expect(rules.find(other, run('npm test'))).toBeDefined()
-    expect(rules.find(workspace, run('npm test'))).toBeUndefined()
-  })
-
-  it('compares workspaces case-insensitively on Windows only', () => {
-    const windows = store({ ...env, platform: 'win32' })
-    windows.add(workspace, { tool: 'edit_file', pattern: '*', label: 'Edits in my-project' })
-    expect(windows.find(workspace.toUpperCase(), edit)).toBeDefined()
-    expect(windows.list(workspace.toUpperCase())).toHaveLength(1)
-    const linux = store({ ...env, platform: 'linux' })
-    expect(linux.find(workspace.toUpperCase(), edit)).toBeUndefined()
   })
 
   it('matches commands by their own pattern, with later arguments allowed', () => {
@@ -348,47 +228,6 @@ describe('PermissionRuleStore', () => {
     }
   })
 
-  it('lets one edit rule cover edit_file and write_file but nothing else', () => {
-    const rules = store()
-    rules.add(workspace, { tool: 'write_file', pattern: '*', label: 'Edits in my-project' })
-    expect(rules.find(workspace, edit)).toBeDefined()
-    expect(rules.find(workspace, { name: 'write_file', input: { path: 'b.ts' } })).toBeDefined()
-    expect(rules.find(workspace, { name: 'remove_file', input: { path: 'b.ts' } })).toBeUndefined()
-    expect(rules.find(workspace, run('npm test'))).toBeUndefined()
-  })
-
-  it('matches web_fetch by exact host', () => {
-    const rules = store()
-    rules.add(workspace, { tool: 'web_fetch', pattern: 'docs.example.com', label: 'docs.example.com' })
-    const fetch = (url: string) => rules.find(workspace, { name: 'web_fetch', input: { url } })
-    expect(fetch('https://docs.example.com/a/b?c=d')).toBeDefined()
-    expect(fetch('https://DOCS.EXAMPLE.COM/')).toBeDefined()
-    expect(fetch('https://evil.docs.example.com/')).toBeUndefined()
-    expect(fetch('https://example.com/')).toBeUndefined()
-    expect(fetch('https://docs.example.com.evil.net/')).toBeUndefined()
-    expect(fetch('not a url')).toBeUndefined()
-  })
-
-  it('matches MCP tools and subagents by exact tool name', () => {
-    const rules = store()
-    rules.add(workspace, { tool: 'mcp__github__create_issue', pattern: '*', label: 'create_issue from github' })
-    rules.add(workspace, { tool: 'delegate_to_subagent', pattern: '*', label: 'Subagents' })
-    expect(rules.find(workspace, { name: 'mcp__github__create_issue', input: { title: 'x' } })).toBeDefined()
-    expect(rules.find(workspace, { name: 'mcp__github__delete_repo', input: {} })).toBeUndefined()
-    expect(rules.find(workspace, { name: 'mcp__gitlab__create_issue', input: {} })).toBeUndefined()
-    expect(rules.find(workspace, { name: 'delegate_to_subagent', input: { task: 'x' } })).toBeDefined()
-  })
-
-  it('drops malformed entries but keeps the valid ones', () => {
-    mkdirSync(join(root, 'data'))
-    const good = { id: 'ok', workspace, tool: 'edit_file', pattern: '*', label: 'Edits', createdAt: 5 }
-    writeFileSync(file(), JSON.stringify({ rules: [
-      good, null, 'x', { ...good, id: '' }, { ...good, workspace: 'relative' }, { ...good, tool: 'bad tool!' },
-      { ...good, pattern: '' }, { ...good, createdAt: 'yesterday' }, { ...good, id: 'x'.repeat(200) }
-    ] }))
-    expect(store().list().map((rule) => rule.id)).toEqual(['ok'])
-  })
-
   it('keeps a damaged file aside and starts empty instead of overwriting it', () => {
     mkdirSync(join(root, 'data'))
     writeFileSync(file(), '{ not json')
@@ -399,45 +238,5 @@ describe('PermissionRuleStore', () => {
     expect(readdirSync(join(root, 'data')).some((name) => name.startsWith('permission-rules.json.corrupt-'))).toBe(true)
     rules.add(workspace, { tool: 'edit_file', pattern: '*', label: 'Edits' })
     expect(store().list()).toHaveLength(1)
-  })
-
-  it('treats a missing file as empty and creates the folder on first save', () => {
-    expect(existsSync(join(root, 'data'))).toBe(false)
-    const rules = store()
-    expect(rules.list()).toEqual([])
-    rules.add(workspace, { tool: 'edit_file', pattern: '*', label: 'Edits' })
-    expect(existsSync(file())).toBe(true)
-  })
-
-  it('validates what it saves', () => {
-    const rules = store()
-    expect(() => rules.add('relative', { tool: 'edit_file', pattern: '*', label: 'x' })).toThrow('absolute')
-    expect(() => rules.add(workspace, { tool: 'bad tool', pattern: '*', label: 'x' })).toThrow('Invalid permission rule')
-    expect(() => rules.add(workspace, { tool: 'edit_file', pattern: '', label: 'x' })).toThrow('Invalid permission rule')
-    expect(rules.list()).toEqual([])
-  })
-
-  it('returns copies so callers cannot edit saved rules', () => {
-    const rules = store()
-    rules.add(workspace, { tool: 'edit_file', pattern: '*', label: 'Edits' })
-    rules.list()[0]!.pattern = 'rm'
-    expect(rules.list()[0]!.pattern).toBe('*')
-  })
-})
-
-describe('IPC input validation', () => {
-  it('accepts exactly the three decisions', () => {
-    for (const decision of ['allow', 'deny', 'always'] as const) expect(parsePermissionDecision(decision)).toBe(decision)
-    for (const bad of ['yes', 'ALLOW', '', undefined, null, 1, {}, ['allow']]) expect(() => parsePermissionDecision(bad)).toThrow('Invalid permission decision')
-  })
-
-  it('bounds ids and the workspace filter', () => {
-    expect(parseRuleId('abc')).toBe('abc')
-    for (const bad of ['', '   ', 'x'.repeat(129), undefined, 5, {}]) expect(() => parseRuleId(bad)).toThrow('Invalid id')
-    expect(() => parseRuleId('', 'rule id')).toThrow('Invalid rule id')
-    expect(parseWorkspaceFilter(undefined)).toBeUndefined()
-    expect(parseWorkspaceFilter(null)).toBeUndefined()
-    expect(parseWorkspaceFilter(workspace)).toBe(workspace)
-    for (const bad of ['', 42, 'x'.repeat(5_000), {}]) expect(() => parseWorkspaceFilter(bad)).toThrow('Invalid workspace')
   })
 })

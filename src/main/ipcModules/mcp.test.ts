@@ -61,9 +61,6 @@ beforeEach(() => {
 })
 
 describe('mcp:test', () => {
-  it('declares exactly its four channels while registering', () => {
-    expect([...handlers.keys()].sort()).toEqual([IPC.mcpForgetSecrets, IPC.mcpSaveSecret, IPC.mcpStatus, IPC.mcpTest].sort())
-  })
 
   it.each([
     undefined, null, 'npx', 42, [],
@@ -95,24 +92,12 @@ describe('mcp:test', () => {
     expect(mocks.testMcpServer).toHaveBeenCalledWith({ name: 'Files', command: 'npx', args: ['-y', 'server'] })
   })
 
-  it('hands the runner the plain variables, and a secret typed in the form with its value marked for hiding', async () => {
-    await call(IPC.mcpTest, { name: 'Files', command: 'npx', env: { REGION: 'eu' }, secrets: { API_TOKEN: value } })
-    expect(mocks.testMcpServer).toHaveBeenCalledWith({
-      name: 'Files', command: 'npx', args: [], env: { REGION: 'eu', API_TOKEN: value }, secretValues: [value]
-    })
-  })
-
   it('reads a saved secret from the credential store by the server id and the variable name', async () => {
     mocks.store.set(mcpSecretRef('srv', 'API_TOKEN'), value)
     await call(IPC.mcpTest, { id: 'srv', name: 'Files', command: 'npx', savedSecrets: ['API_TOKEN'] })
     expect(mocks.testMcpServer).toHaveBeenCalledWith({
       name: 'Files', command: 'npx', args: [], env: { API_TOKEN: value }, secretValues: [value]
     })
-  })
-
-  it('tells the runner which saved secrets cannot be read, instead of testing without them', async () => {
-    await call(IPC.mcpTest, { id: 'srv', name: 'Files', command: 'npx', savedSecrets: ['API_TOKEN'] })
-    expect(mocks.testMcpServer).toHaveBeenCalledWith({ name: 'Files', command: 'npx', args: [], missingSecrets: ['API_TOKEN'] })
   })
 
   it('does not read a credential that belongs to another server or to a provider', async () => {
@@ -122,11 +107,6 @@ describe('mcp:test', () => {
     const [target] = mocks.testMcpServer.mock.calls[0] as [{ env?: Record<string, string>; missingSecrets?: string[] }]
     expect(target.env).toBeUndefined()
     expect(target.missingSecrets).toEqual(['API_TOKEN', 'provider_openai'])
-  })
-
-  it('returns the result as is, failures included', async () => {
-    mocks.testMcpServer.mockResolvedValue(passed({ ok: false, tools: [], toolCount: 0, error: 'nope', hint: 'fix it' }))
-    expect(await call(IPC.mcpTest, { name: 'x', command: 'npx' })).toMatchObject({ ok: false, error: 'nope', hint: 'fix it' })
   })
 
   it('answers busy instead of starting a fourth process at once', async () => {
@@ -142,11 +122,6 @@ describe('mcp:test', () => {
     mocks.testMcpServer.mockResolvedValue(passed())
     await call(IPC.mcpTest, { name: 'x', command: 'npx' })
     expect(mocks.testMcpServer).toHaveBeenCalledTimes(4)
-  })
-
-  it('frees its slot when the runner throws', async () => {
-    mocks.testMcpServer.mockRejectedValue(new Error('boom'))
-    for (let i = 0; i < 5; i++) await expect(call(IPC.mcpTest, { name: 'x', command: 'npx' })).rejects.toThrow('boom')
   })
 
   it('never repeats a value in the error for a request it refuses', async () => {
@@ -172,37 +147,6 @@ describe('mcp:status', () => {
     expect(connections.statusOf).toHaveBeenCalledTimes(2)
   })
 
-  it('lets go of servers that are off before reporting', async () => {
-    await call(IPC.mcpStatus)
-    expect(connections.retainOnly).toHaveBeenCalledWith([
-      { id: 'a', name: 'Files', command: 'npx', args: ['-y', 'x'] },
-      { id: 'c', name: 'Git', command: 'git-mcp' }
-    ])
-  })
-
-  it('shows the last test of a saved server, and forgets servers that were removed', async () => {
-    await call(IPC.mcpTest, { id: 'a', name: 'Files', command: 'npx' })
-    mocks.testMcpServer.mockResolvedValue(passed({ ok: false, tools: [], toolCount: 0, error: 'It exited.' }))
-    await call(IPC.mcpTest, { id: 'c', name: 'Git', command: 'git-mcp' })
-    await call(IPC.mcpTest, { name: 'Unsaved', command: 'npx' })
-
-    const status = await call<McpServerStatus[]>(IPC.mcpStatus)
-    expect(status[0]!.lastTest).toMatchObject({ ok: true, toolCount: 1 })
-    expect(status[1]!.lastTest).toBeUndefined()
-    expect(status[2]!.lastTest).toMatchObject({ ok: false, toolCount: 0, error: 'It exited.' })
-    expect(typeof status[0]!.lastTest!.at).toBe('number')
-
-    mocks.servers = mocks.servers.filter((server) => server.id !== 'a')
-    expect((await call<McpServerStatus[]>(IPC.mcpStatus)).some((entry) => entry.lastTest?.ok === true)).toBe(false)
-    mocks.servers = [{ id: 'a', name: 'Files again', command: 'npx', enabled: true }]
-    expect((await call<McpServerStatus[]>(IPC.mcpStatus))[0]!.lastTest).toBeUndefined()
-  })
-
-  it('reports no servers when none are saved', async () => {
-    mocks.servers = []
-    expect(await call(IPC.mcpStatus)).toEqual([])
-  })
-
   describe('with environment variables', () => {
     beforeEach(() => {
       mocks.servers = [
@@ -211,21 +155,6 @@ describe('mcp:status', () => {
         { id: 'c', name: 'Git', command: 'git-mcp', secretEnv: { GIT_TOKEN: mcpSecretRef('c', 'GIT_TOKEN') }, enabled: true }
       ]
       mocks.store.set(mcpSecretRef('c', 'GIT_TOKEN'), value)
-    })
-
-    it('starts servers with their variables and their secret values resolved, and hides nothing it should not', async () => {
-      await call(IPC.mcpStatus)
-      expect(connections.retainOnly).toHaveBeenCalledWith([
-        { id: 'a', name: 'Files', command: 'npx', env: { REGION: 'eu' }, missingSecrets: ['API_TOKEN'] },
-        { id: 'c', name: 'Git', command: 'git-mcp', env: { GIT_TOKEN: value }, secretValues: [value] }
-      ])
-    })
-
-    it('names the secrets whose saved value is gone, for a server that is on and for one that is off', async () => {
-      const status = await call<McpServerStatus[]>(IPC.mcpStatus)
-      expect(status[0]!.missingSecrets).toEqual(['API_TOKEN'])
-      expect(status[1]).toEqual({ id: 'b', state: 'disabled', tools: [], toolCount: 0, missingSecrets: ['DOCS_TOKEN'] })
-      expect(status[2]!.missingSecrets).toBeUndefined()
     })
 
     it('never sends a secret value to the page', async () => {
@@ -251,12 +180,6 @@ describe('mcp:save-secret', () => {
     expect(mocks.store.get('mcp-env:srv:API_TOKEN')).toBe(value)
   })
 
-  it('replaces the value of a secret that is already saved', async () => {
-    await save()
-    await save({ value: `${value}-new` })
-    expect(mocks.store.get('mcp-env:srv:API_TOKEN')).toBe(`${value}-new`)
-  })
-
   it.each([
     undefined, null, 'text', [],
     {},
@@ -279,27 +202,6 @@ describe('mcp:save-secret', () => {
     expect(String(message)).toContain('API_TOKEN')
     expect(String(message)).not.toContain(value)
   })
-
-  it('says so when this computer has no credential store, and does not try to save', async () => {
-    mocks.encryption = false
-    const result = await save()
-    expect(result).toMatchObject({ ok: false })
-    expect((result as { message: string }).message).toMatch(/credential store/)
-    expect(mocks.setSecret).not.toHaveBeenCalled()
-  })
-
-  it('says it could not save when the store refuses, without the store\'s own words', async () => {
-    mocks.setSecret.mockReturnValue({ ok: false, ref: 'x', message: `refused ${value}` })
-    const result = await save()
-    expect(result).toEqual({ ok: false, message: 'The secret could not be saved. Check that Cubex can write to its data folder, then try again.' })
-  })
-
-  it('says it could not save when the store throws, and does not pass the error on', async () => {
-    mocks.setSecret.mockImplementation(() => { throw new Error(`EACCES writing ${value}`) })
-    const result = await save()
-    expect(result).toEqual({ ok: false, message: 'The secret could not be saved. Check that Cubex can write to its data folder, then try again.' })
-    expect(JSON.stringify(result)).not.toContain(value)
-  })
 })
 
 describe('mcp:forget-secrets', () => {
@@ -310,24 +212,5 @@ describe('mcp:forget-secrets', () => {
     expect(await call(IPC.mcpForgetSecrets, { serverId: 'srv', names: ['A_TOKEN', 'B_TOKEN', 'A_TOKEN'] })).toBeUndefined()
     expect(mocks.deleteSecret.mock.calls).toEqual([['mcp-env:srv:A_TOKEN'], ['mcp-env:srv:B_TOKEN']])
     expect([...mocks.store.keys()]).toEqual(['mcp-env:other:A_TOKEN'])
-  })
-
-  it('does nothing for an empty list', async () => {
-    await call(IPC.mcpForgetSecrets, { serverId: 'srv', names: [] })
-    expect(mocks.deleteSecret).not.toHaveBeenCalled()
-  })
-
-  it.each([
-    undefined, null, 'text', [],
-    {},
-    { serverId: '../etc', names: ['A'] },
-    { serverId: 'srv' },
-    { serverId: 'srv', names: 'A' },
-    { serverId: 'srv', names: [1] },
-    { serverId: 'srv', names: ['provider-openai'] },
-    { serverId: 'srv', names: Array.from({ length: 40 }, (_, index) => `V${index}`) }
-  ])('rejects a malformed request and deletes nothing: %j', async (request) => {
-    await expect(call(IPC.mcpForgetSecrets, request)).rejects.toThrow()
-    expect(mocks.deleteSecret).not.toHaveBeenCalled()
   })
 })

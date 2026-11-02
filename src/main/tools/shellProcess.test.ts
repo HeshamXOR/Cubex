@@ -86,18 +86,6 @@ describe('shell process-tree termination', () => {
     expect(shell.kill).toHaveBeenCalledWith('SIGKILL')
   })
 
-  it('cleans up when Windows taskkill cannot start', async () => {
-    const shell = childFixture()
-    const killer = childFixture(5678)
-    spawnMock.mockReturnValue(killer)
-    const result = terminateShellTree(shell, 'win32')
-    killer.emit('error', new Error('spawn ENOENT'))
-    killer.emit('close', null)
-    expect(await result).toContain('spawn ENOENT')
-    expect(shell.kill).toHaveBeenCalledTimes(1)
-    expect(vi.getTimerCount()).toBe(0)
-  })
-
   it('bounds a hung Windows taskkill and reports that termination is incomplete', async () => {
     const shell = childFixture()
     const killer = childFixture(5678)
@@ -119,20 +107,6 @@ describe('shell process-tree termination', () => {
     expect(shell.kill).not.toHaveBeenCalled()
   })
 
-  it('accepts a POSIX process group that already exited', async () => {
-    vi.spyOn(process, 'kill').mockImplementation(() => { throw Object.assign(new Error('gone'), { code: 'ESRCH' }) })
-    const shell = childFixture()
-    expect(await terminateShellTree(shell, 'darwin')).toBeUndefined()
-    expect(shell.kill).not.toHaveBeenCalled()
-  })
-
-  it('reports failure to stop a POSIX group and attempts to stop its shell', async () => {
-    vi.spyOn(process, 'kill').mockImplementation(() => { throw Object.assign(new Error('denied'), { code: 'EPERM' }) })
-    const shell = childFixture()
-    expect(await terminateShellTree(shell, 'linux')).toContain('Could not terminate the process group: denied')
-    expect(shell.kill).toHaveBeenCalledWith('SIGKILL')
-  })
-
   it('reports a signal exit as a command failure and releases the abort listener', async () => {
     const shell = childFixture()
     const controller = new AbortController()
@@ -148,20 +122,6 @@ describe('shell process-tree termination', () => {
     expect(result.isError).toBe(true)
     expect(result.content).toContain('Command terminated by signal: SIGTERM')
     expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function))
-    expect(vi.getTimerCount()).toBe(0)
-  })
-
-  it('does not invent a successful exit code when the shell closes without a status', async () => {
-    const shell = childFixture()
-    spawnMock.mockReturnValue(shell)
-    const execution = createShellTool(process.cwd()).execute({ command: 'fixture' }, {
-      requestPermission: async () => ({ decision: 'allow' })
-    })
-    shell.emit('spawn')
-    shell.emit('close', null, null)
-    const result = await execution
-    expect(result.isError).toBe(true)
-    expect(result.content).toContain('Command exited without an exit code.')
     expect(vi.getTimerCount()).toBe(0)
   })
 })

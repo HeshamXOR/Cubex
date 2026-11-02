@@ -274,7 +274,7 @@ export function skillsCatalog(skills: Skill[]): string {
   if (skills.length === 0) return ''
   const list = skills.slice(0, MAX_SKILLS)
     .map((skill) => `- ${skill.name} (${skill.source}): ${skill.description}`).join('\n')
-  return 'Available skills (instructions load on demand). Match the task to these descriptions; call `skill` with the relevant name before using its workflow. Load only the skills needed for the current task. Use `resource` for a relative text file referenced by that skill; this tool never executes files.\n' + list
+  return 'Available skills (instructions load on demand). Call `skill` only when the user names one, or when the work is substantial and clearly matches a description here; not for a question or a small edit. Load only the skills the task needs. Use `resource` for a relative text file referenced by that skill; this tool never executes files.\n' + list
 }
 
 function cancelled(ctx: ToolExecutionContext): void {

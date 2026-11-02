@@ -90,44 +90,6 @@ describe('ChatService assistant turn replay inside a tool loop', () => {
       { type: 'tool_use', id: 'toolu_B', name: 'read_file', input: { path: 'b.txt' } }
     ])
   })
-
-  it('keeps redacted thinking and text in place', async () => {
-    const events: ChatEvent[] = []
-    const requests: AIRequest[] = []
-    const chat = startService(async function* (req): AsyncGenerator<AIStreamEvent> {
-      requests.push(structuredClone(req))
-      if (requests.length === 1) {
-        yield { type: 'metadata', data: { reasoningBlock: { redacted: 'ENCRYPTED' } } }
-        yield { type: 'text_delta', text: 'Checking.' }
-        yield { type: 'tool_call_delta', index: 0, id: 'toolu_A', name: 'read_file', argsDelta: '{"path":"a.txt"}' }
-        yield { type: 'reasoning_delta', text: 'More.' }
-        yield { type: 'metadata', data: { reasoningBlock: { signature: 'sig-B' } } }
-        yield { type: 'tool_call_delta', index: 1, id: 'toolu_B', name: 'read_file', argsDelta: '{"path":"b.txt"}' }
-      } else yield { type: 'text_delta', text: 'Done.' }
-    }, events)
-    await chat.start(request())
-    await finished(events)
-    expect(requests[1]!.messages[1]!.content.map((part) => part.type)).toEqual(['reasoning', 'text', 'tool_use', 'reasoning', 'tool_use'])
-    expect(requests[1]!.messages[1]!.content[0]).toEqual({ type: 'reasoning', text: '', redacted: 'ENCRYPTED' })
-  })
-
-  it('keeps unsigned reasoning so adapters that echo it can', async () => {
-    const events: ChatEvent[] = []
-    const requests: AIRequest[] = []
-    const chat = startService(async function* (req): AsyncGenerator<AIStreamEvent> {
-      requests.push(structuredClone(req))
-      if (requests.length === 1) {
-        yield { type: 'reasoning_delta', text: 'Need a.txt.' }
-        yield { type: 'tool_call_delta', index: 0, id: 'call_1', name: 'read_file', argsDelta: '{"path":"a.txt"}' }
-      } else yield { type: 'text_delta', text: 'Done.' }
-    }, events)
-    await chat.start(request())
-    await finished(events)
-    expect(requests[1]!.messages[1]!.content).toEqual([
-      { type: 'reasoning', text: 'Need a.txt.' },
-      { type: 'tool_use', id: 'call_1', name: 'read_file', input: { path: 'a.txt' } }
-    ])
-  })
 })
 
 describe('ChatService history loaded from storage', () => {

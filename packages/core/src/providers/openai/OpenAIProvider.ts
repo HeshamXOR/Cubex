@@ -64,6 +64,13 @@ function capsForModel(id: string): Capability[] {
  */
 const FALLBACK_MODEL_IDS = ['gpt-6-astra', 'gpt-5.6', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-4o', 'gpt-4o-mini']
 
+export interface OpenAIProviderOptions {
+  /** The auth and custom headers of a host that is not OpenAI itself. They replace the SDK's own bearer key header. */
+  headers?: Record<string, string>
+  /** The caller already checked the reasoning effort against the model: send it as chosen. */
+  effortAsChosen?: boolean
+}
+
 /**
  * OpenAI adapter. Supports both the Responses API (default) and Chat Completions
  * (`cfg.apiMode === 'chat_completions'`) via the official `openai` SDK.
@@ -77,11 +84,13 @@ export class OpenAIProvider extends BaseProvider {
   private readonly apiMode: 'responses' | 'chat_completions'
   /** What each model's server takes beyond the baseline (Chat Completions only). */
   private readonly dialects: ChatDialects
+  private readonly effortAsChosen: boolean
   private modelsFallback = false
 
   constructor(
     private readonly cfg: ProviderConfig,
-    secret?: string
+    secret?: string,
+    options: OpenAIProviderOptions = {}
   ) {
     super()
     this.id = cfg.id
@@ -89,6 +98,7 @@ export class OpenAIProvider extends BaseProvider {
     this.apiMode = cfg.apiMode === 'chat_completions' ? 'chat_completions' : 'responses'
     // No base URL means OpenAI itself.
     this.dialects = new ChatDialects(cfg.baseUrl)
+    this.effortAsChosen = options.effortAsChosen === true
     this.client = new OpenAI({
       apiKey: secret ?? 'missing',
       // Trim a trailing slash to avoid "https://host//v1/..." on strict proxies.
@@ -97,6 +107,8 @@ export class OpenAIProvider extends BaseProvider {
       baseURL: cfg.baseUrl ? normalizeBaseUrl(cfg.baseUrl, cfg.baseUrl) : 'https://api.openai.com/v1',
       organization: null,
       project: null,
+      // Null drops the SDK's bearer header, so a host with another scheme (or none) never sees the placeholder key.
+      ...(options.headers ? { defaultHeaders: { Authorization: null, ...options.headers } } : {}),
       dangerouslyAllowBrowser: false,
       // The gateway's RetryEngine is the single retry layer.
       maxRetries: 0
@@ -144,10 +156,12 @@ export class OpenAIProvider extends BaseProvider {
   async *streamMessage(request: AIRequest, options?: RequestOptions): AsyncIterable<AIStreamEvent> {
     const signal = options?.signal
     if (signal?.aborted) throw this.abort()
-    request = requestWithSupportedEffort(this.kind, request, {
-      id: request.model,
-      supportsReasoning: this.supports('reasoning') && this.toModelInfo(request.model).supportsReasoning
-    })
+    if (!this.effortAsChosen) {
+      request = requestWithSupportedEffort(this.kind, request, {
+        id: request.model,
+        supportsReasoning: this.supports('reasoning') && this.toModelInfo(request.model).supportsReasoning
+      })
+    }
     try {
       if (this.apiMode === 'chat_completions') {
         yield* this.streamChat(request, options)
@@ -221,7 +235,7 @@ export class OpenAIProvider extends BaseProvider {
   }
 
   private async *streamResponses(request: AIRequest, options?: RequestOptions): AsyncIterable<AIStreamEvent> {
-    const body = toResponsesBody(request, true)
+    const body = toResponsesBody(request, true, { effortAsChosen: this.effortAsChosen })
     const stream = await this.client.responses.create(
       body as unknown as OpenAI.Responses.ResponseCreateParamsStreaming,
       { ...(options?.signal ? { signal: options.signal } : {}), ...(options?.headers ? { headers: options.headers } : {}), timeout: sdkTimeoutMs(options?.timeout) }

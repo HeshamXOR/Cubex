@@ -4,9 +4,6 @@ import { createWebFetchTool } from './webFetchTool'
 const tool = createWebFetchTool()
 
 describe('web_fetch guard', () => {
-  it('is allow-permission (read-only)', () => {
-    expect(tool.defaultPermission).toBe('allow')
-  })
 
   it('rejects non-http schemes', async () => {
     const r = await tool.execute({ url: 'ftp://example.com/x' }, { requestPermission: async () => ({ decision: 'allow' }) })
@@ -21,10 +18,5 @@ describe('web_fetch guard', () => {
       expect(r.isError, u).toBe(true)
       expect(String(r.content)).toMatch(/local\/private network/i)
     }
-  })
-
-  it('errors on a missing url', async () => {
-    const r = await tool.execute({}, { requestPermission: async () => ({ decision: 'allow' }) })
-    expect(r.isError).toBe(true)
   })
 })

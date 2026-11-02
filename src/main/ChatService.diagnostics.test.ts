@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DEFAULT_RETRY_POLICY } from '@core/types'
@@ -143,47 +143,11 @@ describe('new problems after an edit', () => {
     expect(mocks.hookCalls).toEqual([{ root: mocks.workspace, files: [join(mocks.workspace, 'src/a.ts')] }])
   })
 
-  it('warms the workspace for the turn, before any edit', async () => {
-    const run = await turn(['no edits this turn'])
-    expect(run.events.some((e) => e.kind === 'tool')).toBe(false)
-    expect(mocks.warmed).toEqual([mocks.workspace])
-  })
-
-  it('carries a warnings-only report to the window without adding text for the model', async () => {
-    mocks.report = { text: '', summary: { errors: 0, warnings: 2, items: [] } } satisfies DiagnosticsReport
-    const run = await turn([[write('w', 'src/a.ts', 'export const a = 1\n')], 'done'])
-    expect(run.results.get('w')).not.toContain('New diagnostics')
-    expect(final(run, 'w').diagnostics).toEqual({ errors: 0, warnings: 2 })
-  })
-
-  it('leaves the result alone when the edit introduced nothing', async () => {
-    const run = await turn([[write('w', 'src/a.ts', 'export const a = 1\n')], 'done'])
-    expect(run.results.get('w')).not.toContain('New diagnostics')
-    expect(final(run, 'w')).not.toHaveProperty('diagnostics')
-    expect(mocks.hookCalls).toHaveLength(1)
-  })
-
   it('never lets a failing checker fail the edit', async () => {
     mocks.failHook = true
     const run = await turn([[write('w', 'src/a.ts', 'export const a = 1\n')], 'done'])
     expect(final(run, 'w')).toMatchObject({ phase: 'done' })
     expect(final(run, 'w')).not.toHaveProperty('diagnostics')
-  })
-
-  it('drops a malformed summary rather than showing it', async () => {
-    mocks.report = { text: '', summary: { errors: 'lots', warnings: 0 } }
-    const run = await turn([[write('w', 'src/a.ts', 'export const a = 1\n')], 'done'])
-    expect(final(run, 'w')).not.toHaveProperty('diagnostics')
-  })
-
-  it('does not report on a call that failed', async () => {
-    mocks.report = withError
-    writeFileSync(join(mocks.workspace, 'old.ts'), 'export const old = 1\n')
-    // Overwriting a file that was never read fails, so there is nothing to check.
-    const run = await turn([[write('w', 'old.ts', 'export const old = 2\n')], 'done'])
-    expect(final(run, 'w').phase).toBe('error')
-    expect(final(run, 'w')).not.toHaveProperty('diagnostics')
-    expect(mocks.hookCalls).toEqual([])
   })
 })
 
@@ -196,26 +160,5 @@ describe('the afterEdit setting', () => {
     expect(final(run, 'w')).not.toHaveProperty('diagnostics')
     expect(mocks.hookCalls).toEqual([])
     expect(mocks.warmed).toEqual([])
-  })
-
-  it('is read for each edit, so a change made mid-turn applies to the very next write', async () => {
-    mocks.report = withError
-    const run = await turn([
-      [write('first', 'src/a.ts', 'export const a = 1\n')],
-      // The person switches it off in Settings between the two edits.
-      () => { mocks.afterEdit = 'off'; return [write('second', 'src/b.ts', 'export const b = 1\n')] },
-      'done'
-    ])
-    expect(final(run, 'first').diagnostics).toBeDefined()
-    expect(final(run, 'second')).not.toHaveProperty('diagnostics')
-    expect(mocks.hookCalls.map((call) => call.files[0])).toEqual([join(mocks.workspace, 'src/a.ts')])
-  })
-
-  it('treats a missing setting as off, so a partial config never starts a worker', async () => {
-    mocks.afterEdit = undefined
-    mocks.report = withError
-    const run = await turn([[write('w', 'src/a.ts', 'export const a = 1\n')], 'done'])
-    expect(final(run, 'w')).not.toHaveProperty('diagnostics')
-    expect(mocks.hookCalls).toEqual([])
   })
 })

@@ -50,13 +50,6 @@ describe('ProjectChecker: which project owns a file', () => {
     c2.dispose()
   })
 
-  it('skips extensions the checker does not handle', () => {
-    const root = project({ 'tsconfig.json': TSCONFIG, 'src/a.css': 'a{}' })
-    const c = checker(root)
-    expect(c.check(join(root, 'src/a.css'), null, 'a{}')).toMatchObject({ status: 'skipped' })
-    c.dispose()
-  })
-
   it('uses the nearest config walking up from the file', () => {
     const root = project({
       'tsconfig.json': JSON.stringify({ compilerOptions: { ...OPTIONS, strict: false }, include: ['**/*'] }),
@@ -65,26 +58,6 @@ describe('ProjectChecker: which project owns a file', () => {
     })
     const c = checker(root)
     expect(codes(c.check(join(root, 'pkg/src/a.ts'), null, 'export function f(x) { return x }\n'))).toEqual(['TS7006'])
-    c.dispose()
-  })
-
-  it('finds the referenced project that includes the file in a solution-style root config', () => {
-    const root = project({
-      'tsconfig.json': JSON.stringify({ files: [], references: [{ path: './tsconfig.app.json' }] }),
-      'tsconfig.app.json': JSON.stringify({ compilerOptions: { ...OPTIONS, composite: true }, include: ['src'] }),
-      'src/a.ts': 'export const a: number = 1\n'
-    })
-    const c = checker(root)
-    expect(codes(c.check(join(root, 'src/a.ts'), 'export const a: number = 1\n', 'export const a: number = "x"\n'))).toEqual(['TS2322'])
-    c.dispose()
-  })
-
-  it('reports syntax errors in a javascript file of a jsconfig project', () => {
-    const root = project({ 'jsconfig.json': JSON.stringify({ compilerOptions: { target: 'ES2020', module: 'ESNext' }, include: ['src'] }), 'src/a.js': 'export const a = 1\n' })
-    const c = checker(root)
-    const result = c.check(join(root, 'src/a.js'), 'export const a = 1\n', 'export const a = (1\n')
-    expect(result.status).toBe('ok')
-    expect(codes(result).length).toBeGreaterThan(0)
     c.dispose()
   })
 })

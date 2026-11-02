@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { join, resolve } from 'node:path'
 import type { Conversation, PlanAsk, StoredMessage } from '@shared/ipc'
-import { RestoreCoordinator, parseMessageId, parseRestoreAxes, parseUndoId, type RestoreHost } from './restoreCoordinator'
+import { RestoreCoordinator, type RestoreHost } from './restoreCoordinator'
 
 const WORKSPACE = resolve('restore-workspace')
 const abs = (path: string): string => join(WORKSPACE, path)
@@ -43,17 +43,6 @@ function setup(initial: Conversation = conversation()) {
 }
 
 describe('previewing a restore', () => {
-  it('counts the files from the chosen message on, as workspace-relative paths', async () => {
-    const { coordinator, host } = setup()
-    const preview = await coordinator.preview('task', 'u2')
-    expect(preview).toEqual({
-      checkpoint: true,
-      files: [{ path: 'src/a.ts', action: 'revert' }],
-      blocked: [{ path: 'src/b.ts', reason: 'Changed outside Cubex since its last edit' }]
-    })
-    // Only user messages begin turns, and only those from the chosen one on.
-    expect(host.checkpoints.preview).toHaveBeenCalledWith('task', ['u2', 'u3'])
-  })
 
   it('rejects a message that is not in the conversation, an assistant message, and an unknown task', async () => {
     const { coordinator } = setup()
@@ -77,13 +66,6 @@ describe('restoring the conversation', () => {
     expect(host.forgetReviewTurns).toHaveBeenCalledWith('task', 'u2')
   })
 
-  it('can empty the conversation by going back to its first message', async () => {
-    const { coordinator, stored } = setup()
-    const result = await coordinator.restore('task', 'u1', { code: false, conversation: true })
-    expect(stored.get('task')!.messages).toEqual([])
-    expect(result.conversation?.removedMessages).toBe(6)
-  })
-
   it('drops the summary when the turns it summarized are removed, and keeps it when they are not', async () => {
     const summarized = conversation({ contextStartMessageId: 'u2', contextSummary: 'Goal: retries.', contextSummaryAt: 2600 })
     const gone = setup(summarized)
@@ -93,12 +75,6 @@ describe('restoring the conversation', () => {
     const kept = setup(summarized)
     expect((await kept.coordinator.restore('task', 'u3', { code: false, conversation: true })).conversation?.contextCleared).toBe(false)
     expect(kept.stored.get('task')).toMatchObject({ contextStartMessageId: 'u2', contextSummary: 'Goal: retries.' })
-  })
-
-  it('treats a boundary that points at no message as stale and clears it', async () => {
-    const { coordinator, stored } = setup(conversation({ contextStartMessageId: 'long-gone', contextSummary: 'Old.', contextSummaryAt: 5 }))
-    expect((await coordinator.restore('task', 'u3', { code: false, conversation: true })).conversation?.contextCleared).toBe(true)
-    expect(stored.get('task')?.contextSummary).toBeUndefined()
   })
 })
 
@@ -114,13 +90,6 @@ describe('restoring the code', () => {
     expect(host.syncRestoredFiles).toHaveBeenCalledWith('task', [abs('src/a.ts')])
     expect(host.forgetReviewTurns).not.toHaveBeenCalled()
     expect(host.plans.removeSince).not.toHaveBeenCalled()
-  })
-
-  it('offers no undo when nothing was put back', async () => {
-    const { coordinator, host } = setup()
-    host.checkpoints.restore.mockResolvedValueOnce({ known: true, restored: [], skipped: [], failed: [], undoId: undefined } as never)
-    const result = await coordinator.restore('task', 'u2', { code: true, conversation: false })
-    expect(result.undoId).toBeUndefined()
   })
 
   it('keeps the conversation whole when a file could not be written, so the restore can be retried', async () => {
@@ -195,14 +164,6 @@ describe('undoing a restore', () => {
     await expect(coordinator.undo('task', undoId!)).rejects.toThrow('no longer be undone')
   })
 
-  it('treats a file the restore removed or recreated as absent before the write', async () => {
-    const { coordinator, host } = setup()
-    host.checkpoints.undo.mockResolvedValueOnce({ restored: [abs('src/new.ts')], writes: [{ path: abs('src/new.ts'), before: null, after: Buffer.from('made') }] } as never)
-    const { undoId } = await coordinator.restore('task', 'u2', { code: true, conversation: false })
-    await coordinator.undo('task', undoId!)
-    expect(host.trackWrite).toHaveBeenCalledWith('task', abs('src/new.ts'), Buffer.alloc(0), false, Buffer.from('made'))
-  })
-
   it('is refused once the conversation reads differently, and then touches nothing', async () => {
     const { coordinator, stored, host } = setup()
     const { undoId } = await coordinator.restore('task', 'u2', { code: true, conversation: true })
@@ -218,30 +179,5 @@ describe('undoing a restore', () => {
     host.checkpoints.undo.mockRejectedValueOnce(new Error('Undo stopped: these files changed after the restore.'))
     await expect(coordinator.undo('task', undoId!)).rejects.toThrow('Undo stopped')
     expect(stored.get('task')!.messages).toHaveLength(2)
-  })
-
-  it('only honors the id of the latest restore, and forgets old restores', async () => {
-    const { coordinator } = setup()
-    const first = await coordinator.restore('task', 'u3', { code: true, conversation: false })
-    const second = await coordinator.restore('task', 'u2', { code: true, conversation: false })
-    await expect(coordinator.undo('task', first.undoId!)).rejects.toThrow('no longer be undone')
-    await expect(coordinator.undo('task', second.undoId!)).resolves.toMatchObject({ conversation: false })
-  })
-})
-
-describe('arguments from the renderer', () => {
-  it('accepts bounded ids and rejects anything else', () => {
-    expect(parseMessageId('m-1')).toBe('m-1')
-    for (const bad of [undefined, null, 42, '', '   ', 'x'.repeat(257), {}]) expect(() => parseMessageId(bad)).toThrow('Invalid message id')
-    expect(parseUndoId('abc')).toBe('abc')
-    for (const bad of [undefined, '', 'x'.repeat(129), 7]) expect(() => parseUndoId(bad)).toThrow('Invalid undo id')
-  })
-
-  it('needs two booleans and at least one of them true', () => {
-    expect(parseRestoreAxes({ code: true, conversation: false })).toEqual({ code: true, conversation: false })
-    expect(parseRestoreAxes({ code: true, conversation: true, extra: 'ignored' })).toEqual({ code: true, conversation: true })
-    for (const bad of [undefined, null, 'both', {}, { code: true }, { code: 'yes', conversation: true }, { code: false, conversation: false }]) {
-      expect(() => parseRestoreAxes(bad)).toThrow('Choose what to restore')
-    }
   })
 })

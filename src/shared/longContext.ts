@@ -110,3 +110,19 @@ export function declaredModelInfo(cfg: ProviderConfig, modelId: string, known: K
     longContextBeta: true
   }
 }
+
+/**
+ * The window a request can actually use. A model flagged with the gated 1M
+ * beta keeps its ordinary 200K window until the user enables that header.
+ * Shared so the window shows the same size main measures against, including
+ * before the first request has produced a snapshot.
+ */
+export function effectiveContextWindow(
+  model: { contextWindow?: number; longContextBeta?: boolean } | undefined,
+  longContextEnabled: boolean
+): number | undefined {
+  const window = model?.contextWindow
+  if (window === undefined || !Number.isFinite(window) || window < 1) return undefined
+  const whole = Math.floor(window)
+  return model?.longContextBeta && !longContextEnabled ? Math.min(whole, 200_000) : whole
+}

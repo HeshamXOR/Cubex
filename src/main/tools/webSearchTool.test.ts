@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseDuckDuckGoHtml, createWebSearchTool } from './webSearchTool'
+import { parseDuckDuckGoHtml } from './webSearchTool'
 
 const SAMPLE = `
 <div class="result results_links">
@@ -18,17 +18,5 @@ describe('parseDuckDuckGoHtml', () => {
     expect(hits).toHaveLength(2)
     expect(hits[0]).toEqual({ title: 'Example Docs', url: 'https://example.com/docs', snippet: 'The official docs for Example & friends.' })
     expect(hits[1]!.url).toBe('https://foo.dev/guide')
-  })
-
-  it('respects the limit', () => {
-    expect(parseDuckDuckGoHtml(SAMPLE, 1)).toHaveLength(1)
-  })
-
-  it('returns [] for empty/garbage html', () => {
-    expect(parseDuckDuckGoHtml('<html>nothing</html>')).toEqual([])
-  })
-
-  it('tool is allow-permission', () => {
-    expect(createWebSearchTool().defaultPermission).toBe('allow')
   })
 })

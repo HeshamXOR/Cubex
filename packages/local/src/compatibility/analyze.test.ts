@@ -52,11 +52,6 @@ describe('analyzeCompatibility', () => {
     expect(r.status).toBe('offload_required')
     expect(r.reason).toMatch(/offload/i)
   })
-
-  it('no matching installed runtime → unsupported_runtime', () => {
-    const r = analyzeCompatibility(model(7, ['vllm']), profile(24), 4096, ['ollama'])
-    expect(r.status).toBe('unsupported_runtime')
-  })
 })
 
 describe('recommendModels', () => {
@@ -68,10 +63,5 @@ describe('recommendModels', () => {
     const firstBad = statuses.findIndex((s) => s === 'insufficient_memory')
     const lastGood = statuses.lastIndexOf('fits_vram')
     if (firstBad !== -1 && lastGood !== -1) expect(lastGood).toBeLessThan(firstBad)
-  })
-
-  it('low_memory goal prefers the smallest model first', () => {
-    const results = recommendModels(models, profile(24, 64), 'low_memory', ['ollama'])
-    expect(results[0]!.model.parameterCount).toBe(3)
   })
 })

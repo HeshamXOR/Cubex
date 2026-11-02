@@ -4,6 +4,7 @@ import { ChevronDown, FileOutput, Info, MessagesSquare, Paperclip, Plug, Setting
 import { autoCompactAt, resolveCompactionPolicy } from '@shared/contextPolicy'
 import type { ContextUsageSnapshot } from '../../../shared/ipc'
 import { compactTokens } from '../lib/format'
+import { snapshotIsForOtherModel } from '../lib/contextSnapshot'
 import { openSettingsGroup } from '../lib/settingsLink'
 import { useStore } from '../state/store'
 import './context.css'
@@ -45,8 +46,12 @@ export function ContextMeter({ usage, contextWindow: selectedWindow, lastReply, 
   const [position, setPosition] = useState<CSSProperties>({ visibility: 'hidden' })
   // The same policy main reads for every request, so the tick sits where summarizing really starts.
   const policy = resolveCompactionPolicy(useStore((state) => state.settings?.ai))
-  // A saved request belongs to its original model, even after the picker changes.
-  const requestedWindow = usage ? usage.contextWindow : selectedWindow
+  // A request belongs to the model it was sent to, even after the picker changes. A snapshot kept from an earlier
+  // session is the exception: for another model's window the selected model's is the one that will apply.
+  const activeProviderId = useStore((state) => state.activeProviderId)
+  const activeModel = useStore((state) => state.activeModel)
+  const otherModel = snapshotIsForOtherModel(usage, { providerId: activeProviderId, model: activeModel }, selectedWindow)
+  const requestedWindow = usage && !otherModel ? usage.contextWindow : selectedWindow
   const contextWindow = requestedWindow !== undefined && Number.isFinite(requestedWindow) && requestedWindow > 0 ? requestedWindow : undefined
   // The anchored count rests on what the provider actually measured; the pure
   // estimate is the weaker number and only used until a report arrives.
@@ -56,7 +61,7 @@ export function ContextMeter({ usage, contextWindow: selectedWindow, lastReply, 
   const reserveKnown = usage?.outputReserveKnown !== false
   // Measure against what a request may actually fill, not the raw window, so
   // the 80% mark here is the same 80% that triggers automatic compaction.
-  const inputBudget = finite(usage?.inputBudget)
+  const inputBudget = otherModel ? undefined : finite(usage?.inputBudget)
   const budget = inputBudget !== undefined && inputBudget > 0 ? inputBudget : contextWindow
   const available = contextWindow ? Math.max(0, contextWindow - used - reserve) : undefined
   const percent = budget ? Math.round((used / budget) * 100) : undefined

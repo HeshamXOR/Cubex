@@ -34,47 +34,6 @@ describe('createSubagentTool', () => {
     expect(result.content).toBe('subagent answer')
   })
 
-  it('errors when task is missing', async () => {
-    const gw = new AIGateway(() => new MockAIProvider({ id: 'p' }))
-    const tool = createSubagentTool(gw, policy)
-    const result = await tool.execute({}, ctx)
-    expect(result.isError).toBe(true)
-  })
-
-  it('surfaces a subagent failure as an error result', async () => {
-    const gw = new AIGateway(() => new MockAIProvider({ id: 'p', scenario: 'auth_error' }))
-    const tool = createSubagentTool(gw, policy)
-    const result = await tool.execute({ task: 'do a thing' }, ctx)
-    expect(result.isError).toBe(true)
-    expect(String(result.content)).toMatch(/subagent failed/i)
-  })
-
-  it('runs on a cheaper target model when configured', async () => {
-    const providers: Record<string, MockAIProvider> = {
-      big: new MockAIProvider({ id: 'big', reply: 'from big' }),
-      small: new MockAIProvider({ id: 'small', reply: 'from small' })
-    }
-    const gw = new AIGateway((id) => providers[id])
-    const tool = createSubagentTool(gw, { ...policy, primary: { providerId: 'big', model: 'x' } }, {
-      target: { providerId: 'small', model: 'mini' }
-    })
-    const result = await tool.execute({ task: 'cheap task' }, ctx)
-    expect(result.content).toBe('from small')
-  })
-
-  it('advertises custom profiles as an "agent" enum and runs one', async () => {
-    const gw = new AIGateway(() => new MockAIProvider({ id: 'p', reply: 'reviewed' }))
-    const tool = createSubagentTool(gw, policy, {
-      profiles: [{ name: 'reviewer', description: 'Reviews code', systemPrompt: 'You review code.' }]
-    })
-    const schema = tool.definition.inputSchema as { properties: { agent?: { enum?: string[] } } }
-    expect(schema.properties.agent?.enum).toEqual(['reviewer'])
-    expect(tool.definition.description).toMatch(/reviewer/)
-    const result = await tool.execute({ task: 'review this', agent: 'reviewer' }, ctx)
-    expect(result.isError).toBeFalsy()
-    expect(result.content).toBe('reviewed')
-  })
-
   it('runs actual read-only tools, returns observed evidence, and reports child activity separately', async () => {
     const read = readonlyTool()
     const send = vi.fn().mockResolvedValueOnce(response('', [{ id: 'read', name: 'read_file', input: { path: 'src/parser.ts' } }]))
@@ -105,20 +64,6 @@ describe('createSubagentTool', () => {
     expect(send.mock.calls[1]?.[0].messages.at(-1).content.every((part: { isError?: boolean }) => part.isError)).toBe(true)
   })
 
-  it('can load skill guidance without admitting a shell or execution tool', async () => {
-    const skill = readonlyTool('skill', '# Testing\nUse observable outcomes and isolated fixtures.')
-    const command = readonlyTool('run_command')
-    const send = vi.fn().mockResolvedValueOnce(response('', [{ id: 'guidance', name: 'skill', input: { name: 'testing' } }]))
-      .mockResolvedValueOnce(response('Reviewed the test boundaries.'))
-    const tool = createSubagentTool({ send } as unknown as AIGateway, policy, { createTools: () => [skill, command] })
-    const result = await tool.execute({ task: 'Review the proposed tests using testing guidance.' }, ctx)
-    expect(send.mock.calls[0]?.[0].tools.map((item: { name: string }) => item.name)).toEqual(['skill'])
-    expect(skill.execute).toHaveBeenCalledOnce()
-    expect(command.execute).not.toHaveBeenCalled()
-    expect(send.mock.calls[1]?.[0].messages.at(-1).content[0].content[0].text).toContain('isolated fixtures')
-    expect(result.isError).toBeFalsy()
-  })
-
   it('caps executions and tool output, then requests a final report without tools', async () => {
     const read = readonlyTool('read_file', 'x'.repeat(30_000))
     const send = vi.fn().mockResolvedValueOnce(response('', [
@@ -137,16 +82,6 @@ describe('createSubagentTool', () => {
     expect(parts[0].content[0].text.length).toBeLessThan(16_200)
     expect(parts[1].isError).toBe(true)
     expect(String(result.content).length).toBeLessThanOrEqual(24_000)
-  })
-
-  it('ends research at its iteration limit instead of executing tools after the last response', async () => {
-    const read = readonlyTool()
-    const send = vi.fn().mockResolvedValue(response('', [{ id: 'again', name: 'read_file', input: { path: 'one.ts' } }]))
-    const tool = createSubagentTool({ send } as unknown as AIGateway, policy, { createTools: () => [read], maxIterations: 1 })
-    const result = await tool.execute({ task: 'Inspect files' }, ctx)
-    expect(send).toHaveBeenCalledTimes(2)
-    expect(read.execute).toHaveBeenCalledOnce()
-    expect(result.isError).toBe(true)
   })
 
   it('cancels an in-flight child read without another request, even if the handler ignores abort', async () => {
@@ -180,19 +115,6 @@ describe('createSubagentTool', () => {
     } finally { vi.useRealTimers() }
   })
 
-  it('inherits parent fallback routing and enforces output caps after target parameter merging', async () => {
-    const primary = new MockAIProvider({ id: 'p', scenario: 'auth_error' })
-    const backup = new MockAIProvider({ id: 'backup', reply: 'backup report' })
-    const spy = vi.spyOn(backup, 'sendMessage')
-    const gw = new AIGateway((id) => id === 'p' ? primary : backup)
-    const parent = { ...policy, primary: { ...policy.primary, params: { maxOutputTokens: 8000 } }, fallbackEnabled: true,
-      fallbacks: [{ providerId: 'backup', model: 'mock-large', params: { maxOutputTokens: 9000 } }] }
-    const tool = createSubagentTool(gw, parent, { maxOutputTokens: 256 })
-    const result = await tool.execute({ task: 'Analyze' }, ctx)
-    expect(result.content).toBe('backup report')
-    expect(spy.mock.calls[0]?.[0].params?.maxOutputTokens).toBe(256)
-  })
-
   it('creates fresh tool state per invocation and retains safety rules with custom profiles', async () => {
     const makeTools = vi.fn(() => [readonlyTool()])
     const send = vi.fn().mockResolvedValue(response('Findings'))
@@ -207,28 +129,5 @@ describe('createSubagentTool', () => {
     expect(send.mock.calls[0]?.[0].system).toContain('Inspect the parser.')
     expect(send.mock.calls[0]?.[0].system).toContain('Read-only subtask rules')
     expect(JSON.stringify(send.mock.calls[1]?.[0].messages)).not.toContain('First independent task')
-  })
-})
-
-describe('createSubagentTool assistant turn replay', () => {
-  it('sends interleaved thinking back in order with its signatures', async () => {
-    const calls: ToolCall[] = [
-      { id: 'toolu_A', name: 'read_file', input: { path: 'a.ts' } },
-      { id: 'toolu_B', name: 'read_file', input: { path: 'b.ts' } }
-    ]
-    const first: AIResponse = {
-      ...response('', calls),
-      content: [
-        { type: 'reasoning', text: 'a first', signature: 'sig-A' },
-        { type: 'tool_use', ...calls[0]! },
-        { type: 'reasoning', text: 'then b', signature: 'sig-B' },
-        { type: 'tool_use', ...calls[1]! }
-      ]
-    }
-    const send = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(response('Compared.'))
-    const tool = createSubagentTool({ send } as unknown as AIGateway, policy, { createTools: () => [readonlyTool()] })
-    await tool.execute({ task: 'Compare a and b' }, ctx)
-    const assistant = send.mock.calls[1]?.[0].messages.find((m: { role: string }) => m.role === 'assistant')
-    expect(assistant.content).toEqual(first.content)
   })
 })

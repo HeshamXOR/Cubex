@@ -1,0 +1,6 @@
+{
+  "title": "Answer a question about the code without changing anything",
+  "prompt": "How long does the client wait before its 4th retry, in milliseconds? Work it out from the code (the README may be out of date). This is only a question: do not change any files.",
+  "timeoutSec": 180,
+  "stub": { "answer": "The 4th retry waits 5000 ms: the backoff would be 250 * 3^3 = 6750 ms, but it is capped at capMs (5000)." }
+}

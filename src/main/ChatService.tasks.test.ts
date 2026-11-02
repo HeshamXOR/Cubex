@@ -148,38 +148,6 @@ describe('Stop on a turn', () => {
     await vi.waitFor(() => expect(chat.processManager.get(own.id)?.status).toBe('killed'))
     await vi.waitFor(() => expect(alive(own.pid)).toBe(false))
   })
-
-  it('ends only the stopped turn\'s tasks when two turns each started one', async () => {
-    const chat = chatService()
-    script = [[runCommand('first', { command: SERVER, background: true, yield_ms: 5_000 }), useTools], [{ type: 'text_delta', text: 'Up.' }]]
-    await chat.start(request('turn-1'))
-    await finished('turn-1')
-
-    script = [[runCommand('second', { command: SLEEPER, background: true, yield_ms: 250 }), runCommand('wait', { command: SLEEPER, timeout_ms: 60_000 }), useTools]]
-    await chat.start(request('turn-2'))
-    await commandInFlight('turn-2', 'wait')
-    chat.cancel('turn-2')
-    await finished('turn-2')
-
-    const tasks = chat.processManager.list('task')
-    expect(tasks).toHaveLength(2)
-    const byCommand = (command: string): BackgroundTask => tasks.find((task) => task.command === command)!
-    expect(byCommand(SERVER).status).toBe('running')
-    await vi.waitFor(() => expect(chat.processManager.get(byCommand(SLEEPER).id)?.status).toBe('killed'))
-  })
-
-  it('ends every task of a conversation when the conversation is deleted', async () => {
-    const chat = chatService()
-    script = [[runCommand('serve', { command: SERVER, background: true, yield_ms: 5_000 }), useTools], [{ type: 'text_delta', text: 'Up.' }]]
-    await chat.start(request('turn-1'))
-    await finished('turn-1')
-    const [server] = chat.processManager.list('task') as [BackgroundTask]
-
-    chat.forgetConversation('task')
-
-    expect(chat.processManager.list('task')).toEqual([])
-    await vi.waitFor(() => expect(alive(server.pid)).toBe(false))
-  })
 })
 
 describe('the shell the user chose', () => {

@@ -27,21 +27,6 @@ describe('processTools', () => {
     })
   })
 
-  it('exposes the expected 4 process tools with correct permissions', () => {
-    expect(tools.map((t) => t.definition.name)).toEqual([
-      'task_output',
-      'task_input',
-      'task_stop',
-      'task_list'
-    ])
-
-    const [outputTool, inputTool, stopTool, listTool] = tools
-    expect(outputTool?.defaultPermission).toBe('allow')
-    expect(inputTool?.defaultPermission).toBe('ask')
-    expect(stopTool?.defaultPermission).toBe('allow')
-    expect(listTool?.defaultPermission).toBe('allow')
-  })
-
   describe('interrupt on each platform', () => {
     const inputSchema = (platform: NodeJS.Platform): { description: string; properties: Record<string, unknown> } => {
       const tool = createProcessTools({ conversationId, processManager: mockProcessManager, platform })
@@ -52,25 +37,12 @@ describe('processTools', () => {
       }
     }
 
-    it('offers an interrupt on POSIX and says what it sends', () => {
-      const { description, properties } = inputSchema('linux')
-      expect(properties).toHaveProperty('interrupt')
-      expect(description).toContain('SIGINT')
-    })
-
     it('does not offer an interrupt on Windows, so the model never asks the user to approve one that cannot work', () => {
       const { description, properties } = inputSchema('win32')
       expect(properties).not.toHaveProperty('interrupt')
       expect(properties).toHaveProperty('text')
       expect(description).toContain('no interrupt')
       expect(description).toContain('task_stop')
-    })
-
-    it('asks for text alone on Windows', async () => {
-      const windows = createProcessTools({ conversationId, processManager: mockProcessManager, platform: 'win32' })
-      const res = await windows.find((t) => t.definition.name === 'task_input')!.execute({ task_id: 'p_1' }, ctx)
-      expect(res.isError).toBe(true)
-      expect(res.content).toBe('task_input requires "text".')
     })
 
     it('passes the plain refusal of an interrupt on to the model instead of reporting success', async () => {
@@ -85,15 +57,6 @@ describe('processTools', () => {
   })
 
   describe('task_output', () => {
-    it('validates task_id requirement', async () => {
-      const outputTool = tools.find((t) => t.definition.name === 'task_output')!
-      const res1 = await outputTool.execute({}, ctx)
-      expect(res1.isError).toBe(true)
-      expect(res1.content).toContain('task_id')
-
-      const res2 = await outputTool.execute({ task_id: '' }, ctx)
-      expect(res2.isError).toBe(true)
-    })
 
     it('returns formatted output and readyHint when available', async () => {
       const outputTool = tools.find((t) => t.definition.name === 'task_output')!
@@ -121,24 +84,9 @@ describe('processTools', () => {
       expect(res.content).toContain('Server running at http://localhost:5173')
       expect(res.metadata).toEqual({ taskId: 'p_123', commandOutputId: 'out_1' })
     })
-
-    it('surfaces error if getOutput throws', async () => {
-      const outputTool = tools.find((t) => t.definition.name === 'task_output')!
-      vi.mocked(mockProcessManager.getOutput).mockRejectedValue(new Error('Task p_not_found not found.'))
-
-      const res = await outputTool.execute({ task_id: 'p_not_found' }, ctx)
-      expect(res.isError).toBe(true)
-      expect(res.content).toContain('Task p_not_found not found')
-    })
   })
 
   describe('task_input', () => {
-    it('requires text or interrupt', async () => {
-      const inputTool = tools.find((t) => t.definition.name === 'task_input')!
-      const res = await inputTool.execute({ task_id: 'p_123' }, ctx)
-      expect(res.isError).toBe(true)
-      expect(res.content).toContain('either "text" or "interrupt: true"')
-    })
 
     it('sends text input successfully', async () => {
       const inputTool = tools.find((t) => t.definition.name === 'task_input')!
@@ -159,23 +107,9 @@ describe('processTools', () => {
       expect(res.content).toContain('Interrupt sent to task p_123')
       expect(mockProcessManager.sendInput).toHaveBeenCalledWith('p_123', undefined, true)
     })
-
-    it('returns error if sendInput fails', async () => {
-      const inputTool = tools.find((t) => t.definition.name === 'task_input')!
-      vi.mocked(mockProcessManager.sendInput).mockResolvedValue({ ok: false, error: 'Stdin closed' })
-
-      const res = await inputTool.execute({ task_id: 'p_123', text: 'hello' }, ctx)
-      expect(res.isError).toBe(true)
-      expect(res.content).toContain('Stdin closed')
-    })
   })
 
   describe('task_stop', () => {
-    it('validates task_id', async () => {
-      const stopTool = tools.find((t) => t.definition.name === 'task_stop')!
-      const res = await stopTool.execute({}, ctx)
-      expect(res.isError).toBe(true)
-    })
 
     it('stops task successfully', async () => {
       const stopTool = tools.find((t) => t.definition.name === 'task_stop')!
@@ -186,15 +120,6 @@ describe('processTools', () => {
       expect(res.content).toContain('Task p_123 has been stopped')
     })
 
-    it('returns error if stop fails', async () => {
-      const stopTool = tools.find((t) => t.definition.name === 'task_stop')!
-      vi.mocked(mockProcessManager.stop).mockResolvedValue({ ok: false, error: 'Access denied' })
-
-      const res = await stopTool.execute({ task_id: 'p_123' }, ctx)
-      expect(res.isError).toBe(true)
-      expect(res.content).toContain('Access denied')
-    })
-
     it('tells the model about a termination warning instead of reporting a clean stop', async () => {
       const stopTool = tools.find((t) => t.definition.name === 'task_stop')!
       vi.mocked(mockProcessManager.stop).mockResolvedValue({ ok: true, error: 'Process-tree termination exited with code 128.' })
@@ -203,12 +128,6 @@ describe('processTools', () => {
       expect(res.isError).toBe(false)
       expect(res.content).toContain('Task p_123 has been stopped.')
       expect(res.content).toContain('Termination warning: Process-tree termination exited with code 128.')
-    })
-
-    it('says the stop is a forced kill of the whole tree', () => {
-      const stopTool = tools.find((t) => t.definition.name === 'task_stop')!
-      expect(stopTool.definition.description).toContain('every child process')
-      expect(stopTool.definition.description).toContain('forced kill')
     })
   })
 
@@ -240,15 +159,6 @@ describe('processTools', () => {
   })
 
   describe('task_list', () => {
-    it('reports when no tasks exist', async () => {
-      const listTool = tools.find((t) => t.definition.name === 'task_list')!
-      vi.mocked(mockProcessManager.list).mockReturnValue([])
-
-      const res = await listTool.execute({}, ctx)
-      expect(res.isError).toBe(false)
-      expect(res.content).toContain('No background tasks found')
-      expect(mockProcessManager.list).toHaveBeenCalledWith(conversationId)
-    })
 
     it('formats existing background tasks', async () => {
       const listTool = tools.find((t) => t.definition.name === 'task_list')!

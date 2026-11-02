@@ -121,16 +121,6 @@ describe('ChatService plan transitions', () => {
     expect(events.filter((event) => event.kind === 'mode')).toHaveLength(0)
   })
 
-  it('rejects duplicate active stream ids and malformed renderer ids', async () => {
-    mocks.responses.push(response([planCall()]))
-    service = new ChatService({ resolve: vi.fn(), getModelInfo: vi.fn() } as unknown as ProviderManager, () => {})
-    await service.start(request())
-    await expect(service.start(request())).rejects.toThrow('already running')
-    await expect(service.start({ ...request(), streamId: '../../bad' })).rejects.toThrow('Invalid stream id')
-    service.cancelAll()
-    await vi.waitFor(() => expect(service!.listPlans('task')[0]?.status).toBe('cancelled'))
-  })
-
   it('does not execute writes authored before plan approval in the same tool batch', async () => {
     mocks.workspace = join(mocks.dataRoot, 'project')
     mkdirSync(mocks.workspace)

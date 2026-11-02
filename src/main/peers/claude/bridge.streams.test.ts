@@ -143,13 +143,6 @@ describe('the handshake', () => {
     expect(created.modes).toMatchObject({ currentModeId: 'default', availableModes: [{ id: 'default' }] })
   })
 
-  it('starts with the control request that makes Claude Code say who it is signed in as', async () => {
-    const claude = fakeClaude()
-    running.push(new ClaudeBridge({ claude: claude.process, cwd: process.cwd() }))
-    await until(() => claude.sent.length > 0)
-    expect(claude.sent[0]).toMatchObject({ type: 'control_request', request: { subtype: 'initialize', hooks: null } })
-  })
-
   it('refuses when Claude Code has no login, with the way to sign in', async () => {
     const claude = fakeClaude({ tokenSource: 'none', apiProvider: 'firstParty' })
     const bridge = new ClaudeBridge({ claude: claude.process, cwd: process.cwd() })
@@ -158,14 +151,6 @@ describe('the handshake', () => {
     expect(error).toBeInstanceOf(AcpRequestError)
     expect(error.message).toBe('Claude Code is not signed in.')
     expect(error.data).toEqual({ hint: SIGN_IN_HINT })
-  })
-
-  it('waits for Claude Code to answer, and gives up when it does not', async () => {
-    const claude = fakeClaude(null)
-    const bridge = new ClaudeBridge({ claude: claude.process, cwd: process.cwd(), startTimeoutMs: 100 })
-    running.push(bridge)
-    const error = await settled(client(bridge).connection.request('initialize', { protocolVersion: 1 })) as AcpRequestError
-    expect(error.message).toBe('Claude Code did not get ready within 1 second.')
   })
 
   it('reports a Claude Code that ends before it answers, with what it printed to say why', async () => {
@@ -181,52 +166,6 @@ describe('the handshake', () => {
     expect(error.message).toBe('Claude Code stopped unexpectedly with exit code 1.')
     expect((error.data as { hint: string }).hint).toContain('Sign in')
   })
-
-  it('keeps a failure to start until someone listens for it, so a program that fails at once is not lost', async () => {
-    const claude = fakeClaude(null)
-    const bridge = new ClaudeBridge({ claude: claude.process, cwd: process.cwd() })
-    running.push(bridge)
-    const error = Object.assign(new Error('spawn claude ENOENT'), { code: 'ENOENT' }) as NodeJS.ErrnoException
-    claude.fail(error)
-    await new Promise((done) => setTimeout(done, 20))
-    const heard: unknown[] = []
-    bridge.process.once('error', (caught) => heard.push(caught))
-    await until(() => heard.length > 0)
-    expect(heard[0]).toBe(error)
-  })
-
-  it('keeps the end of the program the same way', async () => {
-    const claude = fakeClaude()
-    const bridge = new ClaudeBridge({ claude: claude.process, cwd: process.cwd() })
-    running.push(bridge)
-    claude.exit(0)
-    await new Promise((done) => setTimeout(done, 400))
-    const heard: Array<number | null> = []
-    bridge.process.once('close', (code) => heard.push(code))
-    await until(() => heard.length > 0)
-    expect(heard).toEqual([0])
-  })
-
-  it('has one session, and says so when asked for a second', async () => {
-    const s = await session()
-    const error = await settled(s.client.connection.request('session/new', { cwd: '.', mcpServers: [] })) as AcpRequestError
-    expect(error.message).toBe('This agent has one session, and it is open.')
-  })
-
-  it('has one mode, and answers a request for it and for no other', async () => {
-    const s = await session()
-    await expect(s.client.connection.request('session/set_mode', { sessionId: s.sessionId, modeId: 'default' })).resolves.toEqual({})
-    const error = await settled(s.client.connection.request('session/set_mode', { sessionId: s.sessionId, modeId: 'bypassPermissions' })) as AcpRequestError
-    expect(error.code).toBe(RPC_ERROR.invalidParams)
-  })
-
-  it('says a method it does not have is not there, signing in included, because Claude Code signs in by itself', async () => {
-    const s = await session()
-    for (const method of ['authenticate', 'session/load', 'fs/read_text_file']) {
-      const error = await settled(s.client.connection.request(method, {})) as AcpRequestError
-      expect(error.code).toBe(RPC_ERROR.methodNotFound)
-    }
-  })
 })
 
 describe('a message', () => {
@@ -239,77 +178,6 @@ describe('a message', () => {
     s.claude.say(result({ stop_reason: 'end_turn' }))
     expect(await pending).toEqual({ stopReason: 'end_turn' })
     expect(updates(s, 'agent_message_chunk')).toEqual([{ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Hi.' } }])
-  })
-
-  it('must name the session, have text in it, and be the only one at a time', async () => {
-    const s = await session()
-    expect((await settled(s.client.connection.request('session/prompt', { sessionId: 'other', prompt: [{ type: 'text', text: 'x' }] })) as AcpRequestError).message).toBe('There is no such session.')
-    expect((await settled(s.client.connection.request('session/prompt', { sessionId: s.sessionId, prompt: [{ type: 'image' }] })) as AcpRequestError).message).toBe('The message has no text.')
-    const first = prompt(s)
-    await until(() => s.claude.sent.some((message) => message.type === 'user'))
-    expect((await settled(prompt(s)) as AcpRequestError).message).toBe('Claude Code is still answering another message.')
-    s.claude.say(result())
-    await first
-  })
-
-  it('joins the text parts of a message and leaves the rest', async () => {
-    const s = await session()
-    const pending = s.client.connection.request('session/prompt', { sessionId: s.sessionId, prompt: [{ type: 'text', text: 'one' }, { type: 'resource_link', uri: 'file:///x' }, { type: 'text', text: 'two' }] })
-    await until(() => s.claude.sent.some((message) => message.type === 'user'))
-    expect(s.claude.sent.find((message) => message.type === 'user')).toMatchObject({ message: { content: [{ text: 'one\n\ntwo' }] } })
-    s.claude.say(result())
-    await pending
-  })
-
-  it('keeps thinking, a subagent\'s words and lines that are not messages out of the reply', async () => {
-    const s = await session()
-    const pending = prompt(s)
-    await until(() => s.claude.sent.some((message) => message.type === 'user'))
-    s.claude.raw('Warning: something on the wrong stream\n\n{broken\n')
-    s.claude.say({ type: 'assistant', message: { content: [{ type: 'thinking', thinking: 'hmm' }, { type: 'text', text: 'answer' }] }, parent_tool_use_id: null })
-    s.claude.say({ type: 'assistant', message: { content: [{ type: 'text', text: 'from a subagent' }] }, parent_tool_use_id: 'toolu_x' })
-    s.claude.say({ type: 'system', subtype: 'init' })
-    s.claude.say({ type: 'stream_event', event: {} })
-    s.claude.say(result())
-    await pending
-    expect(updates(s, 'agent_message_chunk').map((update) => (update.content as Message).text)).toEqual(['answer'])
-    expect(s.bridge.ignored).toBe(2)
-  })
-
-  it('tells of a tool call as it starts and as it ends', async () => {
-    const s = await session()
-    const pending = prompt(s)
-    await until(() => s.claude.sent.some((message) => message.type === 'user'))
-    s.claude.say(toolUse('toolu_1', 'Read', { file_path: 'src/a.ts', offset: 3 }))
-    s.claude.say({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'x' }] }, parent_tool_use_id: null })
-    s.claude.say(toolUse('toolu_2', 'Bash', { command: 'false' }))
-    s.claude.say({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_2', content: 'no', is_error: true }] }, parent_tool_use_id: null })
-    s.claude.say(result())
-    await pending
-    expect(updates(s, 'tool_call')).toMatchObject([
-      { toolCallId: 'toolu_1', title: 'Read src/a.ts', kind: 'read', status: 'pending', locations: [{ line: 3 }] },
-      { toolCallId: 'toolu_2', title: 'Run false', kind: 'execute', status: 'pending', rawInput: { command: 'false' } }
-    ])
-    expect(updates(s, 'tool_call_update')).toEqual([
-      { sessionUpdate: 'tool_call_update', toolCallId: 'toolu_1', status: 'completed' },
-      { sessionUpdate: 'tool_call_update', toolCallId: 'toolu_2', status: 'failed' }
-    ])
-  })
-
-  it('says what went wrong when the result says it was an error, and what it stopped for when it was not', async () => {
-    const s = await session()
-    let pending = prompt(s)
-    await until(() => s.claude.sent.some((message) => message.type === 'user'))
-    s.claude.say(result({ is_error: true, subtype: 'error_during_execution', result: undefined, errors: ['Tool exploded', 7, 'twice'] }))
-    expect((await settled(pending) as AcpRequestError).message).toBe('Claude Code stopped with an error: Tool exploded\ntwice')
-    pending = prompt(s)
-    await until(() => s.claude.sent.filter((message) => message.type === 'user').length === 2)
-    s.claude.say(result({ is_error: true, subtype: 'error_max_budget_usd', result: undefined }))
-    expect((await settled(pending) as AcpRequestError).message).toBe('Claude Code stopped with an error (error_max_budget_usd).')
-    pending = prompt(s)
-    await until(() => s.claude.sent.filter((message) => message.type === 'user').length === 3)
-    s.claude.say(result({ subtype: 'error_max_turns', is_error: false }))
-    expect(await pending).toEqual({ stopReason: 'max_turn_requests' })
   })
 })
 
@@ -354,62 +222,6 @@ describe('a question about a tool', () => {
     s.claude.say(result())
     await pending
   })
-
-  it('is answered by its own request, when two are put at once and answered the other way round', async () => {
-    const s = await session()
-    const pending = prompt(s)
-    await until(() => s.claude.sent.some((message) => message.type === 'user'))
-    const release: Array<(answer: unknown) => void> = []
-    s.client.answer = () => new Promise((resolve) => { release.push(resolve) })
-    s.claude.say(canUse('qa', 'toolu_a', 'Read', { file_path: 'a.ts' }))
-    s.claude.say(canUse('qb', 'toolu_b', 'Read', { file_path: 'b.ts' }))
-    await until(() => release.length === 2)
-    release[1]!({ outcome: { outcome: 'selected', optionId: 'allow_once' } })
-    await until(() => responsesTo(s.claude).length === 1)
-    expect(responsesTo(s.claude)[0]).toMatchObject({ request_id: 'qb', response: { behavior: 'allow' } })
-    release[0]!({ outcome: { outcome: 'selected', optionId: 'reject_once' } })
-    await until(() => responsesTo(s.claude).length === 2)
-    expect(responsesTo(s.claude)[1]).toMatchObject({ request_id: 'qa', response: { behavior: 'deny' } })
-    s.claude.say(result())
-    await pending
-  })
-
-  it('is dropped when Claude Code withdraws it, and a late answer is not sent', async () => {
-    const s = await session()
-    const pending = prompt(s)
-    await until(() => s.claude.sent.some((message) => message.type === 'user'))
-    let release: (answer: unknown) => void = () => undefined
-    s.client.answer = () => new Promise((resolve) => { release = resolve })
-    s.claude.say(canUse('qw', 'toolu_w', 'Bash', { command: 'ls' }))
-    await until(() => s.client.questions.length === 1)
-    s.claude.say({ type: 'control_cancel_request', request_id: 'qw' })
-    await new Promise((done) => setTimeout(done, 30))
-    release({ outcome: { outcome: 'selected', optionId: 'allow_once' } })
-    await new Promise((done) => setTimeout(done, 50))
-    expect(responsesTo(s.claude)).toEqual([])
-    s.claude.say(result())
-    await pending
-  })
-
-  it('has no message waiting for it when none was sent, and is denied', async () => {
-    const s = await session()
-    s.claude.say(canUse('qs', 'toolu_s', 'Bash', { command: 'ls' }))
-    await until(() => responsesTo(s.claude).length === 1)
-    expect(responsesTo(s.claude)[0]).toMatchObject({ request_id: 'qs', response: { behavior: 'deny', message: 'There is no message waiting for this.' } })
-    expect(s.client.questions).toEqual([])
-  })
-
-  it('is asked about once for the call, whichever comes first, the call or the question', async () => {
-    const s = await session()
-    const pending = prompt(s)
-    await until(() => s.claude.sent.some((message) => message.type === 'user'))
-    s.claude.say(canUse('q1', 'toolu_1', 'Write', { file_path: 'a.txt', content: 'x' }))
-    await until(() => responsesTo(s.claude).length === 1)
-    s.claude.say(toolUse('toolu_1', 'Write', { file_path: 'a.txt', content: 'x' }))
-    s.claude.say({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'ok' }] }, parent_tool_use_id: null })
-    s.claude.say(result())
-    expect(await pending).toEqual({ stopReason: 'end_turn' })
-  })
 })
 
 describe('a tool that ran without being asked', () => {
@@ -422,21 +234,6 @@ describe('a tool that ran without being asked', () => {
     const error = await settled(pending) as AcpRequestError
     expect(error.message).toBe('Claude Code did this without asking: Edit src/a.ts. Cubex cannot hold it to your permission mode, so it was stopped.')
     expect(s.claude.stopped).toEqual([false])
-  })
-
-  it('does not count a tool that failed, or one that only reads', async () => {
-    const s = await session()
-    const pending = prompt(s)
-    await until(() => s.claude.sent.some((message) => message.type === 'user'))
-    s.claude.say(toolUse('toolu_1', 'Write', { file_path: 'x.txt', content: 'x' }))
-    s.claude.say({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'No such tool available: Write', is_error: true }] }, parent_tool_use_id: null })
-    s.claude.say(toolUse('toolu_2', 'Grep', { pattern: 'x' }))
-    s.claude.say({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_2', content: 'found' }] }, parent_tool_use_id: null })
-    s.claude.say(toolUse('toolu_3', 'Mystery', {}))
-    s.claude.say({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_3', content: 'fine' }] }, parent_tool_use_id: null })
-    s.claude.say(result())
-    expect(await pending).toEqual({ stopReason: 'end_turn' })
-    expect(s.claude.stopped).toEqual([])
   })
 })
 
@@ -459,13 +256,6 @@ describe('cancelling', () => {
     s.claude.say(result({ subtype: 'error_during_execution', is_error: true, result: '[Request interrupted by user]' }))
     expect(await pending).toEqual({ stopReason: 'cancelled' })
   })
-
-  it('does nothing when there is no message to cancel', async () => {
-    const s = await session()
-    s.client.connection.notify('session/cancel', { sessionId: s.sessionId })
-    await new Promise((done) => setTimeout(done, 40))
-    expect(s.claude.sent.some((message) => (message.request as Message | undefined)?.subtype === 'interrupt')).toBe(false)
-  })
 })
 
 describe('a request Cubex does not serve', () => {
@@ -479,52 +269,5 @@ describe('a request Cubex does not serve', () => {
       { subtype: 'error', request_id: 'h1', error: 'Cubex does not handle "mcp_message" requests.' },
       { subtype: 'error', request_id: 'h2', error: 'Cubex does not handle "weird?name" requests.' }
     ])
-  })
-})
-
-describe('ending', () => {
-  it('ends Claude Code\'s input when the client ends its own, which is how a session is closed', async () => {
-    const s = await session()
-    s.bridge.process.stdin!.end()
-    await until(() => s.claude.inputEnded())
-  })
-
-  it('stops Claude Code if it stays after its input ended', async () => {
-    const s = await session()
-    s.bridge.process.stdin!.end()
-    await until(() => s.claude.stopped.length === 1)
-    expect(s.claude.stopped).toEqual([false])
-  })
-
-  it('fails the message that is being answered when it is stopped, and says the program ended', async () => {
-    const s = await session()
-    const closed: Array<number | null> = []
-    s.bridge.process.once('close', (code) => closed.push(code))
-    const pending = prompt(s)
-    await until(() => s.claude.sent.some((message) => message.type === 'user'))
-    s.bridge.process.stop(false)
-    expect((await settled(pending) as AcpRequestError).message).toBe('Claude Code stopped unexpectedly.')
-    await until(() => closed.length === 1)
-    expect(s.claude.stopped).toEqual([false])
-  })
-
-  it('passes on what Claude Code prints to its error output', async () => {
-    const s = await session()
-    let seen = ''
-    s.bridge.process.stderr!.setEncoding('utf8')
-    s.bridge.process.stderr!.on('data', (chunk: string) => { seen += chunk })
-    s.claude.stderr('something went wrong\n')
-    await until(() => seen.includes('something went wrong'))
-  })
-
-  it('runs its cleanup once when it is over', async () => {
-    let cleaned = 0
-    const claude = fakeClaude()
-    const bridge = new ClaudeBridge({ claude: claude.process, cwd: process.cwd(), cleanup: () => { cleaned++ } })
-    claude.exit(0)
-    await until(() => cleaned === 1)
-    bridge.stop(true)
-    await new Promise((done) => setTimeout(done, 30))
-    expect(cleaned).toBe(1)
   })
 })

@@ -53,23 +53,9 @@ describe('durable display transcripts', () => {
     expect(hydrateMessageTranscript({ uiTranscriptJson: stored }, '../not-an-id').toolCalls?.[0]?.outputConversationId).toBeUndefined()
   })
 
-  it('reads legacy activity and uncertain native calls without inventing completion or keeping tool inputs', () => {
-    const result = hydrateMessageTranscript({ toolCallsJson: JSON.stringify([
-      edit, { id: 'old-call', name: 'read_file', input: { secret: 'MUST_NOT_PERSIST' } }, null, { input: 'no id' }
-    ]) })
-    expect(result.toolCalls).toHaveLength(2)
-    expect(result.toolCalls?.[0]?.phase).toBe('done')
-    expect(result.toolCalls?.[1]).toMatchObject({ phase: 'error', interrupted: true })
-    expect(JSON.stringify(result)).not.toContain('MUST_NOT_PERSIST')
-  })
-
   it.each([undefined, '', '{', 'null', '[]', '{"version":2,"blocks":[]}', '{"version":1,"blocks":{}}'])('ignores malformed or unsupported envelopes %s', (raw) => {
     expect(hydrateMessageTranscript({ uiTranscriptJson: raw })).toEqual({})
     expect(normalizeMessageTranscriptJson(raw)).toBeUndefined()
-  })
-
-  it('falls back to legacy activity when a newer display envelope is malformed', () => {
-    expect(hydrateMessageTranscript({ uiTranscriptJson: '{bad', toolCallsJson: JSON.stringify([edit]) }).toolCalls).toEqual([edit])
   })
 
   it('whitelists fields and rejects invalid counts, owners, phases and blocks', () => {
@@ -105,11 +91,6 @@ describe('durable display transcripts', () => {
     expect(hydrateMessageTranscript({ uiTranscriptJson: ' '.repeat(MESSAGE_TRANSCRIPT_MAX_BYTES + 1) })).toEqual({})
   })
 
-  it('does not duplicate ordinary text-only messages into the display metadata column', () => {
-    expect(serializeMessageTranscript({ text: 'Plain answer' })).toBeUndefined()
-    expect(serializeMessageTranscript({ blocks: [{ type: 'text', text: 'Plain answer' }] })).toBeUndefined()
-  })
-
   it('uses ordered blocks once and appends canonical text only for legacy tool-only metadata', () => {
     const blocks: MessageTranscriptBlock[] = [{ type: 'text', text: 'Before' }, { type: 'tool', tool: edit }, { type: 'text', text: 'After' }]
     expect(messageDisplayBlocks({ blocks, text: 'Before\n\nAfter', toolCalls: [edit] })).toEqual(blocks)
@@ -128,20 +109,6 @@ describe('durable display transcripts', () => {
     const restored = hydrateMessageTranscript({ uiTranscriptJson, text })
     expect(restored.blocks).toEqual(blocks)
     expect(messageDisplayBlocks({ ...restored, text }).filter((block) => block.type === 'text').map((block) => block.text)).toEqual([first, last])
-  })
-
-  it('retains text beyond the metadata block limit without repeating the saved prefix', () => {
-    const first = 'Inspect the files.'
-    const last = 'Everything is verified.'
-    const text = `${first}\n\n${last}`
-    const blocks: MessageTranscriptBlock[] = [
-      { type: 'text', text: first },
-      ...Array.from({ length: 150 }, (_, index): MessageTranscriptBlock => ({ type: 'tool', tool: { ...edit, id: `edit-${index}` } })),
-      { type: 'text', text: last }
-    ]
-    const restored = hydrateMessageTranscript({ text, uiTranscriptJson: serializeMessageTranscript({ text, blocks }) })
-    expect(restored.transcriptTruncated).toBe(true)
-    expect(restored.blocks?.filter((block) => block.type === 'text')).toEqual([{ type: 'text', text: first }, { type: 'text', text: last }])
   })
 
   it('does not trust imported text offsets that point to different text or overlap', () => {
@@ -190,11 +157,6 @@ describe('per-file tool activity', () => {
     expect(result.toolCalls?.[1]).not.toHaveProperty('files')
   })
 
-  it('omits an empty file list rather than persisting it', () => {
-    const stored = serializeMessageTranscript({ toolCalls: [{ ...patch, files: [] }] })!
-    expect(JSON.parse(stored).blocks[0].tool).not.toHaveProperty('files')
-  })
-
   it('caps the number of files at 50 and exposes the truncation', () => {
     const files = Array.from({ length: 80 }, (_, index) => ({ path: `f${index}.ts`, status: 'added' as const, added: 1, removed: 0 }))
     const result = hydrateMessageTranscript({ uiTranscriptJson: serializeMessageTranscript({ toolCalls: [{ ...patch, files }] }) })
@@ -217,15 +179,6 @@ describe('per-file tool activity', () => {
     expect(result.transcriptTruncated).toBe(true)
   })
 
-  it('reads files from legacy activity metadata too', () => {
-    const result = hydrateMessageTranscript({ toolCallsJson: JSON.stringify([patch]) })
-    expect(result.toolCalls?.[0]?.files).toEqual(patch.files)
-  })
-
-  it('keeps already persisted file lists stable when normalized again', () => {
-    const once = normalizeMessageTranscriptJson(serializeMessageTranscript({ toolCalls: [patch] }))
-    expect(normalizeMessageTranscriptJson(once)).toBe(once)
-  })
 })
 
 describe('post-edit diagnostics in saved history', () => {

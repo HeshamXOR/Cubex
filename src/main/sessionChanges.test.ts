@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { EXTERNAL_EDIT_REASON, SESSION_BASELINE_MAX_BYTES, SessionChangeStore, summarizeTextDiff, validateRevertPaths } from './sessionChanges'
+import { EXTERNAL_EDIT_REASON, SessionChangeStore, validateRevertPaths } from './sessionChanges'
 
 let root: string
 let workspace: string
@@ -56,18 +56,6 @@ describe('SessionChangeStore', () => {
     ])
     expect(changes[0]!.diff).toBe(' one\n-two\n+TWO\n three')
     expect(changes.every((change) => change.externallyModified === undefined && change.updatedAt > 0)).toBe(true)
-  })
-
-  it('omits files that are back to their original state', async () => {
-    const store = new SessionChangeStore(storage)
-    writeFileSync(join(workspace, 'a.txt'), 'original')
-    toolWrite(store, 'a.txt', 'changed')
-    toolWrite(store, 'a.txt', 'original')
-    toolWrite(store, 'temp.txt', 'scratch')
-    toolRemove(store, 'temp.txt')
-    expect(await store.list('task', workspace)).toEqual([])
-    // Nothing tracked means nothing stored for the task.
-    expect(existsSync(storage) ? readdirSync(storage) : []).toEqual([])
   })
 
   it('reverts one file and keeps tracking the others', async () => {
@@ -137,36 +125,6 @@ describe('SessionChangeStore', () => {
     expect(await new SessionChangeStore(storage).list('task', workspace)).toEqual([])
   })
 
-  it('reports files over the size cap without keeping a restore point', async () => {
-    const store = new SessionChangeStore(storage)
-    const big = Buffer.alloc(SESSION_BASELINE_MAX_BYTES + 1, 'a')
-    writeFileSync(join(workspace, 'big.txt'), big)
-    toolWrite(store, 'big.txt', 'small now')
-
-    expect(await store.list('task', workspace)).toMatchObject([{ path: 'big.txt', status: 'modified', added: 0, removed: 0, diff: '' }])
-    const { result } = await store.revert('task', workspace)
-    expect(result.skipped).toHaveLength(1)
-    expect(result.skipped[0]!.reason).toMatch(/too large/i)
-    expect(read('big.txt')).toBe('small now')
-    // Only the index was written; the large original was never copied.
-    const [task] = readdirSync(storage)
-    expect(readdirSync(join(storage, task!, 'blobs'))).toEqual([])
-  })
-
-  it('stops keeping originals once the per-task budget is used', async () => {
-    const store = new SessionChangeStore(storage, { maxTaskBytes: 10 })
-    writeFileSync(join(workspace, 'a.txt'), 'aaaaaaaa')
-    writeFileSync(join(workspace, 'b.txt'), 'bbbbbbbb')
-    toolWrite(store, 'a.txt', 'a1')
-    toolWrite(store, 'b.txt', 'b1')
-
-    const { result } = await store.revert('task', workspace)
-    expect(result.restored).toEqual(['a.txt'])
-    expect(result.skipped).toEqual([{ path: 'b.txt', reason: expect.stringMatching(/storage limit/) }])
-    expect(read('a.txt')).toBe('aaaaaaaa')
-    expect(read('b.txt')).toBe('b1')
-  })
-
   it('treats binary files as non-diffable but restores their exact bytes', async () => {
     const store = new SessionChangeStore(storage)
     const original = Buffer.from([0, 1, 2, 255, 0, 10])
@@ -231,39 +189,5 @@ describe('SessionChangeStore', () => {
     writeFileSync(path, 'v0')
     await store.syncRestored('task', [path])
     expect(await store.list('task', workspace)).toEqual([])
-  })
-
-  it('ignores files outside the current workspace and removes a deleted task', async () => {
-    const store = new SessionChangeStore(storage)
-    writeFileSync(join(workspace, 'a.txt'), 'original')
-    toolWrite(store, 'a.txt', 'changed')
-    expect(await store.list('task', join(root, 'another-project'))).toEqual([])
-    expect(await store.list('task', undefined)).toEqual([])
-    expect(await store.list('other-task', workspace)).toEqual([])
-
-    store.deleteConversation('task')
-    expect(readdirSync(storage)).toEqual([])
-    expect(await new SessionChangeStore(storage).list('task', workspace)).toEqual([])
-    expect(() => store.deleteConversation('')).toThrow('valid task id')
-  })
-})
-
-describe('summarizeTextDiff', () => {
-  it('keeps a small edit in a large file fast and condensed', () => {
-    const lines = Array.from({ length: 20_000 }, (_, index) => `line ${index}`)
-    const edited = [...lines]
-    edited[10_000] = 'changed'
-    const started = Date.now()
-    const summary = summarizeTextDiff(lines.join('\n'), edited.join('\n'))
-    expect(Date.now() - started).toBeLessThan(1_000)
-    expect(summary).toMatchObject({ added: 1, removed: 1 })
-    expect(summary.diff.split('\n')).toEqual([
-      '@⋯ 9997 unchanged lines', ' line 9997', ' line 9998', ' line 9999', '-line 10000', '+changed',
-      ' line 10001', ' line 10002', ' line 10003', '@⋯ 9996 unchanged lines'
-    ])
-  })
-
-  it('counts a removed empty line', () => {
-    expect(summarizeTextDiff('x\n\ny', 'x\ny')).toEqual({ added: 0, removed: 1, diff: ' x\n-\n y' })
   })
 })

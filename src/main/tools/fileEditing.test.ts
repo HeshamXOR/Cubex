@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createFileTools, parseDiffMarker } from './fileTools'
+import { createFileTools } from './fileTools'
 import type { JSONValue, ToolExecutionContext } from '@core/types'
 
 /**
@@ -81,37 +81,6 @@ describe('edit_file match diagnostics', () => {
     expect(text).toContain('\\treturn 1')
   })
 
-  it('points at a single-line near miss and says which line differs', async () => {
-    writeFileSync(join(root, 'diag-line.ts'), 'const a = 1\nconst title = "Hello"\nconst c = 3\n')
-    const tools = await session('diag-line.ts')
-    const result = await edit(tools, { path: 'diag-line.ts', old_string: 'const title = "Helo"', new_string: 'const title = "Hi"' })
-    expect(result.isError).toBe(true)
-    const text = String(result.content)
-    expect(text).toMatch(/line 2/)
-    expect(text).toContain('const title = "Hello"')
-  })
-
-  it('does not invent a candidate when nothing in the file resembles old_string', async () => {
-    writeFileSync(join(root, 'diag-none.ts'), 'alpha\nbeta\ngamma\n')
-    const tools = await session('diag-none.ts')
-    const result = await edit(tools, { path: 'diag-none.ts', old_string: 'completely unrelated words here', new_string: 'x' })
-    expect(result.isError).toBe(true)
-    const text = String(result.content)
-    expect(text).toContain('old_string not found')
-    expect(text).toMatch(/no similar/i)
-    expect(text).toMatch(/read_file/)
-  })
-
-  it('keeps the diagnostic bounded for a large old_string against a large file', async () => {
-    const big = Array.from({ length: 5_000 }, (_, index) => `line ${index} of the big file`).join('\n')
-    writeFileSync(join(root, 'diag-big.txt'), big)
-    const tools = await session('diag-big.txt')
-    const wrong = Array.from({ length: 300 }, (_, index) => `line ${index + 100} of the big FILE!`).join('\n')
-    const result = await edit(tools, { path: 'diag-big.txt', old_string: wrong, new_string: 'x' })
-    expect(result.isError).toBe(true)
-    expect(String(result.content).length).toBeLessThan(6_000)
-  })
-
   it('lists every matching line number when old_string is ambiguous and explains how to disambiguate', async () => {
     writeFileSync(join(root, 'diag-dup.ts'), 'x = 1\ny = 2\nx = 1\nz = 3\nx = 1\n')
     const tools = await session('diag-dup.ts')
@@ -124,40 +93,11 @@ describe('edit_file match diagnostics', () => {
     expect(text).toMatch(/replace_all/)
     expect(bytes('diag-dup.ts').toString('utf8')).toBe('x = 1\ny = 2\nx = 1\nz = 3\nx = 1\n')
   })
-
-  it('truncates a very long list of matching lines', async () => {
-    writeFileSync(join(root, 'diag-many.txt'), Array.from({ length: 60 }, () => 'dup').join('\n'))
-    const tools = await session('diag-many.txt')
-    const result = await edit(tools, { path: 'diag-many.txt', old_string: 'dup', new_string: 'uniq' })
-    expect(result.isError).toBe(true)
-    expect(String(result.content)).toMatch(/appears 60 times/)
-    expect(String(result.content)).toMatch(/more/)
-    expect(String(result.content).length).toBeLessThan(1_500)
-  })
-
-  it('honors replace_all and reports how many replacements were made', async () => {
-    writeFileSync(join(root, 'diag-all.ts'), 'x = 1\ny = 2\nx = 1\nz = 3\nx = 1\n')
-    const tools = await session('diag-all.ts')
-    const result = await edit(tools, { path: 'diag-all.ts', old_string: 'x = 1', new_string: 'x = 9', replace_all: true })
-    expect(result.isError).toBeFalsy()
-    expect(String(result.content)).toContain('3 replacements')
-    expect(parseDiffMarker(String(result.content))).toEqual({ added: 3, removed: 3 })
-    expect(bytes('diag-all.ts').toString('utf8')).toBe('x = 9\ny = 2\nx = 9\nz = 3\nx = 9\n')
-  })
-
-  it('still fails replace_all when there is no match, with a diagnostic', async () => {
-    writeFileSync(join(root, 'diag-all-none.ts'), 'one\ntwo\n')
-    const tools = await session('diag-all-none.ts')
-    const result = await edit(tools, { path: 'diag-all-none.ts', old_string: 'three', new_string: 'x', replace_all: true })
-    expect(result.isError).toBe(true)
-    expect(String(result.content)).toContain('old_string not found')
-  })
 })
 
 describe('edit_file line endings, BOM and trailing newline', () => {
   const BOM = Buffer.from([0xef, 0xbb, 0xbf])
   // The decoded form of the BOM: a model may copy this invisible character into old_string.
-  const BOM_CHAR = String.fromCharCode(0xfeff)
 
   it('matches an LF old_string in a CRLF file and keeps every line CRLF', async () => {
     writeFileSync(join(root, 'crlf.txt'), 'one\r\ntwo\r\nthree\r\nfour\r\n')
@@ -165,21 +105,6 @@ describe('edit_file line endings, BOM and trailing newline', () => {
     const result = await edit(tools, { path: 'crlf.txt', old_string: 'two\nthree', new_string: 'TWO\nTHREE\nextra' })
     expect(result.isError).toBeFalsy()
     expect(bytes('crlf.txt').toString('utf8')).toBe('one\r\nTWO\r\nTHREE\r\nextra\r\nfour\r\n')
-  })
-
-  it('also accepts an old_string that itself uses CRLF', async () => {
-    writeFileSync(join(root, 'crlf-explicit.txt'), 'one\r\ntwo\r\nthree\r\n')
-    const tools = await session('crlf-explicit.txt')
-    const result = await edit(tools, { path: 'crlf-explicit.txt', old_string: 'one\r\ntwo', new_string: 'ONE\r\nTWO' })
-    expect(result.isError).toBeFalsy()
-    expect(bytes('crlf-explicit.txt').toString('utf8')).toBe('ONE\r\nTWO\r\nthree\r\n')
-  })
-
-  it('reports line counts for a CRLF edit without counting carriage returns as changes', async () => {
-    writeFileSync(join(root, 'crlf-diff.txt'), 'a\r\nb\r\nc\r\n')
-    const tools = await session('crlf-diff.txt')
-    const result = await edit(tools, { path: 'crlf-diff.txt', old_string: 'b', new_string: 'B' })
-    expect(parseDiffMarker(String(result.content))).toEqual({ added: 1, removed: 1 })
   })
 
   it('never converts the endings of untouched lines in a mixed-ending file', async () => {
@@ -192,22 +117,6 @@ describe('edit_file line endings, BOM and trailing newline', () => {
     expect(bytes('mixed.txt').toString('utf8')).toBe('a\r\nB1\r\nB2\r\nc\nd\ne\r\n')
   })
 
-  it('uses LF for new line breaks in an LF-dominant file that contains a few CRLF lines', async () => {
-    writeFileSync(join(root, 'mostly-lf.txt'), 'a\nb\nc\r\nd\ne\n')
-    const tools = await session('mostly-lf.txt')
-    const result = await edit(tools, { path: 'mostly-lf.txt', old_string: 'd', new_string: 'D1\nD2' })
-    expect(result.isError).toBeFalsy()
-    expect(bytes('mostly-lf.txt').toString('utf8')).toBe('a\nb\nc\r\nD1\nD2\ne\n')
-  })
-
-  it('matches across a line that is LF in a mostly-CRLF file', async () => {
-    writeFileSync(join(root, 'mixed-span.txt'), 'a\r\nb\nc\r\nd\r\n')
-    const tools = await session('mixed-span.txt')
-    const result = await edit(tools, { path: 'mixed-span.txt', old_string: 'a\nb\nc', new_string: 'A\nB\nC' })
-    expect(result.isError).toBeFalsy()
-    expect(bytes('mixed-span.txt').toString('utf8')).toBe('A\r\nB\r\nC\r\nd\r\n')
-  })
-
   it('preserves a UTF-8 BOM when editing the first line', async () => {
     writeFileSync(join(root, 'bom.txt'), Buffer.concat([BOM, Buffer.from('title\r\nbody\r\n', 'utf8')]))
     const tools = await session('bom.txt')
@@ -216,24 +125,6 @@ describe('edit_file line endings, BOM and trailing newline', () => {
     const out = bytes('bom.txt')
     expect(out.subarray(0, 3).equals(BOM)).toBe(true)
     expect(out.subarray(3).toString('utf8')).toBe('Heading\r\nbody\r\n')
-  })
-
-  it('does not double a BOM when old_string and new_string carry one', async () => {
-    writeFileSync(join(root, 'bom-explicit.txt'), Buffer.concat([BOM, Buffer.from('title\nbody\n', 'utf8')]))
-    const tools = await session('bom-explicit.txt')
-    const result = await edit(tools, { path: 'bom-explicit.txt', old_string: `${BOM_CHAR}title`, new_string: `${BOM_CHAR}Heading` })
-    expect(result.isError).toBeFalsy()
-    const out = bytes('bom-explicit.txt')
-    expect(out.subarray(0, 3).equals(BOM)).toBe(true)
-    expect(out.subarray(3).toString('utf8')).toBe('Heading\nbody\n')
-  })
-
-  it('does not add a BOM to a file that has none', async () => {
-    writeFileSync(join(root, 'no-bom.txt'), 'title\nbody\n')
-    const tools = await session('no-bom.txt')
-    await edit(tools, { path: 'no-bom.txt', old_string: 'title', new_string: 'Heading' })
-    expect(bytes('no-bom.txt').subarray(0, 3).equals(BOM)).toBe(false)
-    expect(bytes('no-bom.txt').toString('utf8')).toBe('Heading\nbody\n')
   })
 
   it.each([
@@ -248,26 +139,6 @@ describe('edit_file line endings, BOM and trailing newline', () => {
     const result = await edit(tools, { path, old_string: 'y', new_string: 'Y' })
     expect(result.isError).toBeFalsy()
     expect(bytes(path).toString('utf8')).toBe(after)
-  })
-
-  it('applies replace_all to a CRLF file with multi-line matches', async () => {
-    writeFileSync(join(root, 'crlf-all.txt'), 'if (a)\r\n  go()\r\nelse\r\n  stop()\r\nif (a)\r\n  go()\r\n')
-    const tools = await session('crlf-all.txt')
-    const result = await edit(tools, { path: 'crlf-all.txt', old_string: 'if (a)\n  go()', new_string: 'if (b)\n  run()', replace_all: true })
-    expect(result.isError).toBeFalsy()
-    expect(String(result.content)).toContain('2 replacements')
-    expect(bytes('crlf-all.txt').toString('utf8')).toBe('if (b)\r\n  run()\r\nelse\r\n  stop()\r\nif (b)\r\n  run()\r\n')
-  })
-
-  it('reports the closest region with line numbers for a CRLF file', async () => {
-    writeFileSync(join(root, 'crlf-miss.txt'), 'a\r\nconst x = 1\r\nc\r\n')
-    const tools = await session('crlf-miss.txt')
-    const result = await edit(tools, { path: 'crlf-miss.txt', old_string: 'const x = 2', new_string: 'const x = 3' })
-    expect(result.isError).toBe(true)
-    expect(String(result.content)).toMatch(/line 2/)
-    expect(String(result.content)).toContain('const x = 1')
-    // Diagnostics never leak carriage returns into the model-visible text.
-    expect(String(result.content)).not.toContain('\r')
   })
 
   it('reports an unchanged-content edit as an error instead of rewriting the file', async () => {

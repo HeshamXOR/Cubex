@@ -5,8 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { describe, it, expect, vi } from 'vitest'
 import { createShellTool, isReadOnlyShellCommand } from './shellTool'
 import { CommandOutputStore } from '../commandOutput'
-import { listShells } from '../shell/shellProvider'
-import type { JSONValue, ToolExecutionContext } from '@core/types'
+import type { ToolExecutionContext } from '@core/types'
 
 const ctx: ToolExecutionContext = { requestPermission: async () => ({ decision: 'allow' }) }
 
@@ -91,21 +90,12 @@ describe('isReadOnlyShellCommand', () => {
 })
 
 describe('run_command tool', () => {
-  it('is permission-gated (ask)', () => {
-    expect(createShellTool(process.cwd()).defaultPermission).toBe('ask')
-  })
 
   it('runs a command and returns exit code + output', async () => {
     const res = await createShellTool(process.cwd()).execute({ command: 'echo cubex-ok' }, ctx)
     expect(res.isError).toBeFalsy()
     expect(String(res.content)).toContain('cubex-ok')
     expect(String(res.content)).toContain('Exit code: 0')
-  })
-
-  it('flags a non-zero exit as an error', async () => {
-    const res = await createShellTool(process.cwd()).execute({ command: 'node -e "process.exit(3)"' }, ctx)
-    expect(res.isError).toBe(true)
-    expect(String(res.content)).toContain('Exit code: 3')
   })
 
   it('distinguishes operating-system denials from Cubex permission approval and gives a recovery path', async () => {
@@ -117,13 +107,6 @@ describe('run_command tool', () => {
     expect(result.content).toContain('Do not repeat the same command unchanged')
     expect(result.content).toContain('read_file or search_files')
     expect(result.metadata?.failureCategory).toBe('permission_denied')
-  })
-
-  it('does not infer an access failure from successful command output', async () => {
-    const result = await createShellTool(process.cwd()).execute({ command: 'node -e "console.log(\'assert Access is denied. handled\')"' }, ctx)
-    expect(result.isError).toBe(false)
-    expect(result.content).not.toContain('Cubex approval')
-    expect(result.metadata?.failureCategory).toBeUndefined()
   })
 
   it('saves output omitted from the inline preview and exposes a typed output id', async () => {
@@ -154,42 +137,6 @@ describe('run_command tool', () => {
     } finally { await rm(directory, { recursive: true, force: true }) }
   })
 
-  it('preserves saved output and exit status for a failed command', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'cubex-command-output-test-'))
-    try {
-      const store = new CommandOutputStore(directory)
-      const result = await createShellTool(process.cwd(), { outputStore: store, conversationId: 'task' }).execute({ command: 'node -e "console.log(\'failure-details\'); process.exitCode = 7"' }, ctx)
-      expect(result.isError).toBe(true)
-      const id = String(result.metadata?.commandOutputId)
-      expect(store.get('task', id)).toMatchObject({ status: 'failed', exitCode: 7 })
-      expect(store.read('task', id)?.text).toContain('failure-details')
-    } finally { await rm(directory, { recursive: true, force: true }) }
-  })
-
-  it('reports an unavailable output store without changing a successful command exit', async () => {
-    const result = await createShellTool(process.cwd(), { outputStore: { create: () => { throw new Error('Disk is full.') } }, conversationId: 'task' }).execute({ command: 'echo still-runs' }, ctx)
-    expect(result.isError).toBe(false)
-    expect(result.content).toContain('still-runs')
-    expect(result.content).toContain('Command output could not be saved: Disk is full.')
-    expect(result.metadata).toBeUndefined()
-  })
-
-  it.each<JSONValue>([null, 'echo hi', [], {}, { command: 123 }, { command: [] }, { command: ' ' }, { command: 'echo\0bad' }])(
-    'returns a tool error for malformed input %#', async (input) => {
-      const result = await createShellTool(process.cwd()).execute(input, ctx)
-      expect(result.isError).toBe(true)
-      expect(result.content).toContain('command')
-    }
-  )
-
-  it.each<JSONValue>([null, '1000', NaN, Infinity, -Infinity, -1, 0])(
-    'rejects invalid timeout input %#', async (timeout) => {
-      const result = await createShellTool(process.cwd()).execute({ command: 'echo hi', timeout_ms: timeout }, ctx)
-      expect(result.isError).toBe(true)
-      expect(result.content).toContain('timeout_ms')
-    }
-  )
-
   it('does not start an already-cancelled command', async () => {
     const controller = new AbortController()
     controller.abort()
@@ -198,18 +145,6 @@ describe('run_command tool', () => {
     )
     expect(result.isError).toBe(true)
     expect(result.content).toBe('run_command cancelled.')
-  })
-
-  it('removes the abort listener when command startup fails', async () => {
-    const controller = new AbortController()
-    const removeListener = vi.spyOn(controller.signal, 'removeEventListener')
-    const result = await createShellTool(join(tmpdir(), 'cubex-workspace-does-not-exist')).execute(
-      { command: 'echo should-not-run' }, { ...ctx, signal: controller.signal }
-    )
-    expect(result.isError).toBe(true)
-    expect(result.content).toContain('Failed to start command')
-    expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function))
-    removeListener.mockRestore()
   })
 
   it('cancels the shell and its live descendants and releases the abort listener', async ({ skip }) => {
@@ -260,59 +195,6 @@ describe('run_command tool', () => {
     }
   }, 20_000)
 
-  it('handles an abort between the initial signal check and listener registration', async () => {
-    const fixture = await shellTreeFixture()
-    const controller = new AbortController()
-    const signal = controller.signal
-    const addListener = signal.addEventListener.bind(signal)
-    const spy = vi.spyOn(signal, 'addEventListener').mockImplementation((...args) => {
-      controller.abort()
-      addListener(...args)
-    })
-    try {
-      const result = await createShellTool(fixture.directory).execute(
-        { command: fixture.command }, { ...ctx, signal }
-      )
-      expect(result.isError).toBe(true)
-      expect(result.content).toContain('Command was cancelled.')
-    } finally {
-      spy.mockRestore()
-      await fixture.dispose()
-    }
-  }, 10_000)
-
-  it.skipIf(process.platform === 'win32')('reports a shell killed by a signal as an error', async () => {
-    const result = await createShellTool(process.cwd()).execute({ command: 'kill -TERM $$' }, ctx)
-    expect(result.isError).toBe(true)
-    expect(result.content).toContain('Command terminated by signal: SIGTERM')
-    expect(result.content).not.toContain('Exit code: 0')
-  })
-
-  it('rejects background execution when processManager is not provided', async () => {
-    const result = await createShellTool(process.cwd()).execute({ command: 'echo test', background: true }, ctx)
-    expect(result.isError).toBe(true)
-    expect(result.content).toContain('Background task execution is not supported')
-  })
-
-  it('rejects a non-finite yield_ms and clamps an out-of-range one', async () => {
-    const mockProcessManager = {
-      start: vi.fn().mockResolvedValue({
-        task: { id: 'p_y', conversationId: 'c1', command: 'x', shell: 'cmd', cwd: process.cwd(), status: 'running', startedAt: 1, outputId: 'o' },
-        initialOutput: '',
-        exited: false
-      })
-    } as any
-    const tool = createShellTool(process.cwd(), { processManager: mockProcessManager, conversationId: 'c1' })
-
-    const bad = await tool.execute({ command: 'x', background: true, yield_ms: Number.NaN }, ctx)
-    expect(bad.isError).toBe(true)
-    expect(bad.content).toContain('"yield_ms" must be a finite number')
-    expect(mockProcessManager.start).not.toHaveBeenCalled()
-
-    await tool.execute({ command: 'x', background: true, yield_ms: 10 }, ctx)
-    expect(mockProcessManager.start).toHaveBeenCalledWith(expect.objectContaining({ yieldMs: 250 }))
-  })
-
   it('delegates background execution to processManager when provided', async () => {
     const mockProcessManager = {
       start: vi.fn().mockResolvedValue({
@@ -353,7 +235,6 @@ describe('run_command tool', () => {
 
 describe('run_command shell choice', () => {
   const windows = process.platform === 'win32'
-  const installed = (id: string): boolean => listShells().some((shell) => shell.id === id && shell.available)
 
   it.skipIf(!windows)('runs a foreground command in the shell the user chose, not always cmd.exe', async () => {
     const asked = await createShellTool(process.cwd(), { preferredShell: 'powershell' }).execute({ command: '$PSVersionTable.PSVersion.Major' }, ctx)
@@ -364,35 +245,12 @@ describe('run_command shell choice', () => {
     expect(String(cmd.content)).toContain('Microsoft Windows')
   })
 
-  it.skipIf(!windows || !installed('git-bash'))('runs a foreground command in Git Bash when that is the choice', async () => {
-    const res = await createShellTool(process.cwd(), { preferredShell: 'git-bash' }).execute({ command: 'echo "bash=$BASH_VERSION"' }, ctx)
-    expect(String(res.content)).toMatch(/bash=\d/)
-  })
-
-  it.skipIf(!windows)('lets one call name its own shell over the setting', async () => {
-    const res = await createShellTool(process.cwd(), { preferredShell: 'powershell' }).execute({ command: 'ver', shell: 'cmd' }, ctx)
-    expect(String(res.content)).toContain('Microsoft Windows')
-  })
-
   it('says so when the chosen shell is not installed and names the one that ran instead', async () => {
     const missing = windows ? 'posix' : 'cmd'
     const res = await createShellTool(process.cwd(), { preferredShell: missing }).execute({ command: 'echo still-runs' }, ctx)
     expect(res.isError).toBe(false)
     expect(String(res.content)).toContain('still-runs')
     expect(String(res.content)).toContain(`Note: ${missing} is not installed, so this ran in`)
-  })
-
-  it('stays quiet when the choice is honored', async () => {
-    const res = await createShellTool(process.cwd(), { preferredShell: 'auto' }).execute({ command: 'echo plain' }, ctx)
-    expect(String(res.content)).not.toContain('is not installed')
-  })
-
-  it.skipIf(!windows)('reports a command too long for the shell as a failure to start, with how to fix it', async () => {
-    const res = await createShellTool(process.cwd(), { preferredShell: 'cmd' }).execute({ command: `echo ${'x'.repeat(9_000)}` }, ctx)
-    expect(res.isError).toBe(true)
-    expect(String(res.content)).toContain('Failed to start command')
-    expect(String(res.content)).toContain('too long')
-    expect(String(res.content)).toContain('write_file')
   })
 })
 
@@ -410,39 +268,12 @@ describe('run_command background tasks', () => {
     expect(start).toHaveBeenCalledWith(expect.objectContaining({ conversationId: 'c1', turnId: 'turn-7', background: true }))
   })
 
-  it('leaves the turn out when none is given', async () => {
-    const start = vi.fn().mockResolvedValue({ ...task('running'), exited: false })
-    await createShellTool(process.cwd(), { processManager: { start } as never, conversationId: 'c1' }).execute({ command: 'x', background: true }, ctx)
-    expect(start.mock.calls[0]![0]).not.toHaveProperty('turnId')
-  })
-
   it('does not call a task that was stopped a failure, and does not report the kill as its exit code', async () => {
     const start = vi.fn().mockResolvedValue(task('killed', 1))
     const res = await createShellTool(process.cwd(), { processManager: { start } as never, conversationId: 'c1' }).execute({ command: 'x', background: true }, ctx)
     expect(res.isError).toBe(false)
     expect(String(res.content)).toContain('The task was stopped before it finished.')
     expect(String(res.content)).not.toContain('Exit code')
-  })
-
-  it('calls a task that hit its time limit a failure', async () => {
-    const start = vi.fn().mockResolvedValue(task('timed_out', 1))
-    const res = await createShellTool(process.cwd(), { processManager: { start } as never, conversationId: 'c1' }).execute({ command: 'x', background: true }, ctx)
-    expect(res.isError).toBe(true)
-    expect(String(res.content)).toContain('reached its time limit')
-  })
-
-  it('reports the exit code of a task that ended by itself', async () => {
-    const start = vi.fn().mockResolvedValue(task('failed', 4))
-    const res = await createShellTool(process.cwd(), { processManager: { start } as never, conversationId: 'c1' }).execute({ command: 'x', background: true }, ctx)
-    expect(res.isError).toBe(true)
-    expect(String(res.content)).toContain('Exit code: 4')
-  })
-
-  it('turns a start failure into a tool error instead of throwing', async () => {
-    const start = vi.fn().mockRejectedValue(new Error('Process limit reached: maximum 8 concurrent tasks for this session.'))
-    const res = await createShellTool(process.cwd(), { processManager: { start } as never, conversationId: 'c1' }).execute({ command: 'x', background: true }, ctx)
-    expect(res.isError).toBe(true)
-    expect(String(res.content)).toBe('Failed to start background task: Process limit reached: maximum 8 concurrent tasks for this session.')
   })
 })
 

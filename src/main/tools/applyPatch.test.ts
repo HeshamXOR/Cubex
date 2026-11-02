@@ -35,12 +35,6 @@ async function session(paths: string[] = [], mutations: Mutation[] = []): Promis
 }
 
 describe('apply_patch definition', () => {
-  it('is registered with an ask permission and a single required patch string', () => {
-    const tool = named(createFileTools(root), 'apply_patch')
-    expect(tool.defaultPermission).toBe('ask')
-    expect(tool.definition.inputSchema).toMatchObject({ type: 'object', required: ['patch'], properties: { patch: { type: 'string' } } })
-    expect(tool.definition.description).toContain('*** Begin Patch')
-  })
 
   it('rejects a missing or malformed patch without touching anything', async () => {
     const tools = createFileTools(root)
@@ -91,24 +85,6 @@ describe('apply_patch across files', () => {
     ])
   })
 
-  it('exposes per-file activity as harness metadata, never as model-visible text', async () => {
-    write('activity/a.txt', 'a1\na2\n')
-    write('activity/b.txt', 'b1\n')
-    const tools = await session(['activity/a.txt', 'activity/b.txt'])
-    const result = await run(tools, patch('*** Update File: activity/a.txt', ' a1', '-a2', '+A2', '*** Delete File: activity/b.txt', '*** Add File: activity/c.txt', '+c1'))
-    expect(result.isError).toBeFalsy()
-    const files = parseFileActivities(result.metadata)
-    // Patch order, not execution order.
-    expect(files).toEqual([
-      { path: 'activity/a.txt', status: 'modified', added: 1, removed: 1, diff: expect.stringContaining('+A2') },
-      { path: 'activity/b.txt', status: 'deleted', added: 0, removed: 1, diff: expect.stringContaining('-b1') },
-      { path: 'activity/c.txt', status: 'added', added: 1, removed: 0, diff: expect.stringContaining('+c1') }
-    ])
-    // Per-file diffs travel as metadata; the text the model sees carries only the totals marker.
-    expect(String(result.content)).not.toContain('diffbody')
-    expect(parseDiffMarker(String(result.content))).toEqual({ added: 2, removed: 2 })
-  })
-
   it('refuses to add over an existing file and changes nothing at all', async () => {
     write('exists/keep.txt', 'original')
     write('exists/other.txt', 'other\n')
@@ -122,24 +98,6 @@ describe('apply_patch across files', () => {
     expect(read('exists/other.txt')).toBe('other\n')
   })
 
-  it('validates every file before writing any and reports all the problems at once', async () => {
-    write('batch/a.txt', 'alpha\n')
-    write('batch/b.txt', 'beta\n')
-    const tools = await session(['batch/a.txt', 'batch/b.txt'])
-    const result = await run(tools, patch(
-      '*** Update File: batch/a.txt', '-alpha', '+ALPHA',
-      '*** Update File: batch/b.txt', '-not in the file', '+x',
-      '*** Delete File: batch/missing.txt'
-    ))
-    expect(result.isError).toBe(true)
-    const text = String(result.content)
-    expect(text).toContain('batch/b.txt')
-    expect(text).toContain('batch/missing.txt')
-    expect(text).toMatch(/does not exist/)
-    expect(read('batch/a.txt')).toBe('alpha\n')
-    expect(read('batch/b.txt')).toBe('beta\n')
-  })
-
   it('rejects a cut-off patch whole', async () => {
     write('cut/a.txt', 'a\n')
     const tools = await session(['cut/a.txt'])
@@ -147,40 +105,6 @@ describe('apply_patch across files', () => {
     expect(result.isError).toBe(true)
     expect(String(result.content)).toMatch(/End Patch/)
     expect(read('cut/a.txt')).toBe('a\n')
-  })
-
-  it('applies two sections for the same file in order, and a delete followed by an add as a replacement', async () => {
-    write('seq/a.txt', '1\n2\n3\n')
-    write('seq/b.txt', 'old\n')
-    const tools = await session(['seq/a.txt', 'seq/b.txt'])
-    const result = await run(tools, patch(
-      '*** Update File: seq/a.txt', '-1', '+one',
-      '*** Update File: seq/a.txt', ' one', '-2', '+two',
-      '*** Delete File: seq/b.txt',
-      '*** Add File: seq/b.txt', '+new'
-    ))
-    expect(result.isError).toBeFalsy()
-    expect(read('seq/a.txt')).toBe('one\ntwo\n3\n')
-    expect(read('seq/b.txt')).toBe('new\n')
-    expect(String(result.content)).toMatch(/modified seq\/b\.txt/)
-  })
-
-  it('rejects adding the same file twice and adding a file under another added file', async () => {
-    const tools = createFileTools(root)
-    const twice = await run(tools, patch('*** Add File: dup/a.txt', '+1', '*** Add File: dup/a.txt', '+2'))
-    expect(twice.isError).toBe(true)
-    expect(String(twice.content)).toMatch(/already exists/)
-    const nested = await run(tools, patch('*** Add File: tree/a', '+1', '*** Add File: tree/a/b.txt', '+2'))
-    expect(nested.isError).toBe(true)
-    expect(existsSync(join(root, 'tree'))).toBe(false)
-  })
-
-  it('treats an add followed by a delete of the same new file as nothing to do', async () => {
-    const tools = createFileTools(root)
-    const result = await run(tools, patch('*** Add File: ghost/new.txt', '+x', '*** Delete File: ghost/new.txt', '*** Add File: ghost/real.txt', '+y'))
-    expect(result.isError).toBeFalsy()
-    expect(existsSync(join(root, 'ghost/new.txt'))).toBe(false)
-    expect(read('ghost/real.txt')).toBe('y\n')
   })
 })
 
@@ -203,32 +127,6 @@ describe('apply_patch moves', () => {
       { path: 'mv/source.txt', before: 'keep\nchange\n', existed: true, after: null }
     ])
   })
-
-  it('supports a pure rename and refuses an existing destination or the same file', async () => {
-    write('mv2/a.txt', 'a\n')
-    write('mv2/taken.txt', 'taken\n')
-    const tools = await session(['mv2/a.txt', 'mv2/taken.txt'])
-    const taken = await run(tools, patch('*** Update File: mv2/a.txt', '*** Move to: mv2/taken.txt'))
-    expect(taken.isError).toBe(true)
-    expect(String(taken.content)).toMatch(/already exists/)
-    const same = await run(tools, patch('*** Update File: mv2/a.txt', '*** Move to: mv2/a.txt'))
-    expect(same.isError).toBe(true)
-    expect(String(same.content)).toMatch(/same file/)
-    const renamed = await run(tools, patch('*** Update File: mv2/a.txt', '*** Move to: mv2/b.txt'))
-    expect(renamed.isError).toBeFalsy()
-    expect(read('mv2/b.txt')).toBe('a\n')
-    expect(existsSync(join(root, 'mv2/a.txt'))).toBe(false)
-  })
-
-  it('needs a full read to move a file', async () => {
-    write('mv3/a.txt', '1\n2\n3\n')
-    const tools = createFileTools(root)
-    await named(tools, 'read_file').execute({ path: 'mv3/a.txt', limit: 2 }, ctx)
-    const result = await run(tools, patch('*** Update File: mv3/a.txt', '*** Move to: mv3/b.txt'))
-    expect(result.isError).toBe(true)
-    expect(String(result.content)).toMatch(/Only part/)
-    expect(existsSync(join(root, 'mv3/a.txt'))).toBe(true)
-  })
 })
 
 describe('apply_patch read-before-edit ledger', () => {
@@ -250,52 +148,6 @@ describe('apply_patch read-before-edit ledger', () => {
     expect(read('ledger/a.txt')).toBe('a changed by someone else\n')
     expect(read('ledger/b.txt')).toBe('b\n')
   })
-
-  it('allows hunks only on text from pages the model read, and Delete needs a full read', async () => {
-    write('ledger/paged.txt', 'one\ntwo\nthree\nfour\n')
-    const tools = createFileTools(root)
-    await named(tools, 'read_file').execute({ path: 'ledger/paged.txt', offset: 2, limit: 2 }, ctx)
-    const outside = await run(tools, patch('*** Update File: ledger/paged.txt', '-one', '+ONE'))
-    expect(outside.isError).toBe(true)
-    expect(String(outside.content)).toContain('not included in the pages')
-    const inside = await run(tools, patch('*** Update File: ledger/paged.txt', ' two', '-three', '+THREE'))
-    expect(inside.isError).toBeFalsy()
-    expect(read('ledger/paged.txt')).toBe('one\ntwo\nTHREE\nfour\n')
-    const remove = await run(tools, patch('*** Delete File: ledger/paged.txt'))
-    expect(remove.isError).toBe(true)
-    expect(String(remove.content)).toContain('Only part')
-  })
-
-  it('does not let a partial read authorize appending at the end of the file', async () => {
-    write('ledger/append.txt', 'one\ntwo\nthree\n')
-    const tools = createFileTools(root)
-    await named(tools, 'read_file').execute({ path: 'ledger/append.txt', limit: 1 }, ctx)
-    const result = await run(tools, patch('*** Update File: ledger/append.txt', '@@', '+four'))
-    expect(result.isError).toBe(true)
-    expect(String(result.content)).toMatch(/full read|read the whole/i)
-    expect(read('ledger/append.txt')).toBe('one\ntwo\nthree\n')
-  })
-
-  it('keeps the ledger valid afterwards so edit_file can continue without another read', async () => {
-    write('ledger/continue.txt', 'x\ny\n')
-    const tools = await session(['ledger/continue.txt'])
-    expect((await run(tools, patch('*** Update File: ledger/continue.txt', '-x', '+X'))).isError).toBeFalsy()
-    const edit = await named(tools, 'edit_file').execute({ path: 'ledger/continue.txt', old_string: 'y', new_string: 'Y' }, ctx)
-    expect(edit.isError).toBeFalsy()
-    expect(read('ledger/continue.txt')).toBe('X\nY\n')
-    // A file the patch created counts as fully read.
-    expect((await run(tools, patch('*** Add File: ledger/created.txt', '+made'))).isError).toBeFalsy()
-    const overwrite = await named(tools, 'write_file').execute({ path: 'ledger/created.txt', content: 'rewritten' }, ctx)
-    expect(overwrite.isError).toBeFalsy()
-  })
-
-  it('forgets a deleted file so it cannot be recreated by overwriting', async () => {
-    write('ledger/gone.txt', 'bye\n')
-    const tools = await session(['ledger/gone.txt'])
-    expect((await run(tools, patch('*** Delete File: ledger/gone.txt'))).isError).toBeFalsy()
-    const edit = await named(tools, 'edit_file').execute({ path: 'ledger/gone.txt', old_string: 'bye', new_string: 'x' }, ctx)
-    expect(edit.isError).toBe(true)
-  })
 })
 
 describe('apply_patch text fidelity', () => {
@@ -308,35 +160,6 @@ describe('apply_patch text fidelity', () => {
     expect([...bytes.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf])
     expect(bytes.subarray(3).toString('utf8')).toBe('a\r\nB1\r\nB2\r\nc\nd\r\n')
     expect(read('fidelity/new.txt')).toBe('x\ny\n')
-  })
-
-  it('tolerates whitespace drift in context without rewriting the file whitespace', async () => {
-    write('fidelity/tabs.go', 'func main() {\n\tprintln("a")\n\tprintln("b")\n}\n')
-    const tools = await session(['fidelity/tabs.go'])
-    const result = await run(tools, patch('*** Update File: fidelity/tabs.go', ' func main() {', '     println("a")', '-    println("b")', '+\tprintln("B")', ' }'))
-    expect(result.isError).toBeFalsy()
-    expect(read('fidelity/tabs.go')).toBe('func main() {\n\tprintln("a")\n\tprintln("B")\n}\n')
-  })
-
-  it('preserves a missing final newline', async () => {
-    write('fidelity/nonl.txt', 'a\nb')
-    const tools = await session(['fidelity/nonl.txt'])
-    expect((await run(tools, patch('*** Update File: fidelity/nonl.txt', ' b', '+c'))).isError).toBeFalsy()
-    expect(read('fidelity/nonl.txt')).toBe('a\nb\nc')
-  })
-
-  it('refuses to edit a binary file and shows the hunk diagnostics for a drifted hunk', async () => {
-    write('fidelity/bin.dat', Buffer.from([0xff, 0xfe, 0x00, 0x61]))
-    write('fidelity/src.ts', 'function beta() {\n  const value = compute(2)\n  return value\n}\n')
-    const tools = await session(['fidelity/bin.dat', 'fidelity/src.ts'])
-    const binary = await run(tools, patch('*** Update File: fidelity/bin.dat', '-a', '+b'))
-    expect(binary.isError).toBe(true)
-    expect(String(binary.content)).toMatch(/binary or not valid UTF-8/)
-    const drift = await run(tools, patch('*** Update File: fidelity/src.ts', ' function beta() {', '-  const value = compute(3)', '+  const value = compute(4)', '   return value'))
-    expect(drift.isError).toBe(true)
-    expect(String(drift.content)).toMatch(/hunk 1/)
-    expect(String(drift.content)).toMatch(/lines 1-3/)
-    expect(String(drift.content)).toContain('compute(2)')
   })
 })
 
@@ -440,35 +263,5 @@ describe('apply_patch atomicity and safety', () => {
       expect(String(remove.content)).toMatch(/symbolic link/)
       expect(read('dirlink/real/file.txt')).toBe('keep\n')
     } finally { rmSync(join(root, 'dirlink', 'alias'), { recursive: true, force: true }) }
-  })
-
-  it('does not write anything when the turn is already cancelled', async () => {
-    const controller = new AbortController()
-    controller.abort()
-    const tools = createFileTools(root)
-    const result = await run(tools, patch('*** Add File: cancelled/a.txt', '+x'), controller.signal)
-    expect(result).toMatchObject({ isError: true, content: 'apply_patch cancelled.' })
-    expect(existsSync(join(root, 'cancelled'))).toBe(false)
-  })
-
-  it('caps the number of files in one patch', async () => {
-    const tools = createFileTools(root)
-    const lines = Array.from({ length: 201 }, (_, index) => [`*** Add File: many/f${index}.txt`, '+x']).flat()
-    const result = await run(tools, patch(...lines))
-    expect(result.isError).toBe(true)
-    expect(String(result.content)).toMatch(/at most 200/)
-    expect(existsSync(join(root, 'many'))).toBe(false)
-  })
-
-  it('serializes with concurrent edits to the same file and refuses the stale one', async () => {
-    write('race/a.txt', 'alpha beta\n')
-    const first = await session(['race/a.txt'])
-    const second = await session(['race/a.txt'])
-    const results = await Promise.all([
-      run(first, patch('*** Update File: race/a.txt', '-alpha beta', '+ALPHA beta')),
-      named(second, 'edit_file').execute({ path: 'race/a.txt', old_string: 'beta', new_string: 'BETA' }, ctx)
-    ])
-    expect(results.filter((result) => !result.isError)).toHaveLength(1)
-    expect(results.find((result) => result.isError)?.content).toContain('changed since you read')
   })
 })

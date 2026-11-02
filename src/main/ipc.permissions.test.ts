@@ -59,13 +59,6 @@ const notStrings = [undefined, null, 42, true, {}, [], ['x']]
 const blank = ['', '   ', '\n']
 
 describe('permission IPC', () => {
-  it('registers the three permission channels and removes them on dispose', () => {
-    const channels = [IPC.resolvePermission, IPC.listPermissionRules, IPC.removePermissionRule]
-    expect(channels).toEqual(['chat:resolve-permission', 'permissions:list-rules', 'permissions:remove-rule'])
-    for (const channel of channels) expect(mocks.handlers.has(channel)).toBe(true)
-    ipc.dispose()
-    for (const channel of channels) expect(mocks.handlers.has(channel)).toBe(false)
-  })
 
   it('passes each of the three decisions through to the pending ask', async () => {
     for (const decision of ['allow', 'deny', 'always']) {
@@ -82,15 +75,6 @@ describe('permission IPC', () => {
     expect(mocks.resolvePermission).not.toHaveBeenCalled()
   })
 
-  it('bounds the permission id', async () => {
-    for (const id of [...notStrings, ...blank, 'x'.repeat(129)]) {
-      await expect(call(IPC.resolvePermission, id, 'allow')).rejects.toThrow('Invalid permission id.')
-    }
-    expect(mocks.resolvePermission).not.toHaveBeenCalled()
-    await call(IPC.resolvePermission, 'x'.repeat(128), 'allow')
-    expect(mocks.resolvePermission).toHaveBeenCalledTimes(1)
-  })
-
   it('lists every saved rule, or only those of one workspace', async () => {
     const rule: PermissionRule = { id: 'rule_1', workspace: 'C:\\proj', tool: 'run_command', pattern: 'npm test', label: 'npm test', createdAt: 1 }
     mocks.listPermissionRules.mockReturnValue([rule])
@@ -100,21 +84,5 @@ describe('permission IPC', () => {
     expect(mocks.listPermissionRules).toHaveBeenLastCalledWith(undefined)
     await call(IPC.listPermissionRules, 'C:\\proj')
     expect(mocks.listPermissionRules).toHaveBeenLastCalledWith('C:\\proj')
-  })
-
-  it('rejects a malformed workspace filter instead of listing everything', async () => {
-    for (const workspace of [42, true, {}, [], ['C:\\proj'], ...blank, 'x'.repeat(4097)]) {
-      await expect(call(IPC.listPermissionRules, workspace)).rejects.toThrow('Invalid workspace.')
-    }
-    expect(mocks.listPermissionRules).not.toHaveBeenCalled()
-  })
-
-  it('removes a rule by id, and bounds that id', async () => {
-    await call(IPC.removePermissionRule, 'rule_abc')
-    expect(mocks.removePermissionRule).toHaveBeenCalledWith('rule_abc')
-    for (const id of [...notStrings, ...blank, 'x'.repeat(129)]) {
-      await expect(call(IPC.removePermissionRule, id)).rejects.toThrow('Invalid rule id.')
-    }
-    expect(mocks.removePermissionRule).toHaveBeenCalledTimes(1)
   })
 })

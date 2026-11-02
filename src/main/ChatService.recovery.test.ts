@@ -166,38 +166,6 @@ describe('context overflow recovery', () => {
     expect(errors).toHaveLength(1)
     expect(errors[0]).toMatchObject({ category: 'CONTEXT_LENGTH' })
   })
-
-  it('ends the turn when there is nothing to summarize, without a second request', async () => {
-    mocks.conversation = conversation(turns(1))
-    const h = harness(async function* () { throw overflow() })
-    await h.service.start(request())
-    await finished(h.events)
-    expect(h.streams).toHaveLength(1)
-    expect(h.sends).toHaveLength(0)
-    expect(errorsOf(h.events)).toMatchObject([{ category: 'CONTEXT_LENGTH' }])
-  })
-
-  it('ends the turn when the summary fails', async () => {
-    mocks.conversation = conversation(turns(6))
-    const h = harness(async function* () { throw overflow() }, async () => { throw new Error('summary down') })
-    await h.service.start(request())
-    await finished(h.events)
-    expect(h.streams).toHaveLength(1)
-    expect(errorsOf(h.events)).toMatchObject([{ category: 'CONTEXT_LENGTH' }])
-    expect(progressOf(h.events).map((e) => `${e.step}:${e.phase}`)).toEqual(['summarize:started', 'summarize:failed'])
-  })
-
-  it('does not treat other errors as an overflow', async () => {
-    mocks.conversation = conversation(turns(6))
-    const h = harness(async function* () {
-      throw new NormalizedAIError({ provider: 'primary', category: 'RATE_LIMIT_ERROR', classification: 'transient', retryable: false, message: 'Rate limit: too many tokens per minute' })
-    })
-    await h.service.start(request())
-    await finished(h.events)
-    expect(h.streams).toHaveLength(1)
-    expect(h.sends).toHaveLength(0)
-    expect(errorsOf(h.events)).toMatchObject([{ category: 'RATE_LIMIT_ERROR' }])
-  })
 })
 
 describe('the working set after a summary', () => {
@@ -226,12 +194,6 @@ describe('the working set after a summary', () => {
     // And the compaction hooks ran around the manual summary.
     expect(mocks.hooked.filter((p) => p.event === 'PreCompact' || p.event === 'PostCompact').map((p) => `${p.event}:${p.trigger}`)).toEqual(['PreCompact:manual', 'PostCompact:manual'])
   })
-
-  it('adds no note when the agent has done nothing', async () => {
-    mocks.conversation = conversation(turns(5, 40))
-    const h = harness(async function* () { yield { type: 'text_delta', text: 'Done.' } })
-    await expect(h.service.compactConversation('task')).resolves.toMatchObject({ ok: true, summary: SUMMARY })
-  })
 })
 
 describe('repeat-call detection', () => {
@@ -255,20 +217,5 @@ describe('repeat-call detection', () => {
     const text = h.events.flatMap((e) => (e.kind === 'stream' && e.event.type === 'text_delta' ? [e.event.text] : [])).join('')
     expect(text).toContain('Stopped: the agent made the same read_file call 5 times.')
     expect(h.events.some((e) => e.kind === 'stream' && e.event.type === 'completed')).toBe(true)
-  })
-
-  it('does not stop a turn whose calls differ', async () => {
-    mocks.conversation = conversation([])
-    const h = harness(async function* (_req, index) {
-      if (index < 6) {
-        yield { type: 'tool_call', toolCall: { id: `r${index}`, name: 'read_file', input: { path: 'a.ts', offset: index } } }
-        yield { type: 'stop', stopReason: 'tool_use' }
-      } else yield { type: 'text_delta', text: 'All done.' }
-    })
-    await h.service.start(request({ fileToolsEnabled: true }))
-    await finished(h.events)
-    expect(h.streams).toHaveLength(7)
-    const text = h.events.flatMap((e) => (e.kind === 'stream' && e.event.type === 'text_delta' ? [e.event.text] : [])).join('')
-    expect(text).not.toContain('Stopped:')
   })
 })

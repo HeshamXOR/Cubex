@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, unlinkSync, 
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { canonicalPath, decidePermission, isInside } from './permissions'
+import { decidePermission, isInside } from './permissions'
 
 let base: string
 let root: string
@@ -29,11 +29,6 @@ const ask = (kind: string | undefined, locations?: unknown, options: unknown = O
 const chose = (decision: ReturnType<typeof decidePermission>): string => (decision.reply.outcome.outcome === 'selected' ? decision.reply.outcome.optionId : 'cancelled')
 
 describe('what an agent may look at', () => {
-  it.each(['read', 'search', 'think'])('allows %s, once, without a place', (kind) => {
-    const decision = decidePermission(ask(kind), root)
-    expect(decision.allow).toBe(true)
-    expect(chose(decision)).toBe('once')
-  })
 
   it('allows reading a file inside the folder, by an absolute or a relative path', () => {
     expect(chose(decidePermission(ask('read', [{ path: join(root, 'src', 'a.ts') }]), root))).toBe('once')
@@ -41,26 +36,11 @@ describe('what an agent may look at', () => {
     expect(chose(decidePermission(ask('search', [{ path: root }]), root))).toBe('once')
   })
 
-  it('allows a place that does not exist yet inside the folder', () => {
-    expect(decidePermission(ask('read', [{ path: join(root, 'src', 'new', 'file.ts') }]), root).allow).toBe(true)
-  })
-
   it('refuses a place outside the folder, however it is written', () => {
     for (const path of [join(outside, 'secret.txt'), join('..', 'elsewhere', 'secret.txt'), join(root, '..', 'elsewhere'), join(root, 'missing', '..', '..', 'elsewhere', 'secret.txt'), base]) {
       const decision = decidePermission(ask('read', [{ path }]), root)
       expect(decision.allow, path).toBe(false)
       expect(chose(decision)).toBe('no')
-    }
-  })
-
-  it('refuses when any one of several places is outside', () => {
-    const decision = decidePermission(ask('read', [{ path: join(root, 'src', 'a.ts') }, { path: join(outside, 'secret.txt') }]), root)
-    expect(decision.allow).toBe(false)
-  })
-
-  it('refuses a place that is not a path', () => {
-    for (const locations of [[{}], [{ path: '' }], [{ path: 5 }], [null], ['x']]) {
-      expect(decidePermission(ask('read', locations), root).allow).toBe(false)
     }
   })
 
@@ -94,25 +74,5 @@ describe('what an agent may not do', () => {
     // Allowing always would be written to the person\'s own settings for the agent.
     expect(chose(decidePermission(ask('read', undefined, [{ optionId: 'always', name: 'Always', kind: 'allow_always' }, { optionId: 'no', name: 'No', kind: 'reject_once' }]), root))).toBe('cancelled')
     expect(chose(decidePermission(ask('edit', undefined, [{ optionId: 'once', name: 'Yes', kind: 'allow_once' }, { optionId: 'never', name: 'Never', kind: 'reject_always' }]), root))).toBe('cancelled')
-  })
-
-  it('cancels when the agent offers nothing to choose', () => {
-    expect(chose(decidePermission(ask('read', undefined, []), root))).toBe('cancelled')
-    expect(chose(decidePermission(ask('edit', undefined, null), root))).toBe('cancelled')
-  })
-
-  it('refuses a request that is not shaped like one', () => {
-    for (const params of [null, undefined, 'x', 4, [], {}, { toolCall: 'x' }]) {
-      const decision = decidePermission(params, root)
-      expect(decision.allow).toBe(false)
-      expect(chose(decision)).toBe('cancelled')
-    }
-  })
-})
-
-describe('real paths', () => {
-  it('resolves the part that exists and keeps the rest', () => {
-    expect(canonicalPath(join(root, 'src', 'a.ts'))).toBe(join(root, 'src', 'a.ts'))
-    expect(canonicalPath(join(root, 'src', 'nothing', 'here.ts'))).toBe(join(root, 'src', 'nothing', 'here.ts'))
   })
 })

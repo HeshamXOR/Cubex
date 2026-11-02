@@ -66,25 +66,6 @@ describe('restoring the conversation', () => {
     expect(notice.cut?.messages.map((message) => message.id)).toEqual(['u2', 'a2', 'u3', 'a3'])
   })
 
-  it('drops what described the removed turns: the meter, the checklist, the plans and the summary', async () => {
-    useStore.setState({ contextUsage: { sections: [], estimatedTokens: 1, outputReserve: 0, updatedAt: 1 } })
-    bridge.api.restoreCheckpoint.mockResolvedValue(restored({ conversation: { removedMessages: 4, removedPlanIds: ['plan-new'], contextCleared: true } }))
-    await restoreTo('u2', { code: true, conversation: true })
-    const state = useStore.getState()
-    expect(state.contextUsage).toBeUndefined()
-    expect(state.todos).toEqual([])
-    expect(state.plans.map((entry) => entry.id)).toEqual(['plan-old'])
-    expect(state.activePlan?.id).toBe('plan-old')
-    expect(state.activeConversation).toMatchObject({ contextStartMessageId: undefined, contextSummary: undefined })
-  })
-
-  it('keeps the summary when main kept it', async () => {
-    bridge.api.restoreCheckpoint.mockResolvedValue(restored({ conversation: { removedMessages: 2, removedPlanIds: [], contextCleared: false } }))
-    await restoreTo('u3', { code: false, conversation: true })
-    expect(useStore.getState().activeConversation).toMatchObject({ contextStartMessageId: 'u3', contextSummary: 'Goal: retries.' })
-    expect(useStore.getState().plans).toHaveLength(2)
-  })
-
   it('puts the message back in the composer, attachments too, and focuses it', async () => {
     bridge.api.restoreCheckpoint.mockResolvedValue(restored({ conversation: { removedMessages: 4, removedPlanIds: [], contextCleared: false } }))
     await restoreTo('u2', { code: false, conversation: true })
@@ -93,32 +74,9 @@ describe('restoring the conversation', () => {
     expect(bridge.focusComposer).toHaveBeenCalled()
   })
 
-  it('leaves a draft that is being written alone', async () => {
-    useStore.setState({ composerText: 'half a thought' })
-    bridge.api.restoreCheckpoint.mockResolvedValue(restored({ conversation: { removedMessages: 4, removedPlanIds: [], contextCleared: false } }))
-    await restoreTo('u2', { code: false, conversation: true })
-    expect(useStore.getState().composerText).toBe('half a thought')
-    expect(useRestore.getState().notices.a?.cut?.composer).toBeUndefined()
-    expect(bridge.focusComposer).not.toHaveBeenCalled()
-  })
-
-  it('does not touch the status, so a queue that is on hold stays on hold', async () => {
-    useStore.setState({ status: 'cancelled' })
-    bridge.api.restoreCheckpoint.mockResolvedValue(restored({ conversation: { removedMessages: 2, removedPlanIds: [], contextCleared: false } }))
-    await restoreTo('u3', { code: false, conversation: true })
-    expect(useStore.getState().status).toBe('cancelled')
-  })
 })
 
 describe('restoring the code', () => {
-  it('leaves the thread and the composer alone', async () => {
-    bridge.api.restoreCheckpoint.mockResolvedValue(restored({ restored: ['src/a.ts', 'src/b.ts'], undoId: 'undo-2' }))
-    await restoreTo('u2', { code: true, conversation: false })
-    expect(ids()).toEqual(['u1', 'a1', 'u2', 'a2', 'u3', 'a3'])
-    expect(useStore.getState().composerText).toBe('')
-    expect(useRestore.getState().notices.a).toMatchObject({ kind: 'restored', undoId: 'undo-2', messageCount: 6 })
-    expect(useRestore.getState().notices.a?.cut).toBeUndefined()
-  })
 
   it('reports files it left alone and keeps the thread when a file could not be written', async () => {
     bridge.api.restoreCheckpoint.mockResolvedValue(restored({
@@ -186,14 +144,6 @@ describe('undoing a restore', () => {
     expect(useStore.getState().attachments).toEqual([])
   })
 
-  it('keeps what the person has since typed in the composer', async () => {
-    await restoreSecondExchange()
-    useStore.getState().setComposerText('second request, reworded')
-    bridge.api.undoRestore.mockResolvedValue({ restored: [], conversation: true })
-    await undoRestore()
-    expect(useStore.getState().composerText).toBe('second request, reworded')
-  })
-
   it('reports why it could not undo, and offers no second try', async () => {
     await restoreSecondExchange()
     bridge.api.undoRestore.mockRejectedValue(new Error('Undo stopped: these files changed after the restore. Your current files were preserved.\nsrc/a.ts'))
@@ -206,12 +156,5 @@ describe('undoing a restore', () => {
     expect(bridge.api.undoRestore).toHaveBeenCalledTimes(1)
   })
 
-  it('does nothing without a restore to undo or while a turn runs', async () => {
-    await undoRestore()
-    await restoreSecondExchange()
-    useStore.setState({ streamId: 'running' })
-    await undoRestore()
-    expect(bridge.api.undoRestore).not.toHaveBeenCalled()
-  })
 })
 

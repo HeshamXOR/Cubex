@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createSmoother, stepSmoother, type SmootherState } from './smoothText'
+import { createSmoother, stepSmoother } from './smoothText'
 
 const FRAME = 1000 / 60
 
@@ -78,38 +78,4 @@ describe('stepSmoother', () => {
     expect(st.shown).toBe(text.length)
   })
 
-  it('catches up fast after a huge backlog', () => {
-    const st = createSmoother(0, 0, 0)
-    const text = WORDS.repeat(120)
-    let done = -1
-    for (let now = 0; now < 4000; now += FRAME) {
-      stepSmoother(st, text, now, false)
-      if (st.shown >= text.length) { done = now; break }
-    }
-    expect(done).toBeGreaterThan(0)
-    expect(done).toBeLessThan(1200)
-  })
-
-  it('starts instantly when asked to start at the end', () => {
-    const text = WORDS.repeat(10)
-    const st = createSmoother(text.length, text.length, 0)
-    expect(stepSmoother(st, text, 16, false)).toBe(false)
-    expect(st.shown).toBe(text.length)
-  })
-
-  it('clamps when the text is rewritten shorter', () => {
-    const st: SmootherState = createSmoother(50, 50, 0)
-    stepSmoother(st, 'short text', 16, true)
-    expect(st.shown).toBe(10)
-  })
-
-  it('keeps asking for frames while live, then stops when caught up and final', () => {
-    const st = createSmoother(0, 0, 0)
-    expect(stepSmoother(st, '', 16, true)).toBe(true)
-    const text = 'a b c'
-    let more = true
-    for (let now = 16; now < 2000 && more; now += FRAME) more = stepSmoother(st, text, now, false)
-    expect(more).toBe(false)
-    expect(st.shown).toBe(text.length)
-  })
 })

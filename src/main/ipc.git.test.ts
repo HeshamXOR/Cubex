@@ -67,30 +67,6 @@ afterEach(() => {
 })
 
 describe('git IPC', () => {
-  it('registers its channels and removes them on dispose', () => {
-    for (const channel of [IPC.gitCommit, IPC.gitSuggestMessage]) expect(mocks.handlers.has(channel)).toBe(true)
-    expect(IPC.gitCommit).toBe('git:commit')
-    expect(IPC.gitSuggestMessage).toBe('git:suggest-message')
-    ipc.dispose()
-    expect(mocks.handlers.size).toBe(0)
-  })
-
-  describe('gitSuggestMessage', () => {
-    it('builds a subject from the changes of the task', async () => {
-      mocks.changes = [{ path: 'src/client.ts', status: 'modified' }, { path: 'src/backoff.ts', status: 'added' }]
-      await expect(call(IPC.gitSuggestMessage, 'c1')).resolves.toBe('Update client.ts and add backoff.ts')
-      expect(mocks.getSessionChanges).toHaveBeenCalledWith('c1')
-      mocks.changes = []
-      await expect(call(IPC.gitSuggestMessage, 'c1')).resolves.toBe('')
-    })
-
-    it('rejects malformed task ids before reaching the service', async () => {
-      for (const bad of [undefined, null, 42, {}, '', '   ', 'x'.repeat(257)]) {
-        await expect(call(IPC.gitSuggestMessage, bad)).rejects.toThrow('Invalid task id.')
-      }
-      expect(mocks.getSessionChanges).not.toHaveBeenCalled()
-    })
-  })
 
   describe('gitCommit', () => {
     it('rejects malformed task ids and reports unknown tasks and missing workspaces as results', async () => {

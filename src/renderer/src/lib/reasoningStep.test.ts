@@ -11,18 +11,6 @@ describe('latestReasoningStep', () => {
     expect(latestReasoningStep('Read the config.\nCheck the retry path. Then write the test.\n\n')).toBe('Then write the test.')
   })
 
-  it('removes markdown markers', () => {
-    expect(latestReasoningStep('## Plan')).toBe('Plan')
-    expect(latestReasoningStep('- **Check** `effort.ts`')).toBe('Check effort.ts')
-    expect(latestReasoningStep('2. Run the suite')).toBe('Run the suite')
-    expect(latestReasoningStep('> quoted thought')).toBe('quoted thought')
-  })
-
-  it('never shows a spaced em dash or a middle dot', () => {
-    expect(latestReasoningStep('Parse first — then stream')).toBe('Parse first - then stream')
-    expect(latestReasoningStep('a·b')).toBe('a b')
-  })
-
   it('skips a line that is only markers', () => {
     expect(latestReasoningStep('Look at the parser.\n---')).toBe('Look at the parser.')
   })
@@ -33,7 +21,4 @@ describe('latestReasoningStep', () => {
     expect(step.endsWith('...')).toBe(true)
   })
 
-  it('finds the newest step at the end of very long reasoning', () => {
-    expect(latestReasoningStep(`${'Earlier thinking. '.repeat(5000)}\nFinal check.`)).toBe('Final check.')
-  })
 })

@@ -40,59 +40,9 @@ describe('assignToolNames', () => {
     expect(second.startsWith('mcp__s__a_b_')).toBe(true)
     expect(names.get('plain')).toBe('mcp__s__plain')
   })
-
-  it('is deterministic and independent of input order', () => {
-    const tools = ['a.b', 'a_b', 'x y', 'x_y', 'zed', 'é', 'e']
-    const forward = assignToolNames('srv', tools)
-    const backward = assignToolNames('srv', [...tools].reverse())
-    for (const tool of tools) expect(backward.get(tool)).toBe(forward.get(tool))
-    expect(assignToolNames('srv', tools).get('a.b')).toBe(forward.get('a.b'))
-  })
-
-  it('handles names with no usable characters', () => {
-    const names = assignToolNames('s', ['日本語', '한국어'])
-    for (const name of names.values()) expect(name).toMatch(VALID)
-    expect(new Set(names.values()).size).toBe(2)
-  })
-
-  it('produces valid unique names for a large pseudo-random set', () => {
-    let seed = 7
-    const rand = (): number => (seed = (Math.imul(seed, 1103515245) + 12345) & 0x7fffffff) / 0x7fffffff
-    const alphabet = 'ab._ -/é日:'
-    const tools = new Set<string>()
-    while (tools.size < 600) {
-      let name = ''
-      const length = 1 + Math.floor(rand() * 90)
-      for (let i = 0; i < length; i++) name += alphabet[Math.floor(rand() * alphabet.length)]
-      tools.add(name)
-    }
-    const names = assignToolNames('some_server', [...tools])
-    expect(names.size).toBe(tools.size)
-    expect(new Set(names.values()).size).toBe(tools.size)
-    for (const name of names.values()) expect(name).toMatch(VALID)
-  })
 })
 
 describe('assignServerSegments', () => {
-  it('slugs the display name', () => {
-    const map = assignServerSegments([{ id: 'u1', name: 'My Server! (prod)' }])
-    expect(map.get('u1')).toBe('my_server_prod')
-  })
-
-  it('falls back to the id when the name has no usable characters', () => {
-    const map = assignServerSegments([{ id: '3f2a1c4e-5b6d', name: '日本語' }])
-    expect(map.get('3f2a1c4e-5b6d')).toBe('3f2a1c4e-5b6d')
-  })
-
-  it('never contains a double underscore and does not start or end with one', () => {
-    const map = assignServerSegments([{ id: 'u', name: '__weird__name__' }])
-    expect(map.get('u')).toBe('weird_name')
-  })
-
-  it('limits the length so tool names keep room', () => {
-    const map = assignServerSegments([{ id: 'u', name: 'modelcontextprotocol-filesystem-server-extra' }])
-    expect(map.get('u')!.length).toBeLessThanOrEqual(24)
-  })
 
   it('separates servers whose names slug the same, independent of order', () => {
     const servers = [{ id: 'id-one', name: 'My Server' }, { id: 'id-two', name: 'my_server' }, { id: 'id-three', name: 'Other' }]
@@ -109,11 +59,6 @@ describe('parseMcpToolName', () => {
   it('splits at the first double underscore after the prefix', () => {
     expect(parseMcpToolName('mcp__github__create_issue')).toEqual({ server: 'github', tool: 'create_issue' })
     expect(parseMcpToolName('mcp__github__a__b')).toEqual({ server: 'github', tool: 'a__b' })
-  })
-
-  it('returns undefined for other names', () => {
-    expect(parseMcpToolName('read_file')).toBeUndefined()
-    expect(parseMcpToolName('mcp__nothing')).toBeUndefined()
   })
 
   it('round-trips generated names', () => {

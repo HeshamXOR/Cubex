@@ -1,0 +1,6 @@
+{
+  "title": "Write unit tests that would catch regressions",
+  "prompt": "slugify in src/slug.mjs has no tests. Write a thorough node:test suite for it in test/slug.test.mjs: it should pass today and fail if someone later breaks any part of what slugify does, edge cases included. Do not change src/slug.mjs.",
+  "timeoutSec": 300,
+  "stub": { "command": "node --test" }
+}

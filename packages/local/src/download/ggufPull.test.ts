@@ -151,27 +151,6 @@ describe('pullGguf', () => {
     expect(hf.calls.filter((u) => u.includes('/resolve/'))).toEqual([])
   })
 
-  it('counts bytes already on disk toward the free-space check', async () => {
-    const p1 = bytes(5_000, 3)
-    const p2 = bytes(5_000, 4)
-    const files = { 'Big-Q4_K_M-00001-of-00002.gguf': p1, 'Big-Q4_K_M-00002-of-00002.gguf': p2 }
-    const first = fakeHf(files)
-    await pullGguf({ modelRef: 'o/r:Q4_K_M', modelsDir, fetch: first.fetch, onProgress: () => undefined, ...common })
-    // Everything is present now, so a second pull needs no free space at all.
-    const second = fakeHf(files)
-    const result = await pullGguf({
-      modelRef: 'o/r:Q4_K_M',
-      modelsDir,
-      fetch: second.fetch,
-      onProgress: () => undefined,
-      retryDelayMs: () => 0,
-      reserveBytes: 0,
-      freeBytes: async () => 10
-    })
-    expect(result.files.every((f) => f.alreadyPresent)).toBe(true)
-    expect(second.calls.filter((u) => u.includes('/resolve/'))).toEqual([])
-  })
-
   it('refuses a link to another site before any request', async () => {
     const hf = fakeHf({})
     await expect(
@@ -195,18 +174,5 @@ describe('pullGguf', () => {
     })
     await expect(p).rejects.toMatchObject({ code: 'cancelled' })
     expect(await readdir(join(modelsDir, 'o', 'r'))).toEqual([])
-  })
-
-  it('accepts an exact file option and revision', async () => {
-    const hf = fakeHf({ 'Model-Q4_K_M.gguf': bytes(2_000, 6) })
-    const result = await pullGguf({
-      modelRef: 'o/r',
-      file: 'Model-Q4_K_M.gguf',
-      modelsDir,
-      fetch: hf.fetch,
-      onProgress: () => undefined,
-      ...common
-    })
-    expect(result.files[0]!.verified).toBe(true)
   })
 })

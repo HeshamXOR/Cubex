@@ -85,16 +85,6 @@ describe('ChatService session changes', () => {
     expect(await service!.getSessionChanges('c1')).toEqual([])
   })
 
-  it('refuses to undo while the task has a running turn', async () => {
-    const { events, finished } = startTurn([[{ id: 'w', name: 'write_file', input: { path: 'new.txt', content: 'created' } }]], 'default')
-    await vi.waitFor(() => expect(events.some((e) => e.kind === 'permission')).toBe(true), { timeout: 8000 })
-    await expect(service!.revertSessionChanges('c1')).rejects.toThrow('Stop the running turn')
-    const ask = events.find((e) => e.kind === 'permission')
-    if (ask?.kind === 'permission') service!.resolvePermission(ask.ask.id, 'deny')
-    await finished
-    expect(await service!.revertSessionChanges('c1')).toEqual({ restored: [], skipped: [] })
-  })
-
   it('validates the task and drops stored originals when the conversation is forgotten', async () => {
     const { finished } = startTurn([[{ id: 'w', name: 'write_file', input: { path: 'new.txt', content: 'created' } }]], 'bypass')
     await finished

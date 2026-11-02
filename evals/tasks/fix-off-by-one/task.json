@@ -1,0 +1,6 @@
+{
+  "title": "Fix off-by-one errors reported as a bug",
+  "prompt": "A user reports two bugs in the result pager of this project. (1) With exactly 40 results and 20 per page, the pager says there are 3 pages and the third one is empty. (2) The caption on page 2 says \"Showing 20-40 of 45\" but it should say \"Showing 21-40 of 45\". Find and fix the cause in src/paginate.mjs, and add a test for each so they cannot come back.",
+  "timeoutSec": 240,
+  "stub": { "command": "node --test" }
+}

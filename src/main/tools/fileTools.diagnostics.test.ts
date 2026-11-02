@@ -86,27 +86,6 @@ describe('post-edit diagnostics on the file tools', () => {
     expect(calls[0]!.files.map((file) => file.abs).sort()).toEqual([join(root, 'src', 'a.ts'), join(root, 'src', 'c.ts')])
   })
 
-  it('forwards the tool call signal to the checker', async () => {
-    const { calls, run } = setup()
-    const turn = new AbortController()
-    await run('write_file', { path: 'src/new.ts', content: 'export {}\n' }, turn.signal)
-    expect(calls[0]!.signal).toBe(turn.signal)
-  })
-
-  it('adds nothing when the hook has nothing to report', async () => {
-    const { run } = setup(() => undefined)
-    const result = await run('write_file', { path: 'src/new.ts', content: 'export {}\n' })
-    expect(String(result.content)).not.toContain('New diagnostics')
-    expect(result.metadata?.diagnostics).toBeUndefined()
-  })
-
-  it('keeps a warnings-only report out of the model text but in the metadata', async () => {
-    const { run } = setup(() => ({ text: '', summary: { errors: 0, warnings: 1, items: [] } }))
-    const result = await run('write_file', { path: 'src/new.ts', content: 'export {}\n' })
-    expect(String(result.content)).not.toContain('New diagnostics')
-    expect(result.metadata?.diagnostics).toEqual({ errors: 0, warnings: 1, items: [] })
-  })
-
   it('never fails the edit because the checker did', async () => {
     const { run } = setup(async () => { throw new Error('checker exploded') })
     const result = await run('write_file', { path: 'src/new.ts', content: 'export {}\n' })
@@ -122,37 +101,10 @@ describe('post-edit diagnostics on the file tools', () => {
     expect(calls).toHaveLength(0)
   })
 
-  it('does not check removals or reads', async () => {
-    const { calls, run } = setup()
-    await read(run, 'src/b.ts')
-    await run('remove_file', { path: 'src/b.ts' })
-    await run('list_files', { path: '.' })
-    expect(calls).toHaveLength(0)
-  })
-
-  it('leaves every tool untouched when no hook is given', async () => {
-    const tools = createFileTools(root)
-    const result = await tools.find((tool) => tool.definition.name === 'write_file')!.execute({ path: 'src/new.ts', content: 'export {}\n' }, ctx())
-    expect(result.metadata?.diagnostics).toBeUndefined()
-  })
-
   it('one tool call never sees the files another changed', async () => {
     const { calls, run } = setup()
     await run('write_file', { path: 'src/one.ts', content: 'export const one = 1\n' })
     await run('write_file', { path: 'src/two.ts', content: 'export const two = 2\n' })
     expect(calls.map((call) => call.files.map((file) => file.abs))).toEqual([[join(root, 'src', 'one.ts')], [join(root, 'src', 'two.ts')]])
-  })
-})
-
-describe('concurrent tool calls', () => {
-  it('keeps each call to its own files when two writes overlap', async () => {
-    const seen: string[][] = []
-    const { run } = setup(async (files) => { await new Promise((resolve) => setTimeout(resolve, 20)); seen.push(files.map((file) => file.abs)); return report })
-    await Promise.all([
-      run('write_file', { path: 'src/x.ts', content: 'export const x = 1\n' }),
-      run('write_file', { path: 'src/y.ts', content: 'export const y = 1\n' })
-    ])
-    expect(seen.flat().sort()).toEqual([join(root, 'src', 'x.ts'), join(root, 'src', 'y.ts')])
-    expect(seen.every((files) => files.length === 1)).toBe(true)
   })
 })

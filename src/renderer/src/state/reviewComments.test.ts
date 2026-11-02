@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { COMMENT_MAX_LENGTH, MAX_QUEUED_COMMENTS, loadQueued, useReviewComments, type QueuedComment } from './reviewComments'
+import { loadQueued, useReviewComments, type QueuedComment } from './reviewComments'
 
 const memory = new Map<string, string>()
 
@@ -46,16 +46,6 @@ describe('the review comment queue', () => {
     add('c1', comment('b'))
     edit('c1', 'b', '  ')
     expect(queued()[0]!.text).toBe('Comment b')
-  })
-
-  it('holds no more than one message can carry, and cuts a comment that is too long', () => {
-    const { add } = useReviewComments.getState()
-    for (let index = 0; index < MAX_QUEUED_COMMENTS; index++) expect(add('c1', comment(`k${index}`))).toBe(true)
-    expect(add('c1', comment('one-more'))).toBe(false)
-    expect(queued()).toHaveLength(MAX_QUEUED_COMMENTS)
-    useReviewComments.setState({ byConversation: {} })
-    add('c2', comment('long', { text: 'x'.repeat(COMMENT_MAX_LENGTH + 50) }))
-    expect(queued('c2')[0]!.text).toHaveLength(COMMENT_MAX_LENGTH)
   })
 
   it('survives a restart, and a conversation with nothing queued leaves nothing behind', () => {

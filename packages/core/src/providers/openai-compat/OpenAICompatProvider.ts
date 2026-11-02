@@ -13,7 +13,8 @@ import { chatFetchInit } from '../../util/chatFetch'
 import { withTimeout } from '../../util/timeout'
 import { BaseProvider, buildAuthHeaders, normalizeBaseUrl } from '../base'
 import { infersReasoning, requestWithSupportedEffort, type EffortModel } from '../effort'
-import { ChatDialects, chatExtrasRejected, chatExtrasSent, type ChatDialect } from '../openai/dialect'
+import { ChatDialects, chatExtrasRejected, chatExtrasSent, chatRefusedForResponses, type ChatDialect } from '../openai/dialect'
+import { OpenAIProvider } from '../openai/OpenAIProvider'
 import {
   mapChatUsage,
   mapFinishReason,
@@ -54,9 +55,29 @@ interface ChatChunk {
 }
 
 /**
+ * Fold a later usage report of one stream into the earlier ones. Servers send usage in pieces (the prompt count
+ * early, the rest with the last chunk) and some close the stream with a chunk of zeros. Counts only grow within a
+ * request, so a field the new report leaves out, or reports as 0 over a positive count, keeps its earlier value.
+ */
+function mergeUsage(earlier: Usage | undefined, later: Usage): Usage {
+  if (!earlier) return later
+  const merged: Usage = { ...earlier }
+  for (const key of Object.keys(later) as Array<keyof Usage>) {
+    const value = later[key]
+    if (value === undefined || (value === 0 && (earlier[key] ?? 0) > 0)) continue
+    merged[key] = value
+  }
+  return merged
+}
+
+/**
  * Speaks the OpenAI Chat Completions wire format against an arbitrary base URL
  * using raw `fetch` + SSE parsing (no SDK). Powers self-hosted / third-party
  * OpenAI-compatible servers (vLLM, LocalAI, Together, Groq, llama.cpp, LM Studio…).
+ *
+ * A model that goes through the Responses API (`apiMode: 'responses'`, or a server that
+ * turned a Chat Completions request away naming /v1/responses) is handed to an
+ * OpenAIProvider on the same host, so there is one Responses implementation.
  */
 export class OpenAICompatProvider extends BaseProvider {
   readonly kind: ProviderKind
@@ -65,6 +86,10 @@ export class OpenAICompatProvider extends BaseProvider {
 
   protected readonly baseUrl: string
   private readonly fetchImpl: typeof fetch
+  /** Models whose server wants the Responses API: all of them when chosen, else those it has turned away so far. */
+  private readonly responsesModels = new Set<string>()
+  private readonly responsesFirst: boolean
+  private responsesProvider: OpenAIProvider | undefined
 
   constructor(
     protected readonly cfg: ProviderConfig,
@@ -82,6 +107,36 @@ export class OpenAICompatProvider extends BaseProvider {
     // Respect declared capability overrides so supports() reflects the server.
     this.setCapabilities(cfg.capabilities ?? DEFAULT_CAPS)
     this.fetchImpl = globalThis.fetch
+    this.responsesFirst = this.responsesCapable && cfg.apiMode === 'responses'
+  }
+
+  /** Azure routes by deployment and has its own wire; it never switches to the Responses API. */
+  private get responsesCapable(): boolean {
+    return this.cfg.apiMode !== 'azure'
+  }
+
+  /** The Responses adapter for this host, built on first use with the same URL, auth, headers and capabilities. */
+  private responses(): OpenAIProvider {
+    if (!this.responsesProvider) {
+      const provider = new OpenAIProvider({ ...this.cfg, kind: 'openai', baseUrl: this.baseUrl, apiMode: 'responses' }, this.secret, {
+        headers: buildAuthHeaders(this.cfg, this.secret),
+        // streamMessage has already checked the effort against what this model takes.
+        effortAsChosen: true
+      })
+      provider.setCapabilities([...this.declaredCapabilities])
+      this.responsesProvider = provider
+    }
+    return this.responsesProvider
+  }
+
+  private async *streamResponses(request: AIRequest, options?: RequestOptions): AsyncIterable<AIStreamEvent> {
+    // The same overall limit a direct caller gets on the Chat Completions path.
+    const { signal, clear } = withTimeout(options?.timeout, options?.signal)
+    try {
+      yield* this.responses().streamMessage(request, { ...options, signal })
+    } finally {
+      clear()
+    }
   }
 
   private headers(extra?: Record<string, string>): Record<string, string> {
@@ -172,9 +227,10 @@ export class OpenAICompatProvider extends BaseProvider {
    * POST the chat request with the extras this host takes. A server that refuses
    * one (a 400 or 422 naming it) is asked again once without it, and the refusal
    * is remembered so later requests to that model skip the failed attempt.
-   * Resolves with an OK response; any other outcome throws.
+   * Resolves with an OK response; any other outcome throws. A server that says the model
+   * needs the Responses API resolves with nothing, and the model is remembered for it.
    */
-  private async open(request: AIRequest, headers: Record<string, string> | undefined, signal: AbortSignal): Promise<Response> {
+  private async open(request: AIRequest, headers: Record<string, string> | undefined, signal: AbortSignal): Promise<Response | undefined> {
     const target = this.chatTarget(request)
     const attempt = async (dialect: ChatDialect) => {
       const body = toChatCompletionsBody(request, { stream: true, maxTokensField: target.maxTokensField, effortAsChosen: true, ...dialect })
@@ -190,6 +246,10 @@ export class OpenAICompatProvider extends BaseProvider {
     const first = await attempt(this.dialects.for(request.model))
     if (first.res.ok) return first.res
     const { error, text } = await this.readError(first.res)
+    if (this.responsesCapable && chatRefusedForResponses(first.res.status, text)) {
+      this.responsesModels.add(request.model)
+      return undefined
+    }
     const refused = chatExtrasRejected(first.res.status, text, chatExtrasSent(first.body))
     if (refused.length === 0) throw error
     this.dialects.refuse(request.model, refused)
@@ -207,14 +267,25 @@ export class OpenAICompatProvider extends BaseProvider {
       ...(known?.reasoningEfforts ? { reasoningEfforts: known.reasoningEfforts } : {})
     })
 
+    if (this.responsesFirst || this.responsesModels.has(request.model)) {
+      yield* this.streamResponses(request, options)
+      return
+    }
+
     const { signal, clear } = withTimeout(options?.timeout, options?.signal)
 
-    let res: Response
+    let res: Response | undefined
     try {
       res = await this.open(request, options?.headers, signal)
     } catch (err) {
       clear()
       throw normalizeUnknownError(this.id, err)
+    }
+    if (!res) {
+      // Nothing has been streamed yet, so the same request can go to the other endpoint.
+      clear()
+      yield* this.streamResponses(request, options)
+      return
     }
 
     try {
@@ -273,7 +344,7 @@ export class OpenAICompatProvider extends BaseProvider {
           }
         }
         const u = mapChatUsage(data.usage ?? choice?.usage)
-        if (u) usage = u
+        if (u) usage = mergeUsage(usage, u)
       }
       for (const event of thinkParser.flush()) yield event
       if (usage) yield { type: 'usage', usage }

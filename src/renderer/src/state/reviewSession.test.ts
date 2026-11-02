@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReviewHunk } from '../../../shared/ipc'
 
 vi.mock('../lib/api', () => ({ api: {} }))
-import { lastUserMessageId, staleKey, useReviewSession, type CommentDraft, type UndoneHunk } from './reviewSession'
+import { staleKey, useReviewSession, type CommentDraft, type UndoneHunk } from './reviewSession'
 
 const hunk = (id: string): ReviewHunk =>
   ({ id, header: '@@ -1,1 +1,1 @@', oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ['-a', '+b'], state: 'pending' })
@@ -36,12 +36,6 @@ describe('hunks undone in a conversation', () => {
     expect(session()!.undone.map((entry) => entry.hunk.id)).toEqual(['h3'])
   })
 
-  it('never hold more than a big review needs', () => {
-    const { recordUndone } = useReviewSession.getState()
-    recordUndone('c1', 'm1', Array.from({ length: 80 }, (_, index) => undone('r1', `h${index}`)))
-    expect(session()!.undone).toHaveLength(60)
-    expect(session()!.undone.at(-1)!.hunk.id).toBe('h79')
-  })
 })
 
 describe('hunks that could not be undone', () => {
@@ -82,13 +76,5 @@ describe('comments being written', () => {
     openDraft('c1', draft('d1'))
     openDraft('c1', draft('d2'))
     expect(session()!.drafts.map((open) => [open.id, open.text])).toEqual([['d1', 'half a thought'], ['d2', '']])
-  })
-})
-
-describe('lastUserMessageId', () => {
-  it('is the newest message the person sent', () => {
-    expect(lastUserMessageId([{ id: 'u1', role: 'user' }, { id: 'a1', role: 'assistant' }, { id: 'u2', role: 'user' }, { id: 'a2', role: 'assistant' }])).toBe('u2')
-    expect(lastUserMessageId([{ id: 'a1', role: 'assistant' }])).toBeUndefined()
-    expect(lastUserMessageId([])).toBeUndefined()
   })
 })

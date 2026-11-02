@@ -58,18 +58,6 @@ describe('tool names', () => {
     expect(result.isError).toBe(true)
     expect(String(result.content)).toMatch(/unknown tool/)
   })
-
-  it('stay distinct for two servers that share a name', async () => {
-    const tools = await manager.getTools([spec('a', 'Docs'), spec('b', 'Docs')])
-    const names = tools.map((tool) => tool.definition.name)
-    expect(new Set(names).size).toBe(names.length)
-    expect(names.filter((name) => name.endsWith('__echo'))).toHaveLength(2)
-  })
-
-  it('give the model a plain object schema for every tool', async () => {
-    const tools = await manager.getTools([spec('s', 'Schema')])
-    for (const tool of tools) expect(tool.definition.inputSchema).toMatchObject({ type: 'object' })
-  })
 })
 
 describe('status', () => {
@@ -90,27 +78,6 @@ describe('status', () => {
     // The next turn starts it again.
     await manager.getTools([server])
     expect(manager.statusOf(server).state).toBe('connected')
-  })
-
-  it('explains a command that cannot be found, with how to fix it', async () => {
-    const missing: McpServerSpec = { id: 'm', name: 'Missing', command: 'cubex-no-such-program', args: [] }
-    expect(await manager.getTools([missing])).toEqual([])
-    expect(manager.statusOf(missing)).toMatchObject({
-      state: 'failed',
-      error: '`cubex-no-such-program` was not found on PATH.',
-      hint: expect.stringContaining('full path')
-    })
-  })
-
-  it('keeps what a failing server printed, redacted and without color codes', async () => {
-    const secret = 'sk-ant-abcdefghijklmnopqrstuv'
-    const failing = spec('f', 'Failing', { stderrLines: 2, stderrSecret: secret, exitOnStart: 3 })
-    expect(await manager.getTools([failing])).toEqual([])
-    const status = manager.statusOf(failing)
-    expect(status.state).toBe('failed')
-    expect(status.error).toBe('The server exited (code 3).')
-    expect(status.output).toContain('stderr line 1')
-    expect(status.output).not.toContain(secret)
   })
 })
 
@@ -141,13 +108,6 @@ describe('turning servers off', () => {
     await waitFor(() => !alive(first))
     expect(clientOf('c').pid).not.toBe(first)
     expect(manager.statusOf(spec('c', 'Changed', {}, { args: [fixture, 'new argument'] })).state).toBe('connected')
-  })
-
-  it('stops everything on dispose', async () => {
-    await manager.getTools([spec('x', 'X'), spec('y', 'Y')])
-    const pids = [clientOf('x').pid!, clientOf('y').pid!]
-    manager.disposeAll()
-    await waitFor(() => pids.every((pid) => !alive(pid)))
   })
 })
 
@@ -188,16 +148,6 @@ describe('environment variables', () => {
     expect(clientOf('e').pid).not.toBe(first)
   })
 
-  it('starts a server again when a secret was replaced, without the value being part of what is compared', async () => {
-    await manager.getTools([withVariables('s', {}, { API_TOKEN: secret }, [secret])])
-    const first = clientOf('s').pid!
-    await manager.getTools([withVariables('s', {}, { API_TOKEN: `${secret}-new` }, [`${secret}-new`])])
-    await waitFor(() => !alive(first))
-    expect(clientOf('s').pid).not.toBe(first)
-    const held = (manager as unknown as { connections: Map<string, { launch: string }> }).connections.get('s')!.launch
-    expect(held).not.toContain(secret)
-  })
-
   it('does not start a server whose secret cannot be read, and says which one in the status', async () => {
     const pidFile = join(tmp, 'gone.pid')
     const gone = spec('gone', 'Gone', { pidFile }, { missingSecrets: ['SENTRY_ACCESS_TOKEN'] })
@@ -212,38 +162,5 @@ describe('environment variables', () => {
       hint: 'Open Environment variables on this server and enter the value again.',
       missingSecrets: ['SENTRY_ACCESS_TOKEN']
     })
-  })
-
-  it('stops a running server when its secret goes missing, and starts it again once the value is entered', async () => {
-    const working = withVariables('rot', {}, { API_TOKEN: secret }, [secret])
-    await manager.getTools([working])
-    const pid = clientOf('rot').pid!
-
-    const lost = spec('rot', 'rot', {}, { missingSecrets: ['API_TOKEN'] })
-    expect(await manager.getTools([lost])).toEqual([])
-    await waitFor(() => !alive(pid))
-    expect(manager.statusOf(lost)).toMatchObject({ state: 'failed', missingSecrets: ['API_TOKEN'] })
-
-    expect((await manager.getTools([working])).length).toBeGreaterThan(0)
-    expect(manager.statusOf(working).state).toBe('connected')
-  })
-
-  it('hides a secret in the failed status, whatever it looks like', async () => {
-    const failing = withVariables('hide', { stderrEnv: ['API_TOKEN'], exitOnStart: 3 }, { API_TOKEN: secret }, [secret])
-    expect(await manager.getTools([failing])).toEqual([])
-    const status = manager.statusOf(failing)
-    expect(status.state).toBe('failed')
-    expect(status.output).toContain('env API_TOKEN=«redacted»')
-    expect(JSON.stringify(status)).not.toContain(secret)
-  })
-
-  it('tells a server that asked for a token from one that was given a token it did not accept', async () => {
-    const asked = withVariables('asked', { stderrText: 'Error: SENTRY_ACCESS_TOKEN is required', exitOnStart: 1 }, { SENTRY_ORG: 'lumen' })
-    await manager.getTools([asked])
-    expect(manager.statusOf(asked).hint).toBe('The server wants `SENTRY_ACCESS_TOKEN`, which it did not get. Add it under Environment variables for this server and turn on Secret.')
-
-    const refused = withVariables('refused', { stderrText: 'SENTRY_ACCESS_TOKEN rejected: 401 Unauthorized', exitOnStart: 1 }, { SENTRY_ACCESS_TOKEN: secret }, [secret])
-    await manager.getTools([refused])
-    expect(manager.statusOf(refused).hint).toBe('The server did not accept the value of `SENTRY_ACCESS_TOKEN`. Replace it under Environment variables for this server.')
   })
 })

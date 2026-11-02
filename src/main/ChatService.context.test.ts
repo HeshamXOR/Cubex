@@ -2,14 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DEFAULT_RETRY_POLICY, NormalizedAIError } from '@core/types'
+import { DEFAULT_RETRY_POLICY } from '@core/types'
 import type { AIProvider, AIRequest, AIStreamEvent, ModelInfo } from '@core/types'
 import type { ChatEvent, ChatStartRequest, ContextUsageSnapshot, StoredMessage } from '@shared/ipc'
 import type { ProviderManager } from './ProviderManager'
 
-const mocks = vi.hoisted(() => ({ dataRoot: '', history: [] as StoredMessage[], boundary: undefined as string | undefined }))
+const mocks = vi.hoisted(() => ({ dataRoot: '', history: [] as StoredMessage[], boundary: undefined as string | undefined, update: vi.fn() }))
 vi.mock('./paths', () => ({ dataDir: () => mocks.dataRoot }))
-vi.mock('./db', () => ({ conversationRepo: { get: () => ({ id: 'task', messages: mocks.history, contextStartMessageId: mocks.boundary }) } }))
+vi.mock('./db', () => ({ conversationRepo: { get: () => ({ id: 'task', messages: mocks.history, contextStartMessageId: mocks.boundary }), update: mocks.update } }))
 vi.mock('./config', () => ({ getSettings: () => ({ general: {}, mcpServers: [], hooks: [] }) }))
 vi.mock('./cost', () => ({ recordUsage: vi.fn() }))
 vi.mock('./logger', () => ({ logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() } }))
@@ -21,6 +21,7 @@ beforeEach(() => {
   mocks.dataRoot = mkdtempSync(join(tmpdir(), 'cubex-context-chat-'))
   mocks.history = []
   mocks.boundary = undefined
+  mocks.update.mockReset()
 })
 afterEach(() => {
   service?.cancelAll()
@@ -147,34 +148,116 @@ describe('ChatService context snapshots', () => {
     expect(context.at(-1)?.estimatedTokens).toBeGreaterThan(context[0]!.estimatedTokens)
     expect(requests.every((req) => req.params?.maxOutputTokens === 2048)).toBe(true)
   })
-
-  it('uses fallback model metadata and output params when the gateway changes targets', async () => {
+  it('ends a turn showing the next request: the prompt the provider measured plus the reply that joins the history', async () => {
     const events: ChatEvent[] = []
-    const primary = provider('primary', async function* () {
-      throw new NormalizedAIError({ provider: 'primary', category: 'RATE_LIMIT_ERROR', classification: 'transient', retryable: true, message: 'Rate limited' })
+    const model = provider('primary', async function* (req) {
+      yield { type: 'start', provider: 'primary', model: req.model }
+      yield { type: 'text_delta', text: 'The answer is 42.' }
+      yield { type: 'usage', usage: { inputTokens: 5_000, outputTokens: 12, cachedInputTokens: 4_000 } }
+      yield { type: 'stop', stopReason: 'stop' }
     })
-    const fallback = provider('backup', async function* (req) {
-      expect(req.params?.maxOutputTokens).toBe(8192)
-      expect(snapshots(events).at(-1)).toMatchObject({ provider: 'backup', model: 'second', contextWindow: 64_000, outputReserve: 8192 })
-      yield { type: 'usage', usage: { inputTokens: 777, outputTokens: 2 } }
-      yield { type: 'text_delta', text: 'Done.' }
-    })
-    service = new ChatService(manager([primary, fallback], { 'primary/first': { contextWindow: 32_000 }, 'backup/second': { contextWindow: 64_000 } }), (event) => { events.push(event) })
-    const req = request()
-    req.policy.fallbackEnabled = true
-    req.policy.fallbacks = [{ providerId: 'backup', model: 'second', params: { maxOutputTokens: 8192 } }]
-    await service.start(req)
+    service = new ChatService(manager([model], { 'primary/first': { contextWindow: 32_000 } }), (event) => { events.push(event) })
+    await service.start(request())
     await finished(events)
-    expect(snapshots(events).at(-1)).toMatchObject({ provider: 'backup', model: 'second', measuredInputTokens: 777, outputReserve: 8192 })
+    const last = snapshots(events).at(-1)!
+    // 5,000 is the whole prompt: the cached 4,000 are inside it, not on top of it.
+    expect(last).toMatchObject({ contextBasis: 'anchored', anchorTokens: 5_000, measuredInputTokens: 5_000 })
+    expect(last.appendedTokens).toBeGreaterThan(0)
+    expect(last.appendedTokens).toBeLessThan(40)
+    expect(last.contextTokens).toBe(5_000 + last.appendedTokens!)
+    expect(last.sections.find((row) => row.id === 'conversation')?.count).toBe(2)
   })
 
-  it.each([false, true])('reflects whether the gated long context window is enabled (%s)', async (longContext) => {
+  it('keeps the snapshot a turn ended on with the task, once, and not the ones along the way', async () => {
     const events: ChatEvent[] = []
-    const model = provider('primary', async function* () { yield { type: 'text_delta', text: 'Done.' } })
-    service = new ChatService(manager([model], { 'primary/first': { contextWindow: 1_000_000, longContextBeta: true } }), (event) => { events.push(event) })
-    await service.start({ ...request(), longContext })
+    const requests: AIRequest[] = []
+    const model = provider('primary', async function* (req) {
+      requests.push(structuredClone(req))
+      yield { type: 'start', provider: 'primary', model: req.model }
+      if (requests.length === 1) {
+        yield { type: 'tool_call', toolCall: { id: 'todo', name: 'todo_write', input: { todos: [{ content: 'Inspect', status: 'completed' }] } } }
+        yield { type: 'usage', usage: { inputTokens: 101, outputTokens: 30 } }
+        yield { type: 'stop', stopReason: 'tool_use' }
+      } else {
+        yield { type: 'text_delta', text: 'Done.' }
+        yield { type: 'usage', usage: { inputTokens: 205, outputTokens: 5 } }
+        yield { type: 'stop', stopReason: 'stop' }
+      }
+    })
+    service = new ChatService(manager([model], { 'primary/first': { contextWindow: 32_000 } }), (event) => { events.push(event) })
+    await service.start({ ...request(), fileToolsEnabled: true })
     await finished(events)
-    expect(snapshots(events).at(-1)?.contextWindow).toBe(longContext ? 1_000_000 : 200_000)
-    expect(snapshots(events).at(-1)?.measuredInputTokens).toBeUndefined()
+    await vi.waitFor(() => expect(mocks.update).toHaveBeenCalled())
+    expect(snapshots(events).length).toBeGreaterThan(2)
+    expect(mocks.update).toHaveBeenCalledTimes(1)
+    expect(mocks.update).toHaveBeenCalledWith('task', { lastContext: snapshots(events).at(-1) })
+    expect(snapshots(events).at(-1)).toMatchObject({ measuredInputTokens: 205, model: 'first' })
+  })
+
+  it('anchors each request on its own measurement and never on a sum across the tool loop', async () => {
+    const events: ChatEvent[] = []
+    const requests: AIRequest[] = []
+    const model = provider('primary', async function* (req) {
+      requests.push(structuredClone(req))
+      yield { type: 'start', provider: 'primary', model: req.model }
+      if (requests.length < 3) {
+        yield { type: 'tool_call', toolCall: { id: `todo-${requests.length}`, name: 'todo_write', input: { todos: [{ content: 'Inspect', status: 'completed' }] } } }
+        yield { type: 'usage', usage: { inputTokens: requests.length === 1 ? 20_000 : 21_000, outputTokens: 300 } }
+        yield { type: 'stop', stopReason: 'tool_use' }
+      } else {
+        yield { type: 'text_delta', text: 'Done.' }
+        yield { type: 'usage', usage: { inputTokens: 22_000, outputTokens: 5 } }
+        yield { type: 'stop', stopReason: 'stop' }
+      }
+    })
+    service = new ChatService(manager([model], { 'primary/first': { contextWindow: 200_000 } }), (event) => { events.push(event) })
+    await service.start({ ...request(), fileToolsEnabled: true })
+    await finished(events)
+    expect(requests).toHaveLength(3)
+    const anchored = snapshots(events).filter((row) => row.contextBasis === 'anchored')
+    expect([...new Set(anchored.map((row) => row.anchorTokens))]).toEqual([20_000, 21_000, 22_000])
+    for (const row of anchored) expect(row.contextTokens).toBeLessThan(row.anchorTokens! + 1_500)
+    expect(snapshots(events).at(-1)!.contextTokens).toBeLessThan(22_100)
+  })
+
+  it('does not count thinking that the next request will not carry', async () => {
+    const events: ChatEvent[] = []
+    const requests: AIRequest[] = []
+    const model = provider('primary', async function* (req) {
+      requests.push(structuredClone(req))
+      yield { type: 'start', provider: 'primary', model: req.model }
+      if (requests.length === 1) {
+        // 60,000 characters of unsigned thinking: display-only, so it is not sent and takes no room.
+        yield { type: 'reasoning_delta', text: 'Weighing the options carefully. '.repeat(1_900) }
+        yield { type: 'tool_call', toolCall: { id: 'todo', name: 'todo_write', input: { todos: [{ content: 'Inspect', status: 'completed' }] } } }
+        yield { type: 'usage', usage: { inputTokens: 8_000, outputTokens: 15_000, reasoningTokens: 14_900 } }
+        yield { type: 'stop', stopReason: 'tool_use' }
+      } else {
+        yield { type: 'text_delta', text: 'Done.' }
+        yield { type: 'usage', usage: { inputTokens: 8_200, outputTokens: 5 } }
+        yield { type: 'stop', stopReason: 'stop' }
+      }
+    })
+    service = new ChatService(manager([model], { 'primary/first': { contextWindow: 200_000 } }), (event) => { events.push(event) })
+    await service.start({ ...request(), fileToolsEnabled: true })
+    await finished(events)
+    expect(requests[1]?.messages.some((message) => message.content.some((part) => part.type === 'reasoning'))).toBe(true)
+    const beforeSecond = snapshots(events).filter((row) => row.anchorTokens === 8_000)
+    expect(beforeSecond.length).toBeGreaterThan(0)
+    for (const row of beforeSecond) expect(row.contextTokens).toBeLessThan(8_000 + 1_000)
+  })
+
+  it('sizes the window for a gated 1M model by whether the switch is on', async () => {
+    const run = async (longContext: boolean): Promise<ContextUsageSnapshot | undefined> => {
+      const events: ChatEvent[] = []
+      const model = provider('primary', async function* () { yield { type: 'text_delta', text: 'Done.' } })
+      service = new ChatService(manager([model], { 'primary/first': { contextWindow: 1_000_000, longContextBeta: true } }), (event) => { events.push(event) })
+      await service.start({ ...request(), ...(longContext ? { longContext: true } : {}) })
+      await finished(events)
+      service.dispose()
+      return snapshots(events).at(-1)
+    }
+    expect((await run(false))?.contextWindow).toBe(200_000)
+    expect((await run(true))?.contextWindow).toBe(1_000_000)
   })
 })

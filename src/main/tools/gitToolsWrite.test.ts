@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { cpSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { cpSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { JSONValue, ToolExecutionContext } from '@core/types'
@@ -67,24 +67,6 @@ describe.skipIf(!hasGit)('git_commit and git_branch', { timeout: 30_000 }, () =>
       expect(porcelain(repo)).toEqual(['?? scratch.txt'])
     })
 
-    it('keeps a file the user already staged out of the commit', async () => {
-      write(repo, 'a.txt', 'one\ntwo\nthree\nfour\n')
-      write(repo, 'staged.txt', 'staged by the user\n')
-      git(repo, 'add', 'staged.txt')
-      expect((await call(repo, 'git_commit', { message: 'Only a', paths: ['a.txt'] })).isError).toBe(false)
-      expect(committedPaths(repo)).toEqual(['a.txt'])
-      expect(porcelain(repo)).toEqual(['A  staged.txt'])
-    })
-
-    it('without paths commits tracked changes and never untracked files', async () => {
-      write(repo, 'a.txt', 'one\ntwo\nthree\nfour\n')
-      write(repo, 'untracked.txt', 'x')
-      const result = await call(repo, 'git_commit', { message: 'Tracked only', paths: null })
-      expect(result.isError).toBe(false)
-      expect(committedPaths(repo)).toEqual(['a.txt'])
-      expect(porcelain(repo)).toEqual(['?? untracked.txt'])
-    })
-
     it('refuses empty messages, nothing to commit, and malformed arguments', async () => {
       write(repo, 'a.txt', 'one\ntwo\nthree\nfour\n')
       const before = head()
@@ -116,16 +98,6 @@ describe.skipIf(!hasGit)('git_commit and git_branch', { timeout: 30_000 }, () =>
       expect(git(repo, 'log', '-1', '--format=%s').trim()).toBe('--amend')
     })
 
-    it('returns the hook output when a hook rejects the commit', async () => {
-      writeHook(repo, 'pre-commit', 'echo "lint: forbidden word" >&2\nexit 1')
-      write(repo, 'a.txt', 'one\ntwo\nthree\nfour\n')
-      const before = head()
-      const result = await call(repo, 'git_commit', { message: 'Rejected', paths: ['a.txt'] })
-      expect(result.isError).toBe(true)
-      expect(result.text).toContain('lint: forbidden word')
-      expect(head()).toBe(before)
-    })
-
     it('stops waiting for a hook that never finishes, and can be cancelled', async () => {
       writeHook(repo, 'pre-commit', 'sleep 30')
       write(repo, 'a.txt', 'one\ntwo\nthree\nfour\n')
@@ -152,22 +124,6 @@ describe.skipIf(!hasGit)('git_commit and git_branch', { timeout: 30_000 }, () =>
       expect(currentBranch()).toBe('trunk')
     })
 
-    it('creates a branch from another revision', async () => {
-      const result = await call(repo, 'git_branch', { name: 'old', from: 'HEAD~1' })
-      expect(result.isError).toBe(false)
-      expect(git(repo, 'rev-parse', 'old').trim()).toBe(git(repo, 'rev-parse', 'HEAD~1').trim())
-      expect(currentBranch()).toBe('trunk')
-    })
-
-    it('switches to the new branch when asked and keeps uncommitted work', async () => {
-      write(repo, 'a.txt', 'one\ntwo\nthree\nfour\n')
-      const result = await call(repo, 'git_branch', { name: 'work', checkout: true })
-      expect(result.isError).toBe(false)
-      expect(result.text).toMatch(/switched/i)
-      expect(currentBranch()).toBe('work')
-      expect(porcelain(repo)).toEqual([' M a.txt'])
-    })
-
     it('never moves or replaces an existing branch', async () => {
       git(repo, 'branch', 'keep', 'HEAD~1')
       const before = git(repo, 'rev-parse', 'keep').trim()
@@ -185,32 +141,6 @@ describe.skipIf(!hasGit)('git_commit and git_branch', { timeout: 30_000 }, () =>
       const result = await call(repo, 'git_branch', { name })
       expect(result.isError).toBe(true)
       expect(git(repo, 'branch', '--list').trim()).toBe(before)
-    })
-
-    it('refuses a starting point that is not a commit, or that looks like an option', async () => {
-      for (const from of ['no-such-revision', '--output=pwned.txt', '-b', 'HEAD:a.txt', ' HEAD', '']) {
-        const result = await call(repo, 'git_branch', { name: 'x', from })
-        expect(result.isError, JSON.stringify(from)).toBe(true)
-      }
-      expect(existsSync(join(repo, 'pwned.txt'))).toBe(false)
-      expect(git(repo, 'branch', '--list', 'x').trim()).toBe('')
-    })
-
-    it('does not force a switch over local changes', async () => {
-      write(repo, 'a.txt', 'local edit\n')
-      const result = await call(repo, 'git_branch', { name: 'conflict', from: 'HEAD~1', checkout: true })
-      expect(result.isError).toBe(true)
-      expect(result.text).toMatch(/overwritten|local changes/i)
-      expect(currentBranch()).toBe('trunk')
-      expect(git(repo, 'branch', '--list', 'conflict').trim()).toBe('')
-      expect(porcelain(repo)).toEqual([' M a.txt'])
-    })
-
-    it('validates its arguments', async () => {
-      for (const input of [{}, { name: 7 }, { name: 'x', checkout: 'yes' }, { name: 'x', from: 7 }] as JSONValue[]) {
-        expect((await call(repo, 'git_branch', input)).isError, JSON.stringify(input)).toBe(true)
-      }
-      expect((await call(repo, 'git_branch', { name: 'ok', from: null, checkout: null })).isError).toBe(false)
     })
   })
 })

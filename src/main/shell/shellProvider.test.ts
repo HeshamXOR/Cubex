@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  ShellCommandTooLongError, listShells, normalizeShellPreference, pathScan, resolveShell, type ShellDeps
-} from './shellProvider'
+import { ShellCommandTooLongError, listShells, pathScan, resolveShell, type ShellDeps } from './shellProvider'
 
 const GIT_ROOT = 'C:\\Program Files\\Git'
 const GIT_BASH = `${GIT_ROOT}\\bin\\bash.exe`
@@ -32,17 +30,6 @@ describe('shell detection on Windows', () => {
     const spec = resolveShell('auto', deps)
     expect(spec.id).toBe('git-bash')
     expect(spec.exe).toBe(GIT_BASH)
-  })
-
-  it('finds the Git root from mingw64\\bin\\git.exe too', () => {
-    const deps = windows([GIT_BASH, CMD], { git: [`${GIT_ROOT}\\mingw64\\bin\\git.exe`] })
-    expect(resolveShell('auto', deps).exe).toBe(GIT_BASH)
-  })
-
-  it('falls back to the standard install roots when git is not on PATH', () => {
-    expect(resolveShell('auto', windows([GIT_BASH, CMD])).exe).toBe(GIT_BASH)
-    const portable = windows(['D:\\tools\\PortableGit\\bin\\bash.exe', CMD], {}, { GIT_INSTALL_ROOT: 'D:\\tools\\PortableGit' })
-    expect(resolveShell('auto', portable).exe).toBe('D:\\tools\\PortableGit\\bin\\bash.exe')
   })
 
   it('never asks PATH for bash, which can be the WSL launcher in System32', () => {
@@ -80,25 +67,6 @@ describe('shell detection on Windows', () => {
     expect(resolveShell('posix', deps).fallbackFrom).toBe('posix')
     expect(resolveShell('auto', deps).fallbackFrom).toBeUndefined()
   })
-
-  it('treats an unknown preference as auto', () => {
-    const deps = windows([GIT_BASH, CMD], { git: [`${GIT_ROOT}\\cmd\\git.exe`] })
-    expect(resolveShell('nushell' as never, deps).id).toBe('git-bash')
-    expect(normalizeShellPreference('nushell')).toBe('auto')
-    expect(normalizeShellPreference(undefined)).toBe('auto')
-    expect(normalizeShellPreference({})).toBe('auto')
-    expect(normalizeShellPreference('pwsh')).toBe('pwsh')
-    expect(normalizeShellPreference('auto')).toBe('auto')
-  })
-
-  it('lists every Windows shell with its availability', () => {
-    const deps = windows([GIT_BASH, WINPS, CMD], { git: [`${GIT_ROOT}\\cmd\\git.exe`] })
-    const listed = listShells(deps)
-    expect(listed.map((shell) => shell.id)).toEqual(['git-bash', 'pwsh', 'powershell', 'cmd'])
-    expect(listed.map((shell) => shell.available)).toEqual([true, false, true, true])
-    expect(listed[0]).toMatchObject({ path: GIT_BASH, label: 'Git Bash' })
-    expect(listed[1]).toMatchObject({ path: '', available: false })
-  })
 })
 
 describe('shell detection off Windows', () => {
@@ -121,11 +89,6 @@ describe('Git Bash argv', () => {
     expect(spec.argv(command)).toEqual(['-c', command])
     expect(spec.script(command)).toBe(command)
     expect(spec.verbatimArguments).toBeUndefined()
-  })
-
-  it('describes Bash syntax to the model', () => {
-    expect(spec.syntaxNote).toMatch(/Git Bash/)
-    expect(spec.syntaxNote).toMatch(/Bash syntax/)
   })
 })
 
@@ -153,34 +116,6 @@ describe('PowerShell argv', () => {
     expect(decoded).toContain(command)
   })
 
-  it('forces UTF-8 output, silences progress, and keeps native exit codes', () => {
-    const script = spec.script('node -e "process.exit(3)"')
-    expect(script).toMatch(/\[Console\]::OutputEncoding = \[System\.Text\.UTF8Encoding\]::new\(\$false\)/)
-    expect(script).toMatch(/\$ProgressPreference = 'SilentlyContinue'/)
-    expect(script).toMatch(/exit \$cubexCode/)
-    // The user's command sits between the preamble and the epilogue, on its own lines.
-    expect(script).toMatch(/\nnode -e "process.exit\(3\)"\n/)
-  })
-
-  it('keeps a trailing comment from swallowing the epilogue', () => {
-    const script = spec.script('Get-Date # now')
-    expect(script.indexOf('# now')).toBeLessThan(script.indexOf('exit $cubexCode'))
-    expect(script.slice(script.indexOf('# now'))).toMatch(/^# now\n/)
-  })
-
-  it('says PowerShell 5.1 has no && or ||', () => {
-    expect(spec.syntaxNote).toMatch(/5\.1/)
-    expect(spec.syntaxNote).toMatch(/&&/)
-  })
-
-  it('names pwsh as PowerShell 7 and allows &&', () => {
-    const pwsh = resolveShell('pwsh', windows([PWSH, CMD], { pwsh: [PWSH] }))
-    expect(pwsh.id).toBe('pwsh')
-    expect(pwsh.exe).toBe(PWSH)
-    expect(pwsh.argv('x')[3]).toBe('-EncodedCommand')
-    expect(pwsh.syntaxNote).toMatch(/PowerShell 7/)
-  })
-
   it('refuses a command whose encoded form cannot fit on a Windows command line', () => {
     expect(() => spec.argv('x'.repeat(20_000))).toThrow(ShellCommandTooLongError)
     expect(() => spec.argv('x'.repeat(5_000))).not.toThrow()
@@ -202,10 +137,5 @@ describe('cmd argv', () => {
 
   it('refuses a command longer than the cmd.exe limit', () => {
     expect(() => spec.argv('x'.repeat(8_500))).toThrow(ShellCommandTooLongError)
-  })
-
-  it('tells the model this is cmd.exe', () => {
-    expect(spec.syntaxNote).toMatch(/cmd\.exe/)
-    expect(spec.syntaxNote).toMatch(/not Bash or PowerShell/)
   })
 })

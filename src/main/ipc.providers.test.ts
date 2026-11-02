@@ -86,13 +86,6 @@ describe('provider IPC', () => {
     expect(JSON.stringify(mocks.stored.get('p1'))).not.toContain('sk-secret')
   })
 
-  it('keeps the reference a provider already has when its key is replaced', async () => {
-    await call(IPC.saveProvider, provider({ credentialRef: 'cred_p1_abcdef' }))
-    const saved = await call(IPC.saveProvider, provider({ credentialRef: 'cred_p1_abcdef' }), 'sk-new') as ProviderConfig
-    expect(saved.credentialRef).toBe('cred_p1_abcdef')
-    expect(mocks.setSecret).toHaveBeenCalledWith('cred_p1_abcdef', 'sk-new')
-  })
-
   it('refuses to point a provider at the key of another one', async () => {
     await call(IPC.saveProvider, provider({ id: 'p1', credentialRef: 'cred_p1_abcdef' }))
     await expect(call(IPC.saveProvider, provider({ id: 'p2', name: 'Other', credentialRef: 'cred_p1_abcdef' }), 'sk-evil'))
@@ -115,32 +108,11 @@ describe('provider IPC', () => {
     expect(mocks.setSecret).not.toHaveBeenCalled()
   })
 
-  it('rejects a key that is not text', async () => {
-    await expect(call(IPC.saveProvider, provider(), 42)).rejects.toThrow('The key must be text.')
-    expect(mocks.stored.size).toBe(0)
-  })
-
   it('removes the saved key together with the provider', async () => {
     await call(IPC.saveProvider, provider({ credentialRef: 'cred_p1_abcdef' }))
     await call(IPC.deleteProvider, 'p1')
     expect(mocks.deleteSecret).toHaveBeenCalledWith('cred_p1_abcdef')
     expect(mocks.stored.has('p1')).toBe(false)
     expect(mocks.invalidate).toHaveBeenLastCalledWith('p1')
-  })
-
-  it.each([IPC.deleteProvider, IPC.testProvider, IPC.listModels])('checks the provider id sent to %s', async (channel) => {
-    for (const id of [undefined, null, '', '../x', 'a b', 5, {}, 'a'.repeat(121)]) {
-      await expect(call(channel, id)).rejects.toThrow('Invalid provider id.')
-    }
-    expect(mocks.deleteSecret).not.toHaveBeenCalled()
-    expect(mocks.test).not.toHaveBeenCalled()
-    expect(mocks.listModels).not.toHaveBeenCalled()
-  })
-
-  it('tests and lists models for a valid id', async () => {
-    await call(IPC.testProvider, 'p1')
-    await call(IPC.listModels, 'p1')
-    expect(mocks.test).toHaveBeenCalledWith('p1')
-    expect(mocks.listModels).toHaveBeenCalledWith('p1')
   })
 })

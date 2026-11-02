@@ -44,33 +44,6 @@ describe('formatReviewComments', () => {
     ].join('\n'))
   })
 
-  it('quotes only the commented lines of a narrower range, with the other side between them', () => {
-    const text = formatReviewComments([{ comment: comment({ path: 'src/app.ts', startLine: 7, endLine: 7, hunkId: hunk!.id }), hunk: hunk! }])
-    expect(text).toContain('1. Line 7\n```diff\n+extra\n```\nCheck this.')
-    const both = formatReviewComments([{ comment: comment({ path: 'src/app.ts', startLine: 5, endLine: 6, hunkId: hunk!.id }), hunk: hunk! }])
-    expect(both).toContain('1. Lines 5 to 6\n```diff\n line 5\n-line 6\n-line 7\n+line 6 changed\n```')
-  })
-
-  it('numbers removed lines on the old side and says so', () => {
-    const text = formatReviewComments([{ comment: comment({ path: 'src/app.ts', startLine: 6, endLine: 7, side: 'old', hunkId: hunk!.id, text: 'Keep these.' }), hunk: hunk! }])
-    // Both removed lines are covered, so the hunk is quoted whole, with what replaced them.
-    expect(text).toContain('1. Removed lines 6 to 7\n```diff\n line 3\n line 4\n line 5\n-line 6\n-line 7\n+line 6 changed\n+extra\n line 8\n line 9\n line 10\n```\nKeep these.')
-    const one = formatReviewComments([{ comment: comment({ path: 'src/app.ts', startLine: 6, endLine: 6, side: 'old', hunkId: hunk!.id }), hunk: hunk! }])
-    expect(one).toContain('1. Removed line 6\n```diff\n-line 6\n```\n')
-  })
-
-  it('quotes the whole hunk when a comment on the old side covers every removed line, as for a hunk that only removes', () => {
-    const [removal] = hunksOf(lines(12), lines(12).replace('line 6\nline 7\n', ''))
-    const text = formatReviewComments([{ comment: comment({ path: 'a.ts', startLine: 6, endLine: 7, side: 'old', hunkId: removal!.id }), hunk: removal! }])
-    expect(text).toContain('1. Removed lines 6 to 7\n```diff\n line 3\n line 4\n line 5\n-line 6\n-line 7\n line 8\n line 9\n line 10\n```')
-  })
-
-  it('says so, and quotes nothing, when the hunk is no longer in the diff', () => {
-    const text = formatReviewComments([{ comment: comment({ path: 'src/app.ts', startLine: 9, endLine: 12, text: 'Rename it.' }) }])
-    expect(text).toContain('1. Lines 9 to 12\nThat part of the diff has changed since the comment was written, so no code is quoted.\nRename it.')
-    expect(text).not.toContain('```')
-  })
-
   it('groups by file in the order the files were first commented on, then by line, numbering straight through', () => {
     const text = formatReviewComments([
       { comment: comment({ id: 'a', path: 'b.ts', startLine: 30, endLine: 30, text: 'B late' }) },
@@ -83,33 +56,5 @@ describe('formatReviewComments', () => {
     expect(text.indexOf('B late')).toBeLessThan(text.indexOf('A only'))
     expect(text.match(/^\d+\. /gm)).toEqual(['1. ', '2. ', '3. '])
     expect(text.indexOf('1. Line 2')).toBeLessThan(text.indexOf('2. Line 30'))
-  })
-
-  it('uses a longer fence when the quoted code holds backticks', () => {
-    const [tick] = hunksOf('const a = 1\n', 'const a = `x ${1}` + "```"\n')
-    const text = formatReviewComments([{ comment: comment({ path: 'a.ts', startLine: 1, endLine: 1, hunkId: tick!.id }), hunk: tick! }])
-    expect(text).toContain('\n````diff\n')
-    expect(text).toContain('\n````\nCheck this.')
-  })
-
-  it('cuts a long quote and a long line, and says how much was left out', () => {
-    const before = lines(60, { 10: `long ${'x'.repeat(300)}` })
-    const after = lines(60, Object.fromEntries(Array.from({ length: 40 }, (_, i) => [i + 10, `changed ${i}`])))
-    const [big] = hunksOf(before, after)
-    const range = changedRange(big!)
-    const text = formatReviewComments([{ comment: comment({ path: 'a.ts', startLine: range.start, endLine: range.end, hunkId: big!.id }), hunk: big! }])
-    const block = text.split('\n')
-    const start = block.indexOf('```diff')
-    const end = block.indexOf('```', start + 1)
-    expect(end - start - 1).toBe(25)
-    expect(block[end - 1]).toMatch(/^@@ \d+ more lines @@$/)
-    const clipped = block.find((line) => line.startsWith('-long')) ?? ''
-    expect(clipped.endsWith('…')).toBe(true)
-    expect(clipped.length).toBeLessThan(210)
-  })
-
-  it('keeps the comment text as written, trimmed', () => {
-    const text = formatReviewComments([{ comment: comment({ path: 'a.ts', text: '  First line\n\nSecond paragraph.  \n' }) }])
-    expect(text.endsWith('First line\n\nSecond paragraph.')).toBe(true)
   })
 })

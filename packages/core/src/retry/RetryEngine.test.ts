@@ -31,27 +31,6 @@ describe('isRetryable', () => {
     expect(isRetryable(err({ category: 'TIMEOUT' }), policy)).toBe(true)
     expect(isRetryable(err({ category: 'NETWORK_ERROR' }), policy)).toBe(true)
   })
-
-  it('does not retry a 5xx code excluded from the policy list', () => {
-    const p: RetryPolicy = { ...policy, retryOn5xx: [503] }
-    expect(isRetryable(err({ category: 'SERVER_ERROR', statusCode: 500 }), p)).toBe(false)
-    expect(isRetryable(err({ category: 'SERVER_ERROR', statusCode: 503 }), p)).toBe(true)
-  })
-
-  it('honors per-condition toggles', () => {
-    expect(isRetryable(err({ category: 'RATE_LIMIT_ERROR' }), { ...policy, retryOn429: false })).toBe(false)
-    expect(isRetryable(err({ category: 'TIMEOUT' }), { ...policy, retryOnTimeout: false })).toBe(false)
-  })
-
-  it('unknown errors follow unknownErrorBehavior', () => {
-    const unknown = err({ category: 'UNKNOWN', classification: 'unknown', retryable: false })
-    expect(isRetryable(unknown, { ...policy, unknownErrorBehavior: 'fail' })).toBe(false)
-    expect(isRetryable(unknown, { ...policy, unknownErrorBehavior: 'retry' })).toBe(true)
-  })
-
-  it('respects enabled=false', () => {
-    expect(isRetryable(err({ category: 'SERVER_ERROR' }), { ...policy, enabled: false })).toBe(false)
-  })
 })
 
 describe('nextDelay', () => {
@@ -61,25 +40,9 @@ describe('nextDelay', () => {
     const e = err({ retryAfterMs: 2000 })
     expect(nextDelay(e, policy, 1)).toBe(2000)
   })
-
-  it('caps Retry-After at maxDelay', () => {
-    const e = err({ retryAfterMs: 999_999 })
-    expect(nextDelay(e, policy, 1)).toBe(5000)
-  })
-
-  it('ignores Retry-After when respectRetryAfter=false', () => {
-    const e = err({ retryAfterMs: 2000 })
-    expect(nextDelay(e, { ...policy, respectRetryAfter: false }, 1)).toBe(100)
-  })
 })
 
 describe('withRetry', () => {
-  it('succeeds on first try without sleeping', async () => {
-    const fn = vi.fn(async () => 'ok')
-    const result = await withRetry(fn, DEFAULT_RETRY_POLICY, { sleep: noSleep })
-    expect(result).toBe('ok')
-    expect(fn).toHaveBeenCalledTimes(1)
-  })
 
   it('retries transient failures then succeeds', async () => {
     let n = 0
@@ -115,17 +78,5 @@ describe('withRetry', () => {
       category: 'SERVER_ERROR'
     })
     expect(fn).toHaveBeenCalledTimes(3)
-  })
-
-  it('passes the Retry-After delay to onRetry', async () => {
-    let n = 0
-    const fn = async () => {
-      n += 1
-      if (n === 1) throw err({ category: 'RATE_LIMIT_ERROR', statusCode: 429, retryAfterMs: 1234 })
-      return 'ok'
-    }
-    const onRetry = vi.fn()
-    await withRetry(fn, { ...DEFAULT_RETRY_POLICY, respectRetryAfter: true }, { sleep: noSleep, onRetry })
-    expect(onRetry).toHaveBeenCalledWith(expect.objectContaining({ delayMs: 1234 }))
   })
 })

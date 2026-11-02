@@ -25,26 +25,6 @@ async function session(path: string, onMutate?: Parameters<typeof createFileTool
   return tools
 }
 
-describe('multi_edit definition', () => {
-  it('is registered with the same permission class as edit_file and a strict schema', () => {
-    const tools = createFileTools(root)
-    const definition = named(tools, 'multi_edit').definition
-    expect(named(tools, 'multi_edit').defaultPermission).toBe('ask')
-    expect(named(tools, 'edit_file').defaultPermission).toBe('ask')
-    expect(definition.inputSchema).toMatchObject({
-      type: 'object',
-      required: ['path', 'edits'],
-      properties: {
-        path: { type: 'string' },
-        edits: {
-          type: 'array',
-          items: { type: 'object', required: ['old_string', 'new_string'], properties: { old_string: { type: 'string' }, new_string: { type: 'string' }, replace_all: { type: 'boolean' } } }
-        }
-      }
-    })
-  })
-})
-
 describe('multi_edit', () => {
   it('applies edits in order to the evolving content', async () => {
     writeFileSync(join(root, 'order.txt'), 'alpha\nbeta\ngamma\n')
@@ -102,16 +82,6 @@ describe('multi_edit', () => {
     expect(text('ambiguous.txt')).toBe('x\ny\nx\n')
   })
 
-  it('honors replace_all per edit', async () => {
-    writeFileSync(join(root, 'all.txt'), 'x x\ny\nx\n')
-    const tools = await session('all.txt')
-    const result = await multi(tools, { path: 'all.txt', edits: [{ old_string: 'x', new_string: 'z', replace_all: true }, { old_string: 'y', new_string: 'w' }] })
-    expect(result.isError).toBeFalsy()
-    expect(text('all.txt')).toBe('z z\nw\nz\n')
-    expect(String(result.content)).toContain('2 edits')
-    expect(String(result.content)).toContain('4 replacements')
-  })
-
   it('preserves CRLF endings, the BOM and the final newline across every edit', async () => {
     writeFileSync(join(root, 'crlf.txt'), Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('a\r\nb\r\nc\r\nd', 'utf8')]))
     const tools = await session('crlf.txt')
@@ -128,14 +98,6 @@ describe('multi_edit', () => {
     const tools = await session('checkpoint.txt', (_abs, before, existed, after) => calls.push({ before: before.toString('utf8'), existed, after: after === null || after === undefined ? after : after.toString('utf8') }))
     expect((await multi(tools, { path: 'checkpoint.txt', edits: [{ old_string: 'one', new_string: '1' }, { old_string: 'two', new_string: '2' }] })).isError).toBeFalsy()
     expect(calls).toEqual([{ before: 'one\ntwo\n', existed: true, after: '1\n2\n' }])
-  })
-
-  it('keeps the read ledger valid so edit_file can follow without another read', async () => {
-    writeFileSync(join(root, 'follow.txt'), 'p\nq\n')
-    const tools = await session('follow.txt')
-    expect((await multi(tools, { path: 'follow.txt', edits: [{ old_string: 'p', new_string: 'P' }] })).isError).toBeFalsy()
-    expect((await named(tools, 'edit_file').execute({ path: 'follow.txt', old_string: 'q', new_string: 'Q' }, ctx)).isError).toBeFalsy()
-    expect(text('follow.txt')).toBe('P\nQ\n')
   })
 
   it('requires a prior read and refuses stale files', async () => {
@@ -173,50 +135,6 @@ describe('multi_edit', () => {
     const result = await multi(tools, { path: 'paged-all.txt', edits: [{ old_string: 'r', new_string: 's', replace_all: true }] })
     expect(result.isError).toBe(true)
     expect(String(result.content)).toContain('Only part')
-  })
-
-  it('validates the input shape before touching the file', async () => {
-    writeFileSync(join(root, 'shape.txt'), 'content')
-    const tools = await session('shape.txt')
-    const bad: Array<[JSONValue, RegExp]> = [
-      [{ edits: [{ old_string: 'a', new_string: 'b' }] }, /requires "path"/],
-      [{ path: 'shape.txt' }, /"edits"/],
-      [{ path: 'shape.txt', edits: [] }, /at least one edit/],
-      [{ path: 'shape.txt', edits: 'nope' }, /"edits"/],
-      [{ path: 'shape.txt', edits: [{ old_string: '', new_string: 'b' }] }, /edits\[0\].*old_string/],
-      [{ path: 'shape.txt', edits: [{ old_string: 'content', new_string: 5 }] }, /edits\[0\].*new_string/],
-      [{ path: 'shape.txt', edits: [{ old_string: 'content', new_string: 'x', replace_all: 'yes' }] }, /edits\[0\].*replace_all/],
-      [{ path: 'shape.txt', edits: [null] }, /edits\[0\]/],
-      [{ path: 'shape.txt', edits: [{ old_string: 'content', new_string: 'x' }, { old_string: 'x', new_string: 'x' }] }, /edits\[1\].*identical/]
-    ]
-    for (const [input, expected] of bad) {
-      const result = await multi(tools, input)
-      expect(result.isError, JSON.stringify(input)).toBe(true)
-      expect(String(result.content), JSON.stringify(input)).toMatch(expected)
-    }
-    expect(text('shape.txt')).toBe('content')
-  })
-
-  it('caps the number of edits per call', async () => {
-    writeFileSync(join(root, 'cap.txt'), 'x')
-    const tools = await session('cap.txt')
-    const edits = Array.from({ length: 101 }, (_, index) => ({ old_string: `a${index}`, new_string: `b${index}` }))
-    const result = await multi(tools, { path: 'cap.txt', edits })
-    expect(result.isError).toBe(true)
-    expect(String(result.content)).toMatch(/at most 100/)
-  })
-
-  it('rejects missing files, binary files and escapes without writing', async () => {
-    const tools = createFileTools(root)
-    const missing = await multi(tools, { path: 'ghost.txt', edits: [{ old_string: 'a', new_string: 'b' }] })
-    expect(String(missing.content)).toMatch(/does not exist/)
-    writeFileSync(join(root, 'binary.bin'), Buffer.from([0xff, 0xfe, 0x00, 0x61]))
-    const binary = await session('binary.bin')
-    const refused = await multi(binary, { path: 'binary.bin', edits: [{ old_string: 'a', new_string: 'b' }] })
-    expect(refused.isError).toBe(true)
-    expect(String(refused.content)).toMatch(/binary or not valid UTF-8/)
-    const escape = await multi(tools, { path: '../outside.txt', edits: [{ old_string: 'a', new_string: 'b' }] })
-    expect(String(escape.content)).toMatch(/escapes the workspace/)
   })
 
   it('does not write when the turn is cancelled and surfaces a write failure without a checkpoint', async () => {

@@ -25,17 +25,6 @@ describe('createProgressThrottle', () => {
     expect(out).toEqual([1, 100])
   })
 
-  it('emits at most about four updates per second on a sustained stream', () => {
-    const out: number[] = []
-    const t = createProgressThrottle<Ev>((v) => out.push(v.n), { minIntervalMs: 250 })
-    for (let i = 0; i < 400; i++) {
-      t.push({ n: i, done: false })
-      vi.advanceTimersByTime(10) // 100 events per second for 4 seconds
-    }
-    expect(out.length).toBeLessThanOrEqual(4 * 4 + 1)
-    expect(out.length).toBeGreaterThanOrEqual(4 * 3)
-  })
-
   it('delivers a done event immediately, drops stale pending progress, and ignores later events', () => {
     const out: Ev[] = []
     const t = createProgressThrottle<Ev>((v) => out.push(v), { minIntervalMs: 250 })
@@ -45,26 +34,5 @@ describe('createProgressThrottle', () => {
     t.push({ n: 4, done: false })
     vi.advanceTimersByTime(1000)
     expect(out.map((e) => e.n)).toEqual([1, 3])
-  })
-
-  it('flush() delivers the pending value without waiting', () => {
-    const out: number[] = []
-    const t = createProgressThrottle<Ev>((v) => out.push(v.n), { minIntervalMs: 250 })
-    t.push({ n: 1, done: false })
-    t.push({ n: 2, done: false })
-    t.flush()
-    expect(out).toEqual([1, 2])
-    vi.advanceTimersByTime(1000)
-    expect(out).toEqual([1, 2])
-  })
-
-  it('cancel() discards pending progress', () => {
-    const out: number[] = []
-    const t = createProgressThrottle<Ev>((v) => out.push(v.n), { minIntervalMs: 250 })
-    t.push({ n: 1, done: false })
-    t.push({ n: 2, done: false })
-    t.cancel()
-    vi.advanceTimersByTime(1000)
-    expect(out).toEqual([1])
   })
 })

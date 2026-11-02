@@ -1,0 +1,6 @@
+{
+  "title": "Fix a crash from a pasted stack trace",
+  "prompt": "My server crashes on startup when the config file does not set allowed_hosts. Here is the output:\n\nTypeError: Cannot read properties of undefined (reading 'split')\n    at parseList (file:///work/app/src/config.mjs:21:16)\n    at loadConfig (file:///work/app/src/config.mjs:36:24)\n    at start (file:///work/app/src/server.mjs:9:18)\n\nA missing allowed_hosts should simply mean an empty list. Fix it.",
+  "timeoutSec": 240,
+  "stub": { "command": "node --test" }
+}

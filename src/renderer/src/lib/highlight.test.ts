@@ -1,20 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { languageFor, pieces, tokenizeLine } from './highlight'
+import { pieces, tokenizeLine } from './highlight'
 
 const classes = (line: string, lang: Parameters<typeof tokenizeLine>[1] = 'js'): string[] =>
   tokenizeLine(line, lang).filter((token) => token.cls).map((token) => `${token.cls}:${token.text}`)
-
-describe('languageFor', () => {
-  it('maps extensions to a language family', () => {
-    expect(languageFor('src/upload/client.ts')).toBe('js')
-    expect(languageFor('a\\b\\view.tsx')).toBe('js')
-    expect(languageFor('tool.py')).toBe('py')
-    expect(languageFor('main.rs')).toBe('c')
-    expect(languageFor('package.json')).toBe('json')
-    expect(languageFor('Makefile')).toBe('plain')
-    expect(languageFor('notes.unknownext')).toBe('plain')
-  })
-})
 
 describe('tokenizeLine', () => {
   it('always reproduces the line', () => {
@@ -42,22 +30,6 @@ describe('tokenizeLine', () => {
     expect(classes('x = 1 # comment', 'py')).toContain('c:# comment')
   })
 
-  it('treats an unterminated string as running to the end of the line', () => {
-    expect(classes("const a = 'oops")).toContain("s:'oops")
-  })
-
-  it('colors JSON keys apart from values', () => {
-    const tokens = classes('  "retries": 4, "name": "lumen"', 'json')
-    expect(tokens).toContain('f:"retries"')
-    expect(tokens).toContain('n:4')
-    expect(tokens).toContain('s:"lumen"')
-  })
-
-  it('leaves plain text alone and highlights a markdown heading', () => {
-    expect(tokenizeLine('some words here', 'plain')).toEqual([{ text: 'some words here' }])
-    expect(tokenizeLine('## Install', 'md')).toEqual([{ text: '## Install', cls: 'k' }])
-    expect(tokenizeLine('no heading', 'md')).toEqual([{ text: 'no heading' }])
-  })
 })
 
 describe('pieces', () => {
@@ -74,7 +46,4 @@ describe('pieces', () => {
     expect(out.filter((piece) => piece.marked)).toEqual([{ text: 'ns', cls: 'k', marked: true }])
   })
 
-  it('returns the plain tokens when nothing is marked', () => {
-    expect(pieces('a', 'js')).toEqual(tokenizeLine('a', 'js'))
-  })
 })

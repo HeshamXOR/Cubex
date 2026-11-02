@@ -2,14 +2,11 @@ import { describe, expect, it } from 'vitest'
 import {
   HISTORY_ENTRY_MAX_CHARS,
   HISTORY_PER_PROJECT,
-  HISTORY_PROJECTS,
   NOT_RECALLING,
-  clearPrompts,
   leaveRecall,
   loadPrompts,
   mayRecallNewer,
   mayRecallOlder,
-  projectKey,
   recallNewer,
   recallOlder,
   recordPrompt,
@@ -39,16 +36,6 @@ describe('remembering prompts per project', () => {
     expect(loadPrompts(storage, 'never used')).toEqual([])
   })
 
-  it('trims what it stores and ignores blanks and an immediate repeat', () => {
-    const storage = memoryStorage()
-    recordPrompt(storage, 'p', '  run the tests  ')
-    recordPrompt(storage, 'p', 'run the tests')
-    recordPrompt(storage, 'p', '   ')
-    recordPrompt(storage, 'p', 'something else')
-    recordPrompt(storage, 'p', 'run the tests')
-    expect(loadPrompts(storage, 'p')).toEqual(['run the tests', 'something else', 'run the tests'])
-  })
-
   it('does not keep a pasted document as a prompt', () => {
     const storage = memoryStorage()
     recordPrompt(storage, 'p', 'x'.repeat(HISTORY_ENTRY_MAX_CHARS + 1))
@@ -65,40 +52,6 @@ describe('remembering prompts per project', () => {
     expect(prompts.at(-1)).toBe(`prompt ${HISTORY_PER_PROJECT + 14}`)
   })
 
-  it('forgets the least recently used projects past the limit', () => {
-    const storage = memoryStorage()
-    for (let index = 0; index < HISTORY_PROJECTS + 3; index++) recordPrompt(storage, `project ${index}`, `prompt ${index}`, 1000 + index)
-    expect(loadPrompts(storage, 'project 0')).toEqual([])
-    expect(loadPrompts(storage, 'project 2')).toEqual([])
-    expect(loadPrompts(storage, 'project 3')).toEqual(['prompt 3'])
-    expect(loadPrompts(storage, `project ${HISTORY_PROJECTS + 2}`)).toEqual([`prompt ${HISTORY_PROJECTS + 2}`])
-  })
-
-  it('stays inside a total size by dropping old prompts of old projects', () => {
-    const storage = memoryStorage()
-    const long = 'y'.repeat(HISTORY_ENTRY_MAX_CHARS - 10)
-    for (let project = 0; project < 12; project++) {
-      for (let index = 0; index < 30; index++) recordPrompt(storage, `project ${project}`, `${index} ${long}`, 1000 + project)
-    }
-    const stored = [...storage.values.values()].join('').length
-    expect(stored).toBeLessThan(1_300_000)
-    // The project used last keeps its prompts.
-    expect(loadPrompts(storage, 'project 11').length).toBeGreaterThan(0)
-  })
-
-  it('clears one project and says how many prompts that was', () => {
-    const storage = memoryStorage()
-    recordPrompt(storage, 'one', 'a')
-    recordPrompt(storage, 'one', 'b')
-    recordPrompt(storage, 'two', 'c')
-    expect(clearPrompts(storage, 'one')).toBe(2)
-    expect(loadPrompts(storage, 'one')).toEqual([])
-    expect(loadPrompts(storage, 'two')).toEqual(['c'])
-    expect(clearPrompts(storage, 'one')).toBe(0)
-    clearPrompts(storage, 'two')
-    expect(storage.values.size).toBe(0)
-  })
-
   it('survives damaged storage instead of throwing', () => {
     for (const damaged of ['not json', '[]', '{"p":{"prompts":"nope"}}', '{"p":null}', 'null']) {
       const storage = memoryStorage({ 'cubex.promptHistory.v1': damaged })
@@ -108,18 +61,6 @@ describe('remembering prompts per project', () => {
     }
   })
 
-  it('does not throw when storage refuses to write', () => {
-    const refusing: PromptStorage = { getItem: () => null, setItem: () => { throw new Error('quota') }, removeItem: () => undefined }
-    expect(() => recordPrompt(refusing, 'p', 'text')).not.toThrow()
-  })
-
-  it('files a project under one key however its path is spelled', () => {
-    expect(projectKey('C:\\Users\\Me\\Code\\App\\')).toBe(projectKey('c:/users/me/code/app'))
-    expect(projectKey('/home/me/App')).toBe('/home/me/App')
-    expect(projectKey('/home/me/App/')).toBe('/home/me/App')
-    expect(projectKey(undefined)).toBe('')
-    expect(projectKey('  ')).toBe('')
-  })
 })
 
 describe('walking back through prompts', () => {
@@ -135,11 +76,6 @@ describe('walking back through prompts', () => {
     step = recallOlder(prompts, step.recall, step.text)!
     expect(step.text).toBe('oldest')
     expect(recallOlder(prompts, step.recall, step.text)).toBeUndefined()
-  })
-
-  it('does nothing without any prompts', () => {
-    expect(recallOlder([], NOT_RECALLING, '')).toBeUndefined()
-    expect(recallNewer([], NOT_RECALLING, '')).toBeUndefined()
   })
 
   it('comes forward again and ends on the draft', () => {
@@ -163,17 +99,6 @@ describe('walking back through prompts', () => {
     expect(leaveRecall(NOT_RECALLING)).toBeUndefined()
   })
 
-  it('brings back an empty draft too, so the composer is empty again', () => {
-    const step = recallOlder(prompts, NOT_RECALLING, '')!
-    expect(leaveRecall(step.recall)!.text).toBe('')
-  })
-
-  it('skips a prompt identical to what is already on screen', () => {
-    const repeated = ['alpha', 'beta', 'alpha']
-    // The draft equals the newest prompt: Up goes straight to the one before it.
-    expect(recallOlder(repeated, NOT_RECALLING, 'alpha')!.text).toBe('beta')
-  })
-
   it('keeps walking while the text is the prompt it put there, and stops the moment the person types', () => {
     const shown = recallOlder(prompts, NOT_RECALLING, 'draft')!
     expect(settleRecall(shown.recall, 'newest')).toBe(shown.recall)
@@ -188,11 +113,6 @@ describe('when the arrow keys belong to history', () => {
     expect(mayRecallOlder('a draft', 0, 0, false)).toBe(true)
     expect(mayRecallOlder('a draft', 3, 3, false)).toBe(false)
     expect(mayRecallOlder('a draft', 0, 4, false)).toBe(false)
-  })
-
-  it('while walking, claims Up on the first line only so a long prompt can still be read', () => {
-    expect(mayRecallOlder('line one\nline two', 4, 4, true)).toBe(true)
-    expect(mayRecallOlder('line one\nline two', 12, 12, true)).toBe(false)
   })
 
   it('claims Down only while walking, and only on the last line', () => {

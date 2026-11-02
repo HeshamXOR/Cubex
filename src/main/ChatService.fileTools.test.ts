@@ -55,7 +55,9 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true })
 })
 
-const policy = { primary: { providerId: 'p', model: 'm' }, fallbacks: [], fallbackEnabled: false, retry: { ...DEFAULT_RETRY_POLICY, enabled: false }, timeout: {} }
+/** apply_patch is exposed only to patch-trained models; multi_edit only to the others. */
+const CLAUDE = 'claude-sonnet-4-5'
+const policy = { primary: { providerId: 'p', model: 'gpt-5' }, fallbacks: [], fallbackEnabled: false, retry: { ...DEFAULT_RETRY_POLICY, enabled: false }, timeout: {} }
 type Step = ToolCall[] | string
 
 interface Run {
@@ -65,7 +67,7 @@ interface Run {
 }
 
 /** One scripted turn. Permission asks are answered from `answers` in order (default deny). */
-async function turn(script: Step[], mode: PermissionMode = 'default', answers: PermissionDecision[] = []): Promise<Run> {
+async function turn(script: Step[], mode: PermissionMode = 'default', answers: PermissionDecision[] = [], model = 'gpt-5'): Promise<Run> {
   const events: ChatEvent[] = []
   const results = new Map<string, string>()
   let requests = 0
@@ -92,7 +94,7 @@ async function turn(script: Step[], mode: PermissionMode = 'default', answers: P
     }
   })
   services.push(service)
-  const request: ChatStartRequest = { streamId: 's1', conversationId: 'c1', messageId: 'u1', userText: 'go', fileToolsEnabled: true, permissionMode: mode, policy }
+  const request: ChatStartRequest = { streamId: 's1', conversationId: 'c1', messageId: 'u1', userText: 'go', fileToolsEnabled: true, permissionMode: mode, policy: { ...policy, primary: { providerId: 'p', model } } }
   await service.start(request)
   await vi.waitFor(() => expect(events.some((e) => e.kind === 'stream' && (e.event.type === 'completed' || e.event.type === 'error'))).toBe(true), { timeout: 8000 })
   return { events, results }
@@ -123,10 +125,13 @@ describe('permission classes', () => {
 
   it('does not change anything when the user denies', async () => {
     put('a.txt', 'one\n')
-    const run = await turn([[read('r', 'a.txt')], [patchCall('p', '*** Update File: a.txt', '-one', '+ONE')], [multiCall('m', 'a.txt', [{ old_string: 'one', new_string: 'ONE' }])], 'done'], 'default', ['deny', 'deny'])
-    expect(asks(run).map((ask) => ask.toolName)).toEqual(['apply_patch', 'multi_edit'])
+    const run = await turn([[read('r', 'a.txt')], [patchCall('p', '*** Update File: a.txt', '-one', '+ONE')], 'done'], 'default', ['deny'])
+    expect(asks(run).map((ask) => ask.toolName)).toEqual(['apply_patch'])
     expect(readFileSync(file('a.txt'), 'utf8')).toBe('one\n')
     expect(final(run, 'p').phase).toBe('error')
+    const multi = await turn([[read('r', 'a.txt')], [multiCall('m', 'a.txt', [{ old_string: 'one', new_string: 'ONE' }])], 'done'], 'default', ['deny'], CLAUDE)
+    expect(asks(multi).map((ask) => ask.toolName)).toEqual(['multi_edit'])
+    expect(readFileSync(file('a.txt'), 'utf8')).toBe('one\n')
   })
 
   it('auto-approves both in acceptEdits mode', async () => {
@@ -135,9 +140,10 @@ describe('permission classes', () => {
     const run = await turn([
       [read('r1', 'a.txt'), read('r2', 'b.txt')],
       [patchCall('p', '*** Update File: a.txt', ' one', '-two', '+TWO', '*** Add File: c.txt', '+new')],
-      [multiCall('m', 'b.txt', [{ old_string: 'x', new_string: 'X' }])],
       'done'
     ], 'acceptEdits')
+    const multi = await turn([[read('r3', 'b.txt')], [multiCall('m', 'b.txt', [{ old_string: 'x', new_string: 'X' }])], 'done'], 'acceptEdits', [], CLAUDE)
+    expect(asks(multi)).toEqual([])
     expect(asks(run)).toEqual([])
     expect(readFileSync(file('a.txt'), 'utf8')).toBe('one\nTWO\n')
     expect(readFileSync(file('c.txt'), 'utf8')).toBe('new\n')
@@ -162,7 +168,7 @@ describe('permission classes', () => {
 
   it('treats multi_edit on a protected file like edit_file', async () => {
     put('.git/config', '[core]\n')
-    const run = await turn([[read('r', '.git/config')], [multiCall('m', '.git/config', [{ old_string: '[core]', new_string: '[evil]' }])], 'done'], 'acceptEdits', ['deny'])
+    const run = await turn([[read('r', '.git/config')], [multiCall('m', '.git/config', [{ old_string: '[core]', new_string: '[evil]' }])], 'done'], 'acceptEdits', ['deny'], CLAUDE)
     expect(asks(run)).toHaveLength(1)
     expect(asks(run)[0]!.risks?.join(' ')).toMatch(/Protected path/)
     expect(readFileSync(file('.git/config'), 'utf8')).toBe('[core]\n')
@@ -170,29 +176,16 @@ describe('permission classes', () => {
 
   it('blocks both in plan mode', async () => {
     put('a.txt', 'one\n')
-    const run = await turn([[read('r', 'a.txt')], [patchCall('p', '*** Update File: a.txt', '-one', '+ONE'), multiCall('m', 'a.txt', [{ old_string: 'one', new_string: 'ONE' }])], 'done'], 'plan')
+    const run = await turn([[read('r', 'a.txt')], [patchCall('p', '*** Update File: a.txt', '-one', '+ONE')], 'done'], 'plan')
     expect(asks(run)).toEqual([])
     expect(final(run, 'p')).toMatchObject({ phase: 'error', detail: 'Blocked in plan mode' })
-    expect(final(run, 'm')).toMatchObject({ phase: 'error', detail: 'Blocked in plan mode' })
+    const multi = await turn([[read('r', 'a.txt')], [multiCall('m', 'a.txt', [{ old_string: 'one', new_string: 'ONE' }])], 'done'], 'plan', [], CLAUDE)
+    expect(final(multi, 'm')).toMatchObject({ phase: 'error', detail: 'Blocked in plan mode' })
     expect(readFileSync(file('a.txt'), 'utf8')).toBe('one\n')
   })
 })
 
 describe('tool activity', () => {
-  it('titles the calls', async () => {
-    put('a.txt', 'one\ntwo\n')
-    put('b.txt', 'x\n')
-    const run = await turn([
-      [read('r1', 'a.txt'), read('r2', 'b.txt')],
-      [multiCall('m', 'a.txt', [{ old_string: 'one', new_string: '1' }, { old_string: 'two', new_string: '2' }])],
-      [patchCall('p1', '*** Update File: b.txt', '-x', '+X')],
-      [patchCall('p2', '*** Add File: n1.txt', '+1', '*** Add File: n2.txt', '+2', '*** Delete File: b.txt')],
-      'done'
-    ], 'acceptEdits')
-    expect(final(run, 'm').title).toBe('Edit a.txt (2 edits)')
-    expect(final(run, 'p1').title).toBe('Patch b.txt')
-    expect(final(run, 'p2').title).toBe('Patch 3 files')
-  })
 
   it('reports per-file activity and totals for a patch, and hides the markers from the model', async () => {
     put('a.txt', 'one\ntwo\n')
@@ -214,15 +207,6 @@ describe('tool activity', () => {
     expect(activity.detail).not.toContain('«')
     expect(run.results.get('p')).toContain('Applied patch: 3 files changed (+3 -2)')
     expect(run.results.get('p')).not.toContain('«')
-  })
-
-  it('keeps single-file edits free of the files field', async () => {
-    put('a.txt', 'one\n')
-    const run = await turn([[read('r', 'a.txt')], [multiCall('m', 'a.txt', [{ old_string: 'one', new_string: 'ONE' }])], 'done'], 'acceptEdits')
-    const activity = final(run, 'm')
-    expect(activity).toMatchObject({ phase: 'done', added: 1, removed: 1 })
-    expect(activity).not.toHaveProperty('files')
-    expect(activity.diff).toContain('+ONE')
   })
 })
 

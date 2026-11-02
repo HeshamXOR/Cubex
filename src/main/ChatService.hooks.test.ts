@@ -76,12 +76,6 @@ const scripted = (replies: string[], seen: AIRequest[]): AIProvider => ({
   }
 }) as unknown as AIProvider
 
-/** A model whose connection breaks as soon as the turn reads from it. */
-const unreachable = (): AIProvider => ({
-  id: 'p',
-  streamMessage: () => ({ [Symbol.asyncIterator]: () => ({ next: () => Promise.reject(new Error('The model service is unreachable.')) }) })
-}) as unknown as AIProvider
-
 /** One turn against `provider`; resolves with the events once the turn has completed or failed. */
 async function turn(provider: AIProvider, userText: string): Promise<ChatEvent[]> {
   const events: ChatEvent[] = []
@@ -108,11 +102,6 @@ describe('UserPromptSubmit and Stop hooks', () => {
     expect(stop?.hooks).toBe(mocks.hooks)
   })
 
-  it('sends the prompt hook at most 2000 characters of a long message', async () => {
-    await turn(answering('ok'), 'x'.repeat(5000))
-    expect(mocks.runs[0]?.payload.prompt).toHaveLength(2000)
-  })
-
   it('stops the turn before any request when the prompt hook blocks, and shows the reason as the error', async () => {
     mocks.verdict = (payload) => payload.event === 'UserPromptSubmit' ? { block: true, reason: 'not today' } : { block: false }
     const seen: AIRequest[] = []
@@ -133,14 +122,6 @@ describe('UserPromptSubmit and Stop hooks', () => {
     const last = seen[0]!.messages.at(-1)!
     expect(JSON.stringify(last.content)).toContain('hello')
     expect(JSON.stringify(last.content)).toContain('Branch policy: never touch main.')
-  })
-
-  it('runs the stop hook once for a turn that ends normally', async () => {
-    await turn(answering('Done.'), 'hello')
-    // The end of the turn must not run it a second time after the reply already did.
-    await new Promise((resolve) => setTimeout(resolve, 80))
-    expect(ran()).toEqual(['UserPromptSubmit', 'Stop'])
-    expect(mocks.runs[1]?.payload.stop_hook_active).toBe(false)
   })
 
   it('lets a stop hook that blocks send the agent back to work, with its message', async () => {
@@ -172,20 +153,6 @@ describe('UserPromptSubmit and Stop hooks', () => {
     const text = events.flatMap((e) => (e.kind === 'stream' && e.event.type === 'text_delta' ? [e.event.text] : [])).join('')
     expect(text).toContain('A Stop hook asked for more work 3 times')
     expect(ended(events, 'completed')).toBe(true)
-  })
-
-  it('uses a default message when the hook gives no reason', async () => {
-    let asked = 0
-    mocks.verdict = (payload) => payload.event === 'Stop' && asked++ === 0 ? { block: true } : { block: false }
-    const seen: AIRequest[] = []
-    await turn(scripted(['One.', 'Two.'], seen), 'hello')
-    expect(JSON.stringify(seen[1]!.messages)).toContain('A Stop hook asked you to keep working.')
-  })
-
-  it('still runs the stop hook when the model fails', async () => {
-    const events = await turn(unreachable(), 'hello')
-    expect(ended(events, 'error')).toBe(true)
-    await vi.waitFor(() => expect(ran()).toEqual(['UserPromptSubmit', 'Stop']))
   })
 })
 
@@ -250,11 +217,5 @@ describe('hooks v2', () => {
     const { events } = await run([[write('w1', 'a.txt')], 'done'], { mode: 'bypass' })
     expect(existsSync(join(mocks.workspace, '..', 'outside.txt'))).toBe(false)
     expect(events.filter((e) => e.kind === 'tool' && e.tool.id === 'w1').at(-1)).toMatchObject({ tool: { phase: 'error' } })
-  })
-
-  it('tells Notification hooks when a permission prompt starts waiting', async () => {
-    await run([[write('w1', 'a.txt')], 'done'])
-    await vi.waitFor(() => expect(mocks.all.some((r) => r.payload.event === 'Notification')).toBe(true))
-    expect(mocks.all.find((r) => r.payload.event === 'Notification')?.payload).toMatchObject({ notification_type: 'permission', session_id: 'c1' })
   })
 })

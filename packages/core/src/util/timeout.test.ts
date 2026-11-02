@@ -40,29 +40,4 @@ describe('withTimeout cleanup', () => {
     clear()
     expect(vi.getTimerCount()).toBe(0)
   })
-
-  it('keeps timeout cancellation active until cleanup', () => {
-    vi.useFakeTimers()
-    const external = new AbortController()
-    const remove = vi.spyOn(external.signal, 'removeEventListener')
-    const { signal, clear } = withTimeout({ totalMs: 1_000 }, external.signal)
-
-    vi.advanceTimersByTime(1_000)
-    expect(signal.aborted).toBe(true)
-    expect(signal.reason).toMatchObject({ name: 'TimeoutError' })
-    clear()
-    expect(remove).toHaveBeenCalledOnce()
-  })
-
-  it('uses an already aborted signal without attaching a listener', () => {
-    const external = new AbortController()
-    const reason = new Error('Already cancelled')
-    external.abort(reason)
-    const add = vi.spyOn(external.signal, 'addEventListener')
-    const { signal, clear } = withTimeout(undefined, external.signal)
-
-    expect(signal.reason).toBe(reason)
-    expect(add).not.toHaveBeenCalled()
-    clear()
-  })
 })

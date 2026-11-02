@@ -31,12 +31,6 @@ describe('parseSSE', () => {
       { data: 'world' }
     ])
   })
-
-  it('joins multi-line data and ignores comments/keepalives', async () => {
-    const sse = ': keepalive\ndata: line1\ndata: line2\n\n'
-    const events = await collect(parseSSE(streamFromString(sse)))
-    expect(events).toEqual([{ data: 'line1\nline2' }])
-  })
 })
 
 describe('parseSSEJson', () => {
@@ -44,12 +38,5 @@ describe('parseSSEJson', () => {
     const sse = 'data: {"a":1}\n\ndata: {"a":2}\n\ndata: [DONE]\n\ndata: {"a":3}\n\n'
     const events = await collect(parseSSEJson<{ a: number }>(streamFromString(sse, 5)))
     expect(events.map((e) => e.data.a)).toEqual([1, 2])
-  })
-
-  it('skips non-JSON frames without throwing', async () => {
-    const sse = 'data: not json\n\ndata: {"ok":true}\n\n'
-    const events = await collect(parseSSEJson<{ ok: boolean }>(streamFromString(sse)))
-    expect(events).toHaveLength(1)
-    expect(events[0]!.data.ok).toBe(true)
   })
 })

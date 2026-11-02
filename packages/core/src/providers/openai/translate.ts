@@ -370,25 +370,35 @@ function reportedCost(usage: ChatUsage): number | undefined {
   return usage.is_byok === true ? cost + (money(usage.cost_details?.upstream_inference_cost) ?? 0) : cost
 }
 
-/** Map a Chat Completions usage object to the unified Usage. */
+/**
+ * Map a Chat Completions usage object to the unified Usage. `prompt_tokens` is the whole prompt and the cached
+ * counts are subsets of it, which is what `inputTokens` means. A gateway that fronts Anthropic can instead report
+ * only the uncached remainder there, with the cache counts beside it; a subset cannot be larger than its total,
+ * so counts that are mean `prompt_tokens` left them out, and they are added back.
+ */
 export function mapChatUsage(usage: ChatUsage | null | undefined): Usage | undefined {
   if (!usage) return undefined
   const out: Usage = {}
-  if (usage.prompt_tokens !== undefined) out.inputTokens = usage.prompt_tokens
+  const cached = usage.prompt_tokens_details?.cached_tokens
+  const cacheWrite = usage.prompt_tokens_details?.cache_write_tokens
+  const cacheWriteCount = typeof cacheWrite === 'number' && Number.isSafeInteger(cacheWrite) && cacheWrite >= 0 ? cacheWrite : undefined
+  const cacheTotal = (cached ?? 0) + (cacheWriteCount ?? 0)
+  const exclusive = usage.prompt_tokens !== undefined && cacheTotal > usage.prompt_tokens
+  const prompt = exclusive ? usage.prompt_tokens! + cacheTotal : usage.prompt_tokens
+  if (prompt !== undefined) out.inputTokens = prompt
   if (usage.completion_tokens !== undefined) out.outputTokens = usage.completion_tokens
   if (usage.total_tokens !== undefined) out.totalTokens = usage.total_tokens
   // Some providers keep a model's thinking out of `completion_tokens` and fold it into the total alone. What was
   // generated is then the total less what was sent, so a long answer is never counted short.
-  if (usage.prompt_tokens !== undefined && usage.completion_tokens !== undefined && usage.total_tokens !== undefined &&
-      usage.total_tokens - usage.prompt_tokens > usage.completion_tokens) {
-    out.outputTokens = usage.total_tokens - usage.prompt_tokens
+  if (prompt !== undefined && usage.completion_tokens !== undefined && usage.total_tokens !== undefined &&
+      usage.total_tokens - prompt > usage.completion_tokens) {
+    out.outputTokens = usage.total_tokens - prompt
   }
+  if (exclusive) out.totalTokens = prompt! + (out.outputTokens ?? 0)
   const reasoning = usage.completion_tokens_details?.reasoning_tokens
   if (reasoning !== undefined) out.reasoningTokens = reasoning
-  const cached = usage.prompt_tokens_details?.cached_tokens
   if (cached !== undefined) out.cachedInputTokens = cached
-  const cacheWrite = usage.prompt_tokens_details?.cache_write_tokens
-  if (typeof cacheWrite === 'number' && Number.isSafeInteger(cacheWrite) && cacheWrite >= 0) out.cacheWriteInputTokens = cacheWrite
+  if (cacheWriteCount !== undefined) out.cacheWriteInputTokens = cacheWriteCount
   const reported = reportedCost(usage)
   if (reported !== undefined) out.reportedCostUsd = reported
   return Object.keys(out).length > 0 ? out : undefined
@@ -569,8 +579,13 @@ export function toResponsesTextConfig(request: AIRequest): ResponsesTextConfig |
   return { format: { type: 'text' } }
 }
 
+export interface ResponsesBodyOptions {
+  /** Send the effort as chosen, for a caller that already checked it against what the model takes (see `ChatBodyOptions`). */
+  effortAsChosen?: boolean
+}
+
 /** Build a complete Responses request body from the unified request. */
-export function toResponsesBody(request: AIRequest, stream: boolean): ResponsesBody {
+export function toResponsesBody(request: AIRequest, stream: boolean, options: ResponsesBodyOptions = {}): ResponsesBody {
   const params = request.params ?? {}
   const body: ResponsesBody = {
     model: request.model,
@@ -592,7 +607,7 @@ export function toResponsesBody(request: AIRequest, stream: boolean): ResponsesB
   if (params.temperature !== undefined) body.temperature = params.temperature
   if (params.topP !== undefined) body.top_p = params.topP
   if (params.maxOutputTokens !== undefined) body.max_output_tokens = params.maxOutputTokens
-  const rEffort = toOpenAIEffort(params.reasoningEffort, request.model)
+  const rEffort = options.effortAsChosen ? params.reasoningEffort : toOpenAIEffort(params.reasoningEffort, request.model)
   if (rEffort !== undefined) body.reasoning = { effort: rEffort }
   if (request.metadata) body.metadata = request.metadata
 

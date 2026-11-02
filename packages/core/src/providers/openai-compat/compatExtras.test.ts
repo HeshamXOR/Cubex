@@ -126,6 +126,22 @@ describe('stream_options and metadata are conditional', () => {
     const res = await run(new OpenAICompatProvider(cfg('https://api.moonshot.ai/v1'), 'k'), ask('kimi-k2.6'))
     expect(res.usage).toMatchObject({ inputTokens: 20, outputTokens: 4, totalTokens: 24 })
   })
+
+  it('keeps real usage when a later chunk reports zeros or only part of it', async () => {
+    server(sse(
+      { choices: [{ delta: { content: 'Hi' } }], usage: { prompt_tokens: 20, completion_tokens: 4, total_tokens: 24, prompt_tokens_details: { cached_tokens: 8 } } },
+      { choices: [{ delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } }
+    ))
+    const zeros = await run(new OpenAICompatProvider(cfg('https://llm.example.test/v1'), 'k'), ask())
+    expect(zeros.usage).toMatchObject({ inputTokens: 20, outputTokens: 4, totalTokens: 24, cachedInputTokens: 8 })
+
+    server(sse(
+      { choices: [{ delta: { content: 'Hi' } }], usage: { prompt_tokens: 20 } },
+      { choices: [{ delta: {}, finish_reason: 'stop' }], usage: { completion_tokens: 6 } }
+    ))
+    const partial = await run(new OpenAICompatProvider(cfg('https://llm.example.test/v1'), 'k'), ask())
+    expect(partial.usage).toMatchObject({ inputTokens: 20, outputTokens: 6 })
+  })
 })
 
 /** What a thinking-mode server streams for a turn that reads a file: reasoning, then a tool call. */

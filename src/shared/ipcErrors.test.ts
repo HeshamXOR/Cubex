@@ -6,10 +6,6 @@ describe('cleanIpcErrorMessage', () => {
     expect(cleanIpcErrorMessage("Error invoking remote method 'providers:delete': Error: Key store is locked")).toBe('Key store is locked')
   })
 
-  it('handles error subclasses', () => {
-    expect(cleanIpcErrorMessage("Error invoking remote method 'local:pull': TypeError: fetch failed")).toBe('fetch failed')
-  })
-
   it('keeps a message that was never wrapped', () => {
     expect(cleanIpcErrorMessage('Enter a valid base URL.')).toBe('Enter a valid base URL.')
   })

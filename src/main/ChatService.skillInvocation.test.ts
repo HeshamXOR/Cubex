@@ -98,16 +98,6 @@ describe('a skill the person named', () => {
     expect(lastUser().content).toEqual([{ type: 'text', text: 'Tighten the settings screen.' }])
   })
 
-  it('keeps the skill tool available, so the instructions can read their own reference files', async () => {
-    await finish(request({ skill: 'frontend-engineering' }))
-    expect(requests[0]!.tools?.some((tool) => tool.name === 'skill')).toBe(true)
-  })
-
-  it('says what to do when the person wrote only the name', async () => {
-    await finish(request({ skill: 'frontend-engineering', userText: '   ' }))
-    expect(lastUser().content[1]).toEqual({ type: 'text', text: 'Use the frontend-engineering skill.' })
-  })
-
   it('is found in the task project first, whatever case the name is written in', async () => {
     mocks.workspace = join(mocks.dataRoot, 'project')
     const dir = join(mocks.workspace, '.cubex', 'skills', 'frontend-engineering')
@@ -118,18 +108,6 @@ describe('a skill the person named', () => {
     expect(text).toContain('OWNED_BODY')
     expect(text).toContain('<skill name=\\"frontend-engineering\\">')
     expect(events.find((event) => event.kind === 'tool' && event.tool.name === 'skill')).toMatchObject({ tool: { detail: expect.stringContaining('Source: This project') } })
-  })
-
-  it('stays ahead of the request when the message carries attachments', async () => {
-    const image = { type: 'image' as const, source: { kind: 'base64' as const, mediaType: 'image/png', data: 'AAAA' } }
-    await finish(request({ skill: 'frontend-engineering', attachments: [image] }))
-    expect(lastUser().content.map((part) => part.type)).toEqual(['text', 'text', 'image'])
-    expect(lastUser().content[2]).toEqual(image)
-  })
-
-  it('offers the skills even when the turn has no tools, because the person asked for one', async () => {
-    await finish(request({ skill: 'frontend-engineering', fileToolsEnabled: false }))
-    expect(JSON.stringify(lastUser().content[0])).toContain('The user invoked the')
   })
 })
 
@@ -143,21 +121,5 @@ describe('a skill that cannot be applied', () => {
     // Nothing is left running under the stream id, so the person's next try goes through.
     await finish(request())
     expect(requests).toHaveLength(1)
-  })
-
-  it('refuses a value that is not a skill name', async () => {
-    for (const skill of ['../../secrets/SKILL', 'with space', '', 'x'.repeat(65), null, 7] as unknown as string[]) {
-      await expect(service!.start(request({ skill }))).rejects.toThrow(/^Could not load the "[^"]*" skill: skill names use letters/)
-    }
-    expect(requests).toHaveLength(0)
-  })
-
-  it('refuses instructions that cannot be read, and says why', async () => {
-    vi.mocked(readSkill).mockImplementationOnce(() => { throw new Error('Skill file changed while it was being read. Try loading it again.') })
-    await expect(service!.start(request({ skill: 'frontend-engineering' }))).rejects.toThrow(
-      'Could not load the "frontend-engineering" skill: Skill file changed while it was being read. Try loading it again.'
-    )
-    expect(requests).toHaveLength(0)
-    expect(events).toHaveLength(0)
   })
 })

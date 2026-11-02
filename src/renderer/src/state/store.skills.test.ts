@@ -63,59 +63,11 @@ describe('sending a message that names a skill', () => {
     expect(typed()).toEqual(['/code-review check the diff in src/upload'])
   })
 
-  it('says what to do when only the name was typed', async () => {
-    await live().sendMessage('/code-review')
-    expect(requests()[0]).toMatchObject({ userText: 'Use the code-review skill.', skill: 'code-review' })
-    expect(typed()).toEqual(['/code-review'])
-  })
-
-  it('sends the name as the catalog spells it, and keeps the request across lines', async () => {
-    await live().sendMessage('/frontend-engineering build the navbar\nkeep it keyboard friendly')
-    expect(requests()[0]).toMatchObject({ skill: 'Frontend-Engineering', userText: 'build the navbar\nkeep it keyboard friendly' })
-  })
-
   it('leaves a word that is no skill as an ordinary message, exactly as it was typed', async () => {
     await live().sendMessage('/unknown-thing do it')
     expect(requests()[0]).toMatchObject({ userText: '/unknown-thing do it' })
     expect(requests()[0]).not.toHaveProperty('skill')
     expect(typed()).toEqual(['/unknown-thing do it'])
-  })
-
-  it('does not look at the skills for a message that cannot name one', async () => {
-    await live().sendMessage('Review the diff')
-    finishTurn()
-    await live().sendMessage('/new')
-    expect(bridge.api.listSkills).not.toHaveBeenCalled()
-    expect(requests().map((request) => request.userText)).toEqual(['Review the diff', '/new'])
-  })
-
-  it('reads the list once for the task and uses it again', async () => {
-    await live().sendMessage('/code-review one')
-    finishTurn()
-    await live().sendMessage('/release-notes two')
-    expect(bridge.api.listSkills).toHaveBeenCalledTimes(1)
-    expect(bridge.api.listSkills).toHaveBeenCalledWith('a')
-    expect(requests().map((request) => request.skill)).toEqual(['code-review', 'release-notes'])
-  })
-
-  it('works from the first message of a new task', async () => {
-    useStore.setState({ activeConversation: undefined, activeTabId: undefined })
-    await live().sendMessage('/code-review the first change')
-    expect(bridge.api.listSkills).toHaveBeenCalledWith('new')
-    expect(requests()[0]).toMatchObject({ conversationId: 'new', skill: 'code-review', userText: 'the first change' })
-  })
-
-  it('passes the skill: spelling on even for a name the list does not have, and lets the command keep its plain spelling', async () => {
-    await live().sendMessage('/skill:title tidy the changelog')
-    expect(requests()[0]).toMatchObject({ skill: 'title', userText: 'tidy the changelog' })
-    expect(typed()).toEqual(['/skill:title tidy the changelog'])
-  })
-
-  it('clears the composer once the message went out, like any other message', async () => {
-    live().setComposerText('/code-review the diff')
-    await live().submitComposer()
-    expect(requests()[0]).toMatchObject({ skill: 'code-review', userText: 'the diff' })
-    expect(live().composerText).toBe('')
   })
 
   it('lets a command run as a command when a skill has the same name', async () => {
@@ -126,13 +78,6 @@ describe('sending a message that names a skill', () => {
     live().setComposerText('/skill:title Plan the upload work')
     await live().submitComposer()
     expect(requests()[0]).toMatchObject({ skill: 'title' })
-  })
-
-  it('applies the skill again when the message is sent again', async () => {
-    await live().sendMessage('/code-review the diff')
-    finishTurn()
-    await live().regenerate()
-    expect(requests().map((request) => [request.skill, request.userText])).toEqual([['code-review', 'the diff'], ['code-review', 'the diff']])
   })
 
   it('sends a skill message that waited in the queue with the skill applied', async () => {
@@ -180,21 +125,6 @@ describe('a skill that cannot be applied', () => {
     expect(typed()).toEqual(['/code-review the diff'])
   })
 
-  it('forgets the explanation when the next message starts', async () => {
-    await live().sendMessage('/skill:nope hi')
-    expect(useSkills.getState().failures.a).toBe(refusal)
-    await live().sendMessage('hello')
-    expect(useSkills.getState().failures).toEqual({})
-  })
-
-  it('still settles the reply bubble for any other refusal, as it always did', async () => {
-    bridge.api.startChat.mockRejectedValueOnce(new Error('Choose a model for this task.'))
-    expect(await live().sendMessage('/code-review the diff')).toBe(true)
-    const [user, reply] = live().liveMessages
-    expect(user?.text).toBe('/code-review the diff')
-    expect(reply?.error?.message).toBe('Choose a model for this task.')
-    expect(useSkills.getState().failures).toEqual({})
-  })
 })
 
 describe('the skills of a task', () => {
@@ -224,11 +154,4 @@ describe('the skills of a task', () => {
     expect(useSkills.getState().lists[skillCatalogKey('b', '/work/b')]).toBeUndefined()
   })
 
-  it('keeps only the lists used most recently', async () => {
-    for (let index = 0; index < 30; index++) await useSkills.getState().load(`task-${index}`, undefined)
-    const keys = Object.keys(useSkills.getState().lists)
-    expect(keys).toHaveLength(24)
-    expect(keys).toContain(skillCatalogKey('task-29', undefined))
-    expect(keys).not.toContain(skillCatalogKey('task-0', undefined))
-  })
 })

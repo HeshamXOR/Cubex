@@ -1,0 +1,7 @@
+{
+  "title": "Fix word counting that a failing unittest exposes (Python)",
+  "prompt": "The unit tests in this folder fail (python -m unittest). Fix the bug in the code. The tests are right, so do not edit them.",
+  "timeoutSec": 240,
+  "requires": ["python"],
+  "stub": { "command": "python -m unittest" }
+}

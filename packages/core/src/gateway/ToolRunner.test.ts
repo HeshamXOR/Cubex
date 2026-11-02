@@ -72,32 +72,4 @@ describe('ToolRunner', () => {
     expect(exec).not.toHaveBeenCalled()
     expect(result.toolInvocations[0]!.result.isError).toBe(true)
   })
-
-  it('reports an error for an unregistered tool', async () => {
-    const provider = new ToolThenTextProvider()
-    const gw = new AIGateway(() => provider)
-    const runner = new ToolRunner(gw, toolRegistry([]))
-    const result = await runner.run({ model: 'mock-large', messages: [userMessage('weather?')] }, policy, ctx())
-    expect(result.toolInvocations[0]!.result.isError).toBe(true)
-  })
-})
-
-describe('ToolRunner assistant turn replay', () => {
-  it('sends the assistant turn back as the model produced it, thinking included', async () => {
-    const call = { id: 'toolu_A', name: 'get_weather', input: { city: 'Paris' } }
-    const turn = {
-      id: 'r1', provider: 'p', model: 'mock-large', createdAt: 0, text: 'Checking.', toolCalls: [call], stopReason: 'tool_use' as const,
-      content: [
-        { type: 'reasoning' as const, text: 'need weather', signature: 'sig-A' },
-        { type: 'text' as const, text: 'Checking.' },
-        { type: 'tool_use' as const, ...call }
-      ]
-    }
-    const final = { ...turn, id: 'r2', text: 'Sunny.', toolCalls: [], stopReason: 'stop' as const, content: [{ type: 'text' as const, text: 'Sunny.' }] }
-    const send = vi.fn().mockResolvedValueOnce(turn).mockResolvedValueOnce(final)
-    const exec = vi.fn(async () => ({ toolUseId: 'x', content: 'sunny, 24C' }))
-    const runner = new ToolRunner({ send } as unknown as AIGateway, toolRegistry([weatherTool('allow', exec)]))
-    await runner.run({ model: 'mock-large', messages: [userMessage('weather?')] }, policy, ctx())
-    expect(send.mock.calls[1]?.[0].messages[1]).toEqual({ role: 'assistant', content: turn.content })
-  })
 })

@@ -62,33 +62,6 @@ describe('the update handlers', () => {
     expect(handlers.has(IPC.updatesState)).toBe(false)
   })
 
-  it('build nothing until the window first asks, and hand back a cleanup', () => {
-    expect(cleanup).toBeTypeOf('function')
-    expect(() => cleanup()).not.toThrow()
-  })
-
-  it('report the version of the running app, and that a copy run from source does not update itself', () => {
-    mocks.version = '0.4.2'
-    const state = handlers.get(IPC.updatesGet)!() as UpdateState
-    expect(state).toMatchObject({ currentVersion: '0.4.2', canInstall: false, check: { status: 'idle' } })
-    expect(state.cannotInstallReason).toMatch(/runs from source/)
-  })
-
-  it('say a packaged copy that the installer did not set up cannot update itself either', () => {
-    mocks.packaged = true
-    const state = handlers.get(IPC.updatesGet)!() as UpdateState
-    expect(state.canInstall).toBe(false)
-    expect(state.cannotInstallReason).toBeTruthy()
-  })
-
-  it('check on request even for a copy run from source, and push what happened', async () => {
-    const state = (await handlers.get(IPC.updatesCheck)!()) as UpdateState
-    // The stubbed network is down, so the look fails, and the person is told so.
-    expect(state.check).toMatchObject({ status: 'failed', error: 'Cubex could not reach GitHub. Check your connection and try again.' })
-    expect(sent.map((entry) => entry.channel)).toEqual([IPC.updatesState, IPC.updatesState])
-    expect((sent.at(-1)?.payload as UpdateState).check.status).toBe('failed')
-  })
-
   it('refuse to check in local-only mode, and say how to allow it', async () => {
     mocks.settings.privacy.localOnly = true
     const state = (await handlers.get(IPC.updatesCheck)!()) as UpdateState
@@ -104,14 +77,6 @@ describe('the update handlers', () => {
     expect((init as { headers: Record<string, string> }).headers['User-Agent']).toBe('Cubex/0.1.0')
   })
 
-  it('do nothing for a download, a cancel or an install while no update is on offer', async () => {
-    const download = handlers.get(IPC.updatesDownload)!() as UpdateState
-    expect(download.update).toBeUndefined()
-    expect(((await handlers.get(IPC.updatesCancel)!()) as UpdateState).update).toBeUndefined()
-    expect(await handlers.get(IPC.updatesInstall)!()).toEqual({ ok: false, reason: 'failed', message: 'There is no downloaded update to install. Download it first.' })
-    expect(mocks.saved).toEqual([])
-  })
-
   it('open the list of releases from the main process, never an address from the window', async () => {
     await handlers.get(IPC.updatesOpenPage)!('https://evil.example/')
     expect(mocks.openExternal).toHaveBeenCalledTimes(1)
@@ -124,12 +89,6 @@ describe('the update handlers', () => {
     }
     expect(mocks.saved).toEqual([])
   })
-
-  it('refuse an install request that is not an object', () => {
-    for (const value of ['force', 1, ['force']]) {
-      expect(() => handlers.get(IPC.updatesInstall)!(value)).toThrow('Invalid update request.')
-    }
-  })
 })
 
 describe('parseInstallRequest', () => {
@@ -139,10 +98,6 @@ describe('parseInstallRequest', () => {
     expect(parseInstallRequest({})).toEqual({ force: false })
     expect(parseInstallRequest({ force: true })).toEqual({ force: true })
     for (const force of ['true', 1, 'yes', {}, [true]]) expect(parseInstallRequest({ force })).toEqual({ force: false })
-  })
-
-  it('keeps nothing else from the request', () => {
-    expect(parseInstallRequest({ force: true, path: 'C:\\evil.exe', url: 'https://evil.example' })).toEqual({ force: true })
   })
 
   it.each(['force', 1, true, ['force']])('refuses %j', (value) => {

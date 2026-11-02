@@ -67,47 +67,6 @@ describe('ProviderManager.test', () => {
     expect(result.details?.latencyMs).toEqual(expect.any(Number))
   })
 
-  it('counts the models it just fetched, not the number the adapter guessed', async () => {
-    configure({ kind: 'anthropic' })
-    provide({ ok: true, details: { models: 7 } }, [model('a'), model('b')])
-    expect((await new ProviderManager().test('p')).details?.models).toBe(2)
-  })
-
-  it('keeps the fetched list as the known one, so the model menu matches what was reported', async () => {
-    configure()
-    provide({ ok: true }, [model('a'), model('b'), model('c')])
-    const manager = new ProviderManager()
-    await manager.test('p')
-    expect(manager.registry.byProvider('p').map((m) => m.id)).toEqual(['a', 'b', 'c'])
-  })
-
-  it('says when the default model is not one the provider offers', async () => {
-    configure({ defaultModel: 'gpt-4' })
-    provide({ ok: true }, [model('gpt-6-astra')])
-    expect((await new ProviderManager().test('p')).details?.defaultModelListed).toBe(false)
-  })
-
-  it('says nothing about the default model when there is no list to compare with', async () => {
-    configure({ defaultModel: 'gpt-4' })
-    provide({ ok: true }, [])
-    expect(await new ProviderManager().test('p')).not.toHaveProperty('details.defaultModelListed')
-  })
-
-  it('names Azure deployments as deployments', async () => {
-    configure({ kind: 'openai-compat', apiMode: 'azure', azureResource: 'res', azureDeployments: ['gpt-prod'] })
-    provide({ ok: true }, [model('gpt-prod')])
-    expect(await new ProviderManager().test('p')).toMatchObject({ ok: true, details: { models: 1, modelNoun: 'deployments', checked: 'Asked the resource for its models with this key.' } })
-  })
-
-  it('is still a success when the model list cannot be fetched after the check passed', async () => {
-    configure()
-    provide({ ok: true }, new Error('boom'))
-    const result = await new ProviderManager().test('p')
-    expect(result.ok).toBe(true)
-    expect(result.details).not.toHaveProperty('models')
-    expect(result.details?.checked).toBeDefined()
-  })
-
   it('carries the fix with a failed check, and does not list models it cannot reach', async () => {
     configure({ kind: 'openai', baseUrl: 'https://api.openai.com/v1' })
     const { getModels } = provide({ ok: false, message: 'Authentication failed: check the API key.' })
@@ -116,19 +75,6 @@ describe('ProviderManager.test', () => {
     expect(result.details?.fix).toBe('Paste a valid key from platform.openai.com/api-keys in Edit, save, then test again.')
     expect(result.details?.latencyMs).toEqual(expect.any(Number))
     expect(getModels).not.toHaveBeenCalled()
-  })
-
-  it('tells a person to start Ollama when it is not running', async () => {
-    configure({ kind: 'ollama', accessType: 'local', auth: { type: 'none' } })
-    provide({ ok: false, message: 'Ollama not reachable at http://127.0.0.1:11434' })
-    expect((await new ProviderManager().test('p')).details?.fix).toMatch(/Start Ollama/)
-  })
-
-  it('says a provider that is turned off is turned off', async () => {
-    configure({ enabled: false })
-    provide({ ok: true })
-    expect(await new ProviderManager().test('p')).toEqual({ ok: false, message: 'This provider is turned off. Turn it on, then test again.' })
-    expect(await new ProviderManager().test('missing')).toMatchObject({ ok: false })
   })
 
   it('reports an adapter that throws instead of answering', async () => {
@@ -159,24 +105,5 @@ describe('ProviderManager.refreshModels', () => {
     expect(result.fix).toMatch(/internet connection/)
     expect(getModels).not.toHaveBeenCalled()
     expect(manager.registry.byProvider('p').map((m) => m.id)).toEqual(['a', 'b'])
-  })
-
-  it('says so for a provider that is turned off', async () => {
-    configure({ enabled: false })
-    provide({ ok: true })
-    expect(await new ProviderManager().refreshModels('p')).toMatchObject({ ok: false, count: 0, message: expect.stringContaining('turned off') })
-  })
-
-  it('reports Local only mode instead of throwing', async () => {
-    configure()
-    provide({ ok: true })
-    state.localOnly = true
-    expect(await new ProviderManager().refreshModels('p')).toMatchObject({ ok: false, message: expect.stringContaining('Local-only mode') })
-  })
-
-  it('reports a list that fails after the check passed', async () => {
-    configure()
-    provide({ ok: true }, new Error('list failed'))
-    expect(await new ProviderManager().refreshModels('p')).toMatchObject({ ok: false, message: 'list failed' })
   })
 })

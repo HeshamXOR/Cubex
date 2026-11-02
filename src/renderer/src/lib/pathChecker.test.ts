@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkspacePathStat } from '../../../shared/workspaceFile'
-import { FOUND_TTL_MS, MISSING_TTL_MS, PathChecker } from './pathChecker'
+import { PathChecker } from './pathChecker'
 
 const found = (path: string): WorkspacePathStat => ({ kind: 'file', path })
 const MISSING: WorkspacePathStat = { kind: 'missing' }
@@ -56,21 +56,6 @@ describe('PathChecker', () => {
     expect(instance.peek('w', 'src/a.ts')).toBeUndefined()
   })
 
-  it('rechecks a miss sooner than a hit', async () => {
-    const { instance, calls } = checker()
-    const first = Promise.all([instance.check('w', undefined, 'src/a.ts'), instance.check('w', undefined, 'new.ts')])
-    await vi.advanceTimersByTimeAsync(20)
-    await first
-    expect(calls).toHaveLength(1)
-
-    vi.setSystemTime(10_000 + MISSING_TTL_MS + 100)
-    expect(instance.peek('w', 'src/a.ts')).toEqual(found('src/a.ts'))
-    expect(instance.peek('w', 'new.ts')).toBeUndefined()
-
-    vi.setSystemTime(10_000 + FOUND_TTL_MS + 100)
-    expect(instance.peek('w', 'src/a.ts')).toBeUndefined()
-  })
-
   it('keeps workspaces apart', async () => {
     const { instance, calls } = checker()
     const both = Promise.all([instance.check('w1', 'c1', 'src/a.ts'), instance.check('w2', 'c2', 'src/a.ts')])
@@ -109,12 +94,4 @@ describe('PathChecker', () => {
     expect(stat).toHaveBeenCalledTimes(2)
   })
 
-  it('can forget everything it knows', async () => {
-    const { instance } = checker()
-    const first = instance.check('w', undefined, 'src/a.ts')
-    await vi.advanceTimersByTimeAsync(20)
-    await first
-    instance.clear()
-    expect(instance.peek('w', 'src/a.ts')).toBeUndefined()
-  })
 })

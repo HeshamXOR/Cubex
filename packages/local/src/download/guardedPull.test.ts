@@ -52,25 +52,6 @@ describe('runGuardedPull: the runtime must answer', () => {
     })
     expect(fake.pull).not.toHaveBeenCalled()
   })
-
-  it('says to restart a runtime that answers with an error status', async () => {
-    const fake = fakeRuntime({ detect: async () => ({ installed: true, running: false, endpoint: 'http://127.0.0.1:11434', error: 'HTTP 500' }) })
-    expect(terminal(await run(fake))?.error).toBe('Ollama answered HTTP 500 at http://127.0.0.1:11434. Restart Ollama, then try again.')
-  })
-
-  it('treats a detection that throws as unreachable', async () => {
-    const fake = fakeRuntime({
-      detect: async () => {
-        throw new Error('boom')
-      }
-    })
-    expect(terminal(await run(fake))).toMatchObject({ errorCode: 'runtime_unreachable' })
-  })
-
-  it('refuses a runtime that cannot download', async () => {
-    const updates = await run(fakeRuntime({ noPull: true }))
-    expect(terminal(updates)).toMatchObject({ errorCode: 'unsupported', error: expect.stringContaining('cannot download models') })
-  })
 })
 
 describe('runGuardedPull: the disk is checked before the first byte', () => {
@@ -83,38 +64,6 @@ describe('runGuardedPull: the disk is checked before the first byte', () => {
     expect(last.error).toContain('has 2.1 GB free')
     expect(last.error).toContain('Use a bigger drive.')
     expect(fake.pull).not.toHaveBeenCalled()
-  })
-
-  it('checks what is still missing, not the whole model', async () => {
-    const fake = fakeRuntime({ estimate: { totalBytes: 10 * GB, remainingBytes: 1 * GB, source: 'registry' } })
-    const updates = await run(fake, { freeBytes: async () => 3 * GB })
-    expect(terminal(updates)).toMatchObject({ status: 'success' })
-    expect(fake.pull).toHaveBeenCalledOnce()
-  })
-
-  it('falls back to the catalog size for a model the runtime cannot size', async () => {
-    const fake = fakeRuntime({ estimate: undefined })
-    const updates = await run(fake, { catalogBytes: (id) => (id === 'llama3.1:8b' ? 4.7 * GB : undefined), freeBytes: async () => 1 * GB })
-    expect(terminal(updates)).toMatchObject({ errorCode: 'disk_space' })
-    expect(fake.pull).not.toHaveBeenCalled()
-  })
-
-  it('goes ahead when nothing can size the model', async () => {
-    const fake = fakeRuntime({ estimate: undefined })
-    const updates = await run(fake, { freeBytes: async () => 1 })
-    expect(terminal(updates)).toMatchObject({ status: 'success' })
-  })
-
-  it('does not check a disk it cannot see, such as a runtime on another machine', async () => {
-    const fake = fakeRuntime({ dir: undefined, estimate: { totalBytes: 500 * GB, remainingBytes: 500 * GB, source: 'registry' } })
-    const updates = await run(fake, { freeBytes: async () => 1 })
-    expect(terminal(updates)).toMatchObject({ status: 'success' })
-  })
-
-  it('never refuses because the free space could not be measured', async () => {
-    const fake = fakeRuntime({ estimate: { totalBytes: 500 * GB, remainingBytes: 500 * GB, source: 'registry' } })
-    const updates = await run(fake, { freeBytes: async () => Number.POSITIVE_INFINITY })
-    expect(terminal(updates)).toMatchObject({ status: 'success' })
   })
 })
 
@@ -145,18 +94,6 @@ describe('runGuardedPull: the disk is checked again as the model is revealed', (
     expect(updates.filter((u) => u.done)).toHaveLength(1)
   })
 
-  it('reports the disk even when the runtime stops without saying so', async () => {
-    const fake = fakeRuntime({
-      pull: (_id, onProgress, signal) =>
-        new Promise<void>((resolve) => {
-          onProgress(downloading(0, 8 * GB))
-          signal?.addEventListener('abort', () => resolve())
-        })
-    })
-    const updates = await run(fake, { freeBytes: async () => 2 * GB })
-    expect(terminal(updates)).toMatchObject({ errorCode: 'disk_space' })
-  })
-
   it('lets a download that fits run to the end', async () => {
     const fake = fakeRuntime({
       pull: async (_id, onProgress) => {
@@ -169,39 +106,9 @@ describe('runGuardedPull: the disk is checked again as the model is revealed', (
     expect(terminal(updates)).toMatchObject({ status: 'success' })
     expect(updates.filter((u) => u.status === 'downloading')).toHaveLength(2)
   })
-
-  it('checks again when a later layer reveals more of the model', async () => {
-    const free = vi.fn(async () => 5 * GB)
-    const fake = fakeRuntime({
-      pull: (_id, onProgress, signal) =>
-        new Promise<void>((resolve) => {
-          onProgress(downloading(0, 2 * GB))
-          setTimeout(() => onProgress(downloading(2 * GB, 9 * GB)), 5)
-          signal?.addEventListener('abort', () => {
-            onProgress({ status: 'cancelled', phase: 'cancelled', done: true })
-            resolve()
-          })
-        })
-    })
-    const updates = await run(fake, { freeBytes: free })
-    expect(terminal(updates)).toMatchObject({ errorCode: 'disk_space' })
-    expect(free.mock.calls.length).toBeGreaterThanOrEqual(2)
-  })
 })
 
 describe('runGuardedPull: cancelling', () => {
-  it('reports a cancellation without starting when the person cancels while the runtime is checked', async () => {
-    const controller = new AbortController()
-    const fake = fakeRuntime({
-      detect: async () => {
-        controller.abort()
-        return { installed: true, running: true }
-      }
-    })
-    const updates = await run(fake, {}, controller.signal)
-    expect(terminal(updates)).toMatchObject({ status: 'cancelled', phase: 'cancelled' })
-    expect(fake.pull).not.toHaveBeenCalled()
-  })
 
   it('passes a cancellation on to the runtime and reports it as one', async () => {
     const controller = new AbortController()

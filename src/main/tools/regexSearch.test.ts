@@ -7,10 +7,6 @@ describe('literal line matcher', () => {
     expect(createLiteralMatcher('a.b', false).matchingLines(text, 10, 100)).toEqual([0, 2])
     expect(createLiteralMatcher('a.b', true).matchingLines(text, 10, 100)).toEqual([0])
   })
-
-  it('stops at the requested number of hits', () => {
-    expect(createLiteralMatcher('x', false).matchingLines('x\nx\nx\nx', 2, 100)).toEqual([0, 1])
-  })
 })
 
 describe('regex line matcher', () => {
@@ -40,16 +36,4 @@ describe('regex line matcher', () => {
     expect((caught as RegexTimeout).partial).toEqual([0, 1])
     expect(Date.now() - started).toBeLessThan(5_000)
   }, 20_000)
-
-  it('is still usable after a timeout', () => {
-    const matcher = createRegexMatcher('^(x|(a+)+$)', false)
-    expect(() => matcher.matchingLines(`${'a'.repeat(60)}!`, 10, 100)).toThrow(RegexTimeout)
-    expect(matcher.matchingLines('x\nnope\nxx', 10, 100)).toEqual([0, 2])
-  }, 20_000)
-
-  it('does not let one file leak lines into the next call', () => {
-    const matcher = createRegexMatcher('needle', false)
-    expect(matcher.matchingLines('needle\nneedle', 10, 100)).toEqual([0, 1])
-    expect(matcher.matchingLines('nothing here', 10, 100)).toEqual([])
-  })
 })

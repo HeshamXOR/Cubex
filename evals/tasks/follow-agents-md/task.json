@@ -1,0 +1,6 @@
+{
+  "title": "Follow the rules written in AGENTS.md",
+  "prompt": "Add a function clamp(value, min, max) in a new module src/clamp.mjs. It returns value limited to the range from min to max, and throws a RangeError when min is greater than max.",
+  "timeoutSec": 240,
+  "stub": { "command": "node --test" }
+}

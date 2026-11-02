@@ -1,0 +1,6 @@
+{
+  "title": "Edit a file that uses Windows line endings",
+  "prompt": "lowStock in lib/stock.mjs should also list an item whose quantity is exactly the threshold, not only the ones below it: at or below the threshold counts as low. Make that change and update the doc comment to match. Do not touch anything else.",
+  "timeoutSec": 240,
+  "stub": { "command": "node --test" }
+}

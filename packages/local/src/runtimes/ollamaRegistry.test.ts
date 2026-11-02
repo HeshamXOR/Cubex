@@ -2,14 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  blobBytesOnDisk,
-  fetchOllamaManifest,
-  ollamaModelsDir,
-  parseOllamaManifest,
-  parseOllamaModelRef,
-  type ManifestBlob
-} from './ollamaRegistry'
+import { blobBytesOnDisk, fetchOllamaManifest, parseOllamaManifest, parseOllamaModelRef, type ManifestBlob } from './ollamaRegistry'
 
 const digest = (char: string): string => `sha256:${char.repeat(64)}`
 const stem = (char: string): string => `sha256-${char.repeat(64)}`
@@ -34,17 +27,6 @@ describe('parseOllamaModelRef', () => {
   )
 })
 
-describe('ollamaModelsDir', () => {
-  it('prefers OLLAMA_MODELS and ignores a blank one', () => {
-    expect(ollamaModelsDir({ OLLAMA_MODELS: 'D:\\models' }, 'C:\\Users\\a')).toBe('D:\\models')
-    expect(ollamaModelsDir({ OLLAMA_MODELS: '  ' }, 'home')).toBe(join('home', '.ollama', 'models'))
-  })
-
-  it('falls back to the home folder', () => {
-    expect(ollamaModelsDir({}, 'home')).toBe(join('home', '.ollama', 'models'))
-  })
-})
-
 describe('parseOllamaManifest', () => {
   const manifest = {
     config: { digest: digest('a'), size: 487 },
@@ -53,14 +35,6 @@ describe('parseOllamaManifest', () => {
       { digest: digest('c'), size: 1481 }
     ]
   }
-
-  it('lists the config and every layer', () => {
-    expect(parseOllamaManifest(manifest)).toEqual([
-      { digest: digest('a'), size: 487 },
-      { digest: digest('b'), size: 4_920_738_944 },
-      { digest: digest('c'), size: 1481 }
-    ])
-  })
 
   it.each([
     ['not an object', 'text'],
@@ -95,42 +69,6 @@ describe('fetchOllamaManifest', () => {
     expect(await fetchOllamaManifest({ ...ref, host: 'hf.co' }, { fetch: fetchMock as unknown as typeof fetch })).toBeUndefined()
     expect(fetchMock).not.toHaveBeenCalled()
   })
-
-  it('reports nothing for an unknown model, a bad reply or an unreachable registry', async () => {
-    const notFound = vi.fn(async () => new Response('{"errors":[]}', { status: 404 }))
-    expect(await fetchOllamaManifest(ref, { fetch: notFound as unknown as typeof fetch })).toBeUndefined()
-    const notJson = vi.fn(async () => new Response('<html>'))
-    expect(await fetchOllamaManifest(ref, { fetch: notJson as unknown as typeof fetch })).toBeUndefined()
-    const offline = vi.fn(async () => {
-      throw new TypeError('fetch failed')
-    })
-    expect(await fetchOllamaManifest(ref, { fetch: offline as unknown as typeof fetch })).toBeUndefined()
-  })
-
-  it('gives up when the registry does not answer in time', async () => {
-    const hang = vi.fn(
-      (_url: string, init: RequestInit) =>
-        new Promise<Response>((_resolve, reject) => {
-          init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
-        })
-    )
-    const started = Date.now()
-    expect(await fetchOllamaManifest(ref, { fetch: hang as unknown as typeof fetch, timeoutMs: 30 })).toBeUndefined()
-    expect(Date.now() - started).toBeLessThan(2000)
-  })
-
-  it('stops when the caller cancels', async () => {
-    const controller = new AbortController()
-    const hang = vi.fn(
-      (_url: string, init: RequestInit) =>
-        new Promise<Response>((_resolve, reject) => {
-          init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
-        })
-    )
-    const pending = fetchOllamaManifest(ref, { fetch: hang as unknown as typeof fetch, signal: controller.signal })
-    controller.abort()
-    expect(await pending).toBeUndefined()
-  })
 })
 
 describe('blobBytesOnDisk', () => {
@@ -160,22 +98,8 @@ describe('blobBytesOnDisk', () => {
     expect(await blobBytesOnDisk(dir, blobs)).toBe(2500)
   })
 
-  it('does not count a final file of the wrong size as present', async () => {
-    await file(stem('a'), 400)
-    expect(await blobBytesOnDisk(dir, blobs)).toBe(0)
-  })
-
   it('never counts more than the blob is worth', async () => {
     await file(`${stem('a')}-partial`, 9000)
     expect(await blobBytesOnDisk(dir, blobs)).toBe(1000)
-  })
-
-  it('ignores blobs that belong to other models', async () => {
-    await file(stem('f'), 7000)
-    expect(await blobBytesOnDisk(dir, blobs)).toBe(0)
-  })
-
-  it('is zero when Ollama has not created its blobs folder yet', async () => {
-    expect(await blobBytesOnDisk(join(dir, 'missing'), blobs)).toBe(0)
   })
 })

@@ -1,0 +1,6 @@
+{
+  "title": "Run the project's tests and fix what fails",
+  "prompt": "Run this project's test suite and fix everything that fails. The tests describe the intended behavior, so change the code and leave the tests as they are. When you are done, tell me in a sentence or two what was wrong.",
+  "timeoutSec": 300,
+  "stub": { "command": "node --test", "answer": "Fixed three bugs in src/text.mjs: titleCase kept the rest of each word as it was, truncate could exceed its limit and ordinal treated 11, 12 and 13 like other numbers." }
+}

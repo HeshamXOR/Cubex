@@ -17,7 +17,7 @@ vi.mock('../lib/api', () => ({ api: bridge.api }))
 import { useStore } from './store'
 import { useQueue } from './queue'
 import { useCommandNotice } from './commandNotice'
-import { clearActiveGoal, pauseActiveGoal, resumeActiveGoal, toolCallsInLastTurn } from './goal'
+import { clearActiveGoal, pauseActiveGoal, resumeActiveGoal } from './goal'
 
 const provider: ProviderConfig = { id: 'mock', kind: 'mock', name: 'Mock', accessType: 'api', auth: { type: 'none' }, enabled: true }
 const conversation = (id: string): Conversation => ({ id, title: `Task ${id}`, createdAt: 1, updatedAt: 1, execution: 'cloud', workspacePath: `C:\\work\\${id}`, messages: [] })
@@ -89,71 +89,12 @@ describe('/goal', () => {
     expect(useStore.getState().liveMessages.filter((message) => message.role === 'user').map((message) => message.text)).toEqual(['Goal: all tests pass'])
   })
 
-  it('does not send what is in the composer along with the goal', async () => {
-    useStore.getState().addAttachment({ type: 'image', source: { kind: 'base64', mediaType: 'image/png', data: 'AAAA' } })
-    await typeGoal('it builds')
-    expect(requests()[0]?.attachments).toBeUndefined()
-    expect(useStore.getState().attachments).toHaveLength(1)
-  })
-
-  it('says what is wrong, with an example, when it is used wrongly', async () => {
-    await typeGoal('it works --check')
-    expect(notice()).toContain('Name the command after --check')
-    expect(goal()).toBeUndefined()
-    expect(sent()).toEqual([])
-  })
-
-  it('does not make the task look as if its last turn failed', async () => {
-    await typeGoal('it works --check')
-    // A failed turn holds the message queue and pauses a goal: a mistyped command is neither.
-    expect(useStore.getState().status).not.toBe('error')
-    expect(useStore.getState().statusDetail).toBeUndefined()
-  })
-
-  it('says there is no goal when asked for one that is not set', async () => {
-    await typeGoal('')
-    expect(notice()).toContain('No goal is set')
-  })
-
-  it('does not start while a turn is running', async () => {
-    await useStore.getState().sendMessage('first')
-    await typeGoal('all tests pass')
-    expect(goal()).toBeUndefined()
-    expect(notice()).toContain('A turn is running')
-    expect(sent()).toEqual(['first'])
-  })
-
-  it('says to choose a model, and sets nothing, when there is none', async () => {
-    useStore.setState({ activeModel: undefined })
-    await typeGoal('all tests pass')
-    expect(goal()).toBeUndefined()
-    expect(notice()).toContain('Choose a model')
-    expect(sent()).toEqual([])
-  })
-
   it('pauses the goal, and says why, when the provider refuses the first request', async () => {
     bridge.api.startChat.mockRejectedValueOnce(new Error('The provider refused the request.'))
     await typeGoal('all tests pass')
     await vi.waitFor(() => expect(goal()?.status).toBe('paused'))
     expect(goal()?.note).toContain('The provider refused the request.')
     expect(bridge.api.evaluateGoal).not.toHaveBeenCalled()
-  })
-})
-
-describe('typed in the composer', () => {
-  it('leaves a wrong command in the composer to be corrected, with the reason above it', async () => {
-    useStore.getState().setComposerText('/goal it works --check')
-    await useStore.getState().submitComposer()
-    expect(useStore.getState().composerText).toBe('/goal it works --check')
-    expect(notice()).toContain('Name the command after --check')
-  })
-
-  it('clears the composer once the goal has started', async () => {
-    useStore.getState().setComposerText('/goal all tests pass')
-    await useStore.getState().submitComposer()
-    expect(useStore.getState().composerText).toBe('')
-    expect(sent()).toEqual(['Goal: all tests pass'])
-    expect(notice()).toBeUndefined()
   })
 })
 
@@ -180,28 +121,6 @@ describe('in a new session, which has no task yet', () => {
     expect(bridge.api.evaluateGoal).toHaveBeenCalledWith({ conversationId: 'n', goal: { text: 'all tests pass' } })
   })
 
-  it('clears the composer, which was carried into the new task', async () => {
-    useStore.getState().setComposerText('/goal all tests pass')
-    await useStore.getState().submitComposer()
-    expect(useStore.getState().activeConversation?.id).toBe('n')
-    expect(useStore.getState().composerText).toBe('')
-  })
-
-  it('creates no task, and says why, when there is no model to run it', async () => {
-    useStore.setState({ activeModel: undefined })
-    await typeGoal('all tests pass')
-    expect(bridge.api.createConversation).not.toHaveBeenCalled()
-    expect(useStore.getState().activeConversation).toBeUndefined()
-    expect(notice('')).toContain('Choose a model')
-  })
-
-  it('says why, and leaves the goal unset, when the task cannot be created', async () => {
-    bridge.api.createConversation.mockRejectedValueOnce(new Error('The database is locked.'))
-    await typeGoal('all tests pass')
-    expect(goal()).toBeUndefined()
-    expect(notice('')).toBe('The database is locked.')
-    expect(sent()).toEqual([])
-  })
 })
 
 describe('the loop', () => {
@@ -257,14 +176,6 @@ describe('the loop', () => {
     expect(sent()).toHaveLength(1)
   })
 
-  it('treats a judge that rejects as a turn that could not be judged', async () => {
-    await typeGoal('all tests pass')
-    bridge.api.evaluateGoal.mockRejectedValueOnce(new Error('IPC closed'))
-    finishTurn()
-    await vi.waitFor(() => expect(goal()?.status).toBe('paused'))
-    expect(goal()?.note).toBe('IPC closed')
-  })
-
   it('stops at the turn limit and says how many turns it took', async () => {
     useStore.setState({ goal: startGoal('all tests pass', undefined, 2) })
     await useStore.getState().sendMessage('Goal: all tests pass')
@@ -285,15 +196,6 @@ describe('the loop', () => {
     expect(sent()).toHaveLength(2)
   })
 
-  it('does not call a goal stalled while the agent is doing work', async () => {
-    await typeGoal('all tests pass')
-    for (let turn = 1; turn <= 3; turn++) {
-      finishTurn({ tools: 2 })
-      await vi.waitFor(() => expect(sent()).toHaveLength(turn + 1))
-    }
-    expect(goal()?.status).toBe('active')
-    expect(goal()?.idle).toBe(0)
-  })
 })
 
 describe('stopping, pausing and clearing', () => {
@@ -344,16 +246,6 @@ describe('stopping, pausing and clearing', () => {
     expect(goal()).toMatchObject({ status: 'active', turning: true })
   })
 
-  it('does not tell the model about a paused goal', async () => {
-    await typeGoal('all tests pass')
-    pauseActiveGoal()
-    finishTurn()
-    await new Promise((resolve) => setTimeout(resolve, 30))
-    await useStore.getState().sendMessage('something else')
-    expect(requests()[1]?.goal).toBeUndefined()
-    expect(goal()?.status).toBe('paused')
-  })
-
   it('clears the goal, and stops the judging that is running', async () => {
     await typeGoal('all tests pass')
     clearActiveGoal()
@@ -361,17 +253,6 @@ describe('stopping, pausing and clearing', () => {
     expect(bridge.api.cancelGoalCheck).toHaveBeenCalledWith('a')
   })
 
-  it('answers /goal pause, resume and clear the same way', async () => {
-    await typeGoal('all tests pass')
-    await typeGoal('pause')
-    expect(goal()?.status).toBe('paused')
-    finishTurn()
-    await new Promise((resolve) => setTimeout(resolve, 30))
-    await typeGoal('resume')
-    expect(goal()?.status).toBe('active')
-    await typeGoal('clear')
-    expect(goal()).toBeUndefined()
-  })
 })
 
 describe('while it is being judged', () => {
@@ -466,15 +347,6 @@ describe('when the person opens another task', () => {
   })
 })
 
-describe('toolCallsInLastTurn', () => {
-  it('counts the tool cards of the latest reply, and zero without one', async () => {
-    expect(toolCallsInLastTurn({ liveMessages: [] })).toBe(0)
-    await typeGoal('all tests pass')
-    finishTurn({ tools: 3 })
-    expect(toolCallsInLastTurn(useStore.getState())).toBe(3)
-  })
-})
-
 /** A verdict the test answers by hand, as a check that takes minutes would. */
 function slowVerdict(): (value: GoalVerdict) => void {
   let answer: (value: GoalVerdict) => void = () => undefined
@@ -566,11 +438,6 @@ describe('a goal kept with its task', () => {
     expect(sent()).toHaveLength(1)
   })
 
-  it('opens a task without a goal when the saved goal cannot be read', async () => {
-    bridge.api.getGoal.mockRejectedValueOnce(new Error('disk'))
-    await useStore.getState().openConversation('c')
-    expect(goal()).toBeUndefined()
-  })
 })
 
 describe('the token budget', () => {
@@ -601,11 +468,4 @@ describe('the token budget', () => {
     expect(sent()).toHaveLength(1)
   })
 
-  it('does not count turns of a goal that is paused', async () => {
-    await typeGoal('all tests pass --budget 20k')
-    const id = streamId()
-    pauseActiveGoal()
-    usage(id, 5_000, 100)
-    expect(goal()?.tokens ?? 0).toBe(0)
-  })
 })

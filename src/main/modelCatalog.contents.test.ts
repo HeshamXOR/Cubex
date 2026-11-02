@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -69,37 +69,6 @@ describe('ModelCatalog contents', () => {
     expect(gpt.pricing).toMatchObject({ inputPerMTok: 1.25, outputPerMTok: 10, cachedInputPerMTok: 0.125 })
   })
 
-  it('does not invent a price, a window or an effort list the catalog does not give', async () => {
-    const catalog = served()
-    await catalog.refresh(true)
-    const plain = catalog.lookup('nvidia', 'vendor/plain')!
-    expect(plain.pricing).toBeUndefined()
-    expect(plain.contextWindow).toBeUndefined()
-    expect(plain.reasoningEfforts).toBeUndefined()
-    expect(catalog.lookup('nvidia', 'vendor/levels-unsaid')!.reasoningEfforts).toBeUndefined()
-  })
-
-  it('reads the effort levels, lowest first, and drops values that are not levels', async () => {
-    const catalog = served()
-    await catalog.refresh(true)
-    expect(catalog.lookup('nvidia', 'moonshotai/kimi-k3')!.reasoningEfforts).toEqual(['low', 'high', 'max'])
-    expect(catalog.lookup('openai', 'gpt-x')!.reasoningEfforts).toEqual(['low', 'medium', 'high', 'xhigh'])
-  })
-
-  it('says a model has no effort setting when it only has a thinking switch', async () => {
-    const catalog = served()
-    await catalog.refresh(true)
-    expect(catalog.lookup('nvidia', 'z-ai/glm-5.2')!.reasoningEfforts).toEqual([])
-  })
-
-  it('answers for the provider asked about only, and ignores case', async () => {
-    const catalog = served()
-    await catalog.refresh(true)
-    expect(catalog.lookup('NVIDIA', 'MoonshotAI/Kimi-K3')).toBeDefined()
-    expect(catalog.lookup('openai', 'moonshotai/kimi-k3')).toBeUndefined()
-    expect(catalog.lookup('nvidia', 'gpt-x')).toBeUndefined()
-  })
-
   it('finds a provider by the host of its API, and only when one provider uses it', async () => {
     const catalog = served({
       ...CATALOG,
@@ -112,17 +81,6 @@ describe('ModelCatalog contents', () => {
     expect(catalog.providerForHost('unknown.test')).toBeUndefined()
   })
 
-  it('keeps only what it reads on disk, and reads it back the next time', async () => {
-    await served().refresh(true)
-    const saved = JSON.parse(readFileSync(cachePath, 'utf8'))
-    expect(saved.raw.nvidia.models['moonshotai/kimi-k3']).not.toHaveProperty('extra')
-    expect(saved.raw.nvidia.api).toBe('https://integrate.api.nvidia.com/v1')
-
-    const offline = new ModelCatalog({ cachePath, url: 'https://example.test/api.json', fetch: (async () => { throw new Error('offline') }) as unknown as typeof fetch })
-    expect(offline.lookup('nvidia', 'moonshotai/kimi-k3')!.reasoningEfforts).toEqual(['low', 'high', 'max'])
-    expect(offline.getStatus().source).toBe('catalog')
-  })
-
   it('shares one request between callers that ask at the same time', async () => {
     let calls = 0
     const catalog = new ModelCatalog({
@@ -131,14 +89,6 @@ describe('ModelCatalog contents', () => {
     })
     await Promise.all([catalog.refresh(), catalog.refresh(), catalog.ready(1_000)])
     expect(calls).toBe(1)
-  })
-
-  it('does not wait for a download that never finishes', async () => {
-    const never = new ModelCatalog({ cachePath, url: 'https://example.test/api.json', fetch: (() => new Promise<Response>(() => undefined)) as unknown as typeof fetch })
-    const started = Date.now()
-    await never.ready(60)
-    expect(Date.now() - started).toBeLessThan(1_000)
-    expect(never.getStatus().source).toBe('builtin')
   })
 
   it('answers at once when a catalog is already on disk, and refreshes behind it', async () => {

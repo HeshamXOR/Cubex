@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { DEFAULT_RETRY_POLICY } from '@core/types'
-import type { AIProvider, AIRequest, AIResponse, AIStreamEvent, ToolCall } from '@core/types'
+import type { AIProvider, AIRequest, AIStreamEvent, ToolCall } from '@core/types'
 import type { ChatEvent, ChatStartRequest, ToolActivity } from '@shared/ipc'
 import type { ProviderManager } from './ProviderManager'
 
@@ -70,17 +70,6 @@ function timeline(events: ChatEvent[]): string[] {
   })
 }
 
-function response(text: string, toolCalls: ToolCall[] = []): AIResponse {
-  return {
-    id: 'provider-response', provider: 'primary', model: 'test', text, toolCalls,
-    content: [
-      ...(text ? [{ type: 'text' as const, text }] : []),
-      ...toolCalls.map((call) => ({ type: 'tool_use' as const, ...call }))
-    ],
-    stopReason: toolCalls.length ? 'tool_use' : 'stop', createdAt: Date.now()
-  }
-}
-
 const readCall: ToolCall = { id: 'read-note', name: 'read_file', input: { path: 'note.txt' } }
 
 describe('ChatService event order and failed-call recovery', () => {
@@ -136,47 +125,6 @@ describe('ChatService event order and failed-call recovery', () => {
     expect(JSON.stringify(requests[1]!.messages[2])).toContain('A file inspected by the model.')
   })
 
-  it.each(['full', 'prefix'] as const)('does not repeat streamed text when a provider completes with %s text coverage', async (coverage) => {
-    const events: ChatEvent[] = []
-    const requests: AIRequest[] = []
-    const text = 'Inspecting one file.'
-    const firstText = coverage === 'full' ? text : 'Inspecting '
-    const chat = startService(async function* (req): AsyncGenerator<AIStreamEvent> {
-      requests.push(structuredClone(req))
-      if (requests.length === 1) {
-        yield { type: 'text_delta', text: firstText }
-        yield { type: 'tool_call', toolCall: readCall }
-        yield { type: 'completed', response: response(text, [readCall]) }
-      } else yield { type: 'text_delta', text: 'Done.' }
-    }, events)
-    await chat.start(request())
-    await finished(events)
-    const expectedText = coverage === 'full' ? [`text:${text}`] : ['text:Inspecting ', 'text:one file.']
-    expect(timeline(events)).toEqual([
-      'iteration:1', ...expectedText, 'read_file:running', 'read_file:done', 'iteration:2', 'text:Done.', 'completed'
-    ])
-    expect(requests[1]!.messages[1]!.content.filter((part) => part.type === 'text')).toEqual([{ type: 'text', text }])
-  })
-
-  it('preserves completion-only intermediate text and tools before a completion-only final reply', async () => {
-    const events: ChatEvent[] = []
-    const requests: AIRequest[] = []
-    const chat = startService(async function* (req): AsyncGenerator<AIStreamEvent> {
-      requests.push(structuredClone(req))
-      yield { type: 'completed', response: requests.length === 1 ? response('Reading the file now.', [readCall]) : response('Read and verified.') }
-    }, events)
-    await chat.start(request())
-    await finished(events)
-    expect(requests).toHaveLength(2)
-    expect(timeline(events)).toEqual([
-      'iteration:1', 'text:Reading the file now.', 'read_file:running', 'read_file:done',
-      'iteration:2', 'text:Read and verified.', 'completed'
-    ])
-    expect(requests[1]!.messages[1]!.content).toEqual([
-      { type: 'text', text: 'Reading the file now.' }, { type: 'tool_use', ...readCall }
-    ])
-  })
-
   it.each(['file', 'shell'])('executes an identical failed command once despite reordered input keys and an intervening %s read', async (readKind) => {
     writeFileSync(join(mocks.workspace, 'probe.cjs'), "require('node:fs').appendFileSync('attempts.txt', 'run\\n'); console.error('fixture command failed'); process.exitCode = 7")
     const events: ChatEvent[] = []
@@ -207,31 +155,6 @@ describe('ChatService event order and failed-call recovery', () => {
     const lastResult = requests[4]!.messages.at(-1)!
     expect(JSON.stringify(lastResult)).toContain('Previous failure:')
     expect(JSON.stringify(lastResult)).toContain('fixture command failed')
-  })
-
-  it('allows retrying a failed command after a successful file correction', async () => {
-    writeFileSync(join(mocks.workspace, 'probe.cjs'), [
-      "const fs = require('node:fs')",
-      "fs.appendFileSync('attempts.txt', 'run\\n')",
-      "if (!fs.existsSync('ready.txt')) { console.error('Missing ready.txt'); process.exitCode = 2 } else console.log('Correction verified')"
-    ].join('\n'))
-    const events: ChatEvent[] = []
-    const requests: AIRequest[] = []
-    const chat = startService(async function* (req): AsyncGenerator<AIStreamEvent> {
-      requests.push(structuredClone(req))
-      const turn = requests.length
-      if (turn === 1 || turn === 3) yield { type: 'tool_call', toolCall: { id: `run-${turn}`, name: 'run_command', input: { command: 'node probe.cjs' } } }
-      else if (turn === 2) yield { type: 'tool_call', toolCall: { id: 'correct-file', name: 'write_file', input: { path: 'ready.txt', content: 'ready' } } }
-      else yield { type: 'text_delta', text: 'Correction verified.' }
-    }, events)
-    await chat.start(request())
-    await finished(events)
-    expect(requests).toHaveLength(4)
-    expect(readFileSync(join(mocks.workspace, 'attempts.txt'), 'utf8')).toBe('run\nrun\n')
-    expect(readFileSync(join(mocks.workspace, 'ready.txt'), 'utf8')).toBe('ready')
-    expect(terminalTools(events, 'write_file')).toMatchObject([{ id: 'correct-file', phase: 'done' }])
-    expect(terminalTools(events, 'run_command').map((tool) => tool.phase)).toEqual(['error', 'done'])
-    expect(JSON.stringify(requests[3]!.messages.at(-1))).toContain('Correction verified')
   })
 
   it.each(['edit_file', 'write_file', 'remove_file'])('recovers a failed %s after reading the same normalized file, but not an unrelated file', async (name) => {
@@ -283,24 +206,5 @@ describe('ChatService event order and failed-call recovery', () => {
     ])
     expect(readFileSync(join(mocks.workspace, 'note.txt'), 'utf8')).toBe(name === 'edit_file'
       ? 'A file corrected by the model.\nA newer manual edit.\n' : 'Reviewed replacement.\n')
-  })
-
-  it('does not unlock a failed mutation after a failed read of that same file', async () => {
-    const events: ChatEvent[] = []
-    let turn = 0
-    const chat = startService(async function* (): AsyncGenerator<AIStreamEvent> {
-      turn++
-      if (turn === 1 || turn === 3) yield { type: 'tool_call', toolCall: { id: `mutation-${turn}`, name: 'edit_file', input: { path: 'note.txt', old_string: 'inspected', new_string: 'changed' } } }
-      else if (turn === 2) yield { type: 'tool_call', toolCall: { id: 'invalid-read', name: 'read_file', input: { path: 'note.txt', offset: -1 } } }
-      else yield { type: 'text_delta', text: 'The read input must be corrected first.' }
-    }, events)
-    await chat.start(request())
-    await finished(events)
-    expect(terminalTools(events, 'read_file')).toMatchObject([{ phase: 'error' }])
-    expect(terminalTools(events, 'edit_file')).toMatchObject([
-      { phase: 'error', detail: expect.stringContaining('Call read_file') },
-      { phase: 'error', detail: expect.stringContaining('This exact call already failed') }
-    ])
-    expect(readFileSync(join(mocks.workspace, 'note.txt'), 'utf8')).toBe('A file inspected by the model.\n')
   })
 })

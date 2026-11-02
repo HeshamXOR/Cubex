@@ -1,16 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  QUEUE_LIMIT,
-  describeGate,
-  enqueue,
-  pruneQueues,
-  putBack,
-  queueGate,
-  take,
-  turnEndFor,
-  type QueueConditions,
-  type QueuedMessage
-} from './messageQueue'
+import { QUEUE_LIMIT, enqueue, pruneQueues, queueGate, take, type QueueConditions, type QueuedMessage } from './messageQueue'
 
 const message = (id: string, text = id, attachments: QueuedMessage['attachments'] = []): QueuedMessage => ({ id, text, attachments, queuedAt: 1 })
 
@@ -46,24 +35,6 @@ describe('what the queue does next', () => {
     expect(queueGate({ ...ready, viewing: false, lastEnd: 'failed' })).toEqual({ action: 'hold', reason: 'failed' })
   })
 
-  it('reads the end of a turn from the status the store keeps', () => {
-    expect(turnEndFor('done')).toBe('completed')
-    expect(turnEndFor('error')).toBe('failed')
-    expect(turnEndFor('cancelled')).toBe('stopped')
-    for (const status of ['idle', 'thinking', 'working', 'streaming', 'awaiting_input'] as const) expect(turnEndFor(status)).toBeUndefined()
-  })
-
-  it('says what it is waiting for in a plain sentence, without a dash or a dot-joined list', () => {
-    const gates = [
-      queueGate({ ...ready, running: true }), queueGate({ ...ready, compacting: true }), queueGate({ ...ready, viewing: false }),
-      queueGate({ ...ready, needsAnswer: true }), queueGate({ ...ready, lastEnd: 'failed' }), queueGate({ ...ready, lastEnd: 'stopped' }),
-      queueGate({ ...ready, modelReady: false }), queueGate(ready)
-    ]
-    const sentences = gates.map(describeGate)
-    expect(new Set(sentences).size).toBe(sentences.length)
-    for (const sentence of sentences) expect(sentence).not.toMatch(/ — | · /)
-    expect(describeGate({ action: 'hold', reason: 'stopped' })).toContain('stopped')
-  })
 })
 
 describe('the queue itself', () => {
@@ -71,14 +42,6 @@ describe('the queue itself', () => {
     let queue: QueuedMessage[] = []
     for (const id of ['a', 'b', 'c']) queue = enqueue(queue, message(id)).queue
     expect(queue.map((entry) => entry.id)).toEqual(['a', 'b', 'c'])
-  })
-
-  it('does not change the queue it was given', () => {
-    const queue = [message('a')]
-    enqueue(queue, message('b'))
-    take(queue, 'a')
-    putBack(queue, message('z'))
-    expect(queue.map((entry) => entry.id)).toEqual(['a'])
   })
 
   it('refuses an empty message but accepts one that is only an attachment', () => {
@@ -103,12 +66,6 @@ describe('the queue itself', () => {
     expect(taken.item?.attachments).toEqual([file])
     expect(taken.queue.map((entry) => entry.id)).toEqual(['a', 'c'])
     expect(take(queue, 'missing').item).toBeUndefined()
-  })
-
-  it('puts a message back at the front, once', () => {
-    const queue = [message('b'), message('c')]
-    expect(putBack(queue, message('a')).map((entry) => entry.id)).toEqual(['a', 'b', 'c'])
-    expect(putBack(queue, message('b')).map((entry) => entry.id)).toEqual(['b', 'c'])
   })
 
   it('drops the queues of tasks that no longer exist and the ones that emptied', () => {

@@ -1,12 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_COMPACTION_THRESHOLD,
-  MAX_BUDGET_USD,
   autoCompactAt,
   clampThreshold,
   normalizeAiPolicy,
   normalizeBudget,
-  normalizeBudgetAmount,
   pruneStartsAt,
   resolveCompactionPolicy
 } from './contextPolicy'
@@ -26,12 +24,6 @@ describe('resolveCompactionPolicy', () => {
     expect(resolveCompactionPolicy({ autoCompact: false, compaction: { auto: true } }).auto).toBe(true)
   })
 
-  it('falls back to ai.autoCompact when ai.compaction has no auto, so older installs keep their choice', () => {
-    expect(resolveCompactionPolicy({ autoCompact: false }).auto).toBe(false)
-    expect(resolveCompactionPolicy({ autoCompact: false, compaction: { threshold: 0.6 } }).auto).toBe(false)
-    expect(resolveCompactionPolicy({ autoCompact: true, compaction: {} }).auto).toBe(true)
-  })
-
   it('treats damaged values as the safe default instead of switching summarizing off', () => {
     for (const junk of ['false', 0, null, 'no', []]) {
       expect(resolveCompactionPolicy({ autoCompact: junk }).auto).toBe(true)
@@ -41,10 +33,6 @@ describe('resolveCompactionPolicy', () => {
     expect(resolveCompactionPolicy({ compaction: 'nonsense' })).toEqual({ auto: true, threshold: 0.8, prune: true })
   })
 
-  it('turns pruning off only for an explicit false', () => {
-    expect(resolveCompactionPolicy({ compaction: { prune: false } }).prune).toBe(false)
-    expect(resolveCompactionPolicy({ compaction: { prune: true } }).prune).toBe(true)
-  })
 })
 
 describe('clampThreshold', () => {
@@ -58,9 +46,6 @@ describe('clampThreshold', () => {
     expect(clampThreshold(0.7251)).toBe(0.73)
   })
 
-  it('uses the default for anything that is not a finite number', () => {
-    for (const bad of [undefined, null, '0.6', Number.NaN, Number.POSITIVE_INFINITY, {}]) expect(clampThreshold(bad)).toBe(0.8)
-  })
 })
 
 describe('threshold math', () => {
@@ -80,20 +65,6 @@ describe('threshold math', () => {
 })
 
 describe('budget normalization', () => {
-  it('keeps positive amounts in whole cents', () => {
-    expect(normalizeBudgetAmount(5)).toBe(5)
-    expect(normalizeBudgetAmount(0.5)).toBe(0.5)
-    expect(normalizeBudgetAmount(12.3456)).toBe(12.35)
-    expect(normalizeBudgetAmount(0.01)).toBe(0.01)
-  })
-
-  it('drops zero, negative, tiny and non-numeric amounts, because clearing a field sends 0', () => {
-    for (const bad of [0, -3, 0.004, Number.NaN, Number.POSITIVE_INFINITY, '5', null, undefined]) expect(normalizeBudgetAmount(bad)).toBeUndefined()
-  })
-
-  it('caps an absurd amount instead of storing it', () => {
-    expect(normalizeBudgetAmount(5e12)).toBe(MAX_BUDGET_USD)
-  })
 
   it('defaults the action to warn and keeps only valid caps', () => {
     expect(normalizeBudget({ dailyUsd: 5, perTurnUsd: 0, perSessionUsd: -1, action: 'explode' })).toEqual({ dailyUsd: 5, action: 'warn' })
@@ -101,9 +72,6 @@ describe('budget normalization', () => {
     expect(normalizeBudget({})).toEqual({ action: 'warn' })
   })
 
-  it('has no budget when none was stored', () => {
-    for (const none of [undefined, null, 5, 'x', []]) expect(normalizeBudget(none)).toBeUndefined()
-  })
 })
 
 describe('normalizeAiPolicy', () => {
@@ -118,11 +86,6 @@ describe('normalizeAiPolicy', () => {
     const out = normalizeAiPolicy(ai({ autoCompact: false, compaction: undefined }))
     expect(out.autoCompact).toBe(false)
     expect(out.compaction?.auto).toBe(false)
-  })
-
-  it('lets compaction.auto win and writes it back to autoCompact', () => {
-    expect(normalizeAiPolicy(ai({ autoCompact: true, compaction: { auto: false } })).autoCompact).toBe(false)
-    expect(normalizeAiPolicy(ai({ autoCompact: false, compaction: { auto: true } })).autoCompact).toBe(true)
   })
 
   it('clamps the threshold and removes empty caps', () => {

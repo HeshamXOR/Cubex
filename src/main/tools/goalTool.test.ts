@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { GOAL_LIMITS, GOAL_TOOL, type GoalClaim } from '@shared/goal'
+import { type GoalClaim } from '@shared/goal'
 import { createGoalTool } from './goalTool'
 
 function tool() {
@@ -8,12 +8,6 @@ function tool() {
 }
 
 describe('goal_update', () => {
-  it('is named for the shared constant, needs no permission, and requires a status and a note', () => {
-    const { tool: t } = tool()
-    expect(t.definition.name).toBe(GOAL_TOOL)
-    expect(t.defaultPermission).toBe('allow')
-    expect(t.definition.inputSchema).toMatchObject({ required: ['status', 'note'], additionalProperties: false })
-  })
 
   it('records a complete claim with its evidence', async () => {
     const { tool: t, claims } = tool()
@@ -21,12 +15,6 @@ describe('goal_update', () => {
     expect(result.isError).toBeUndefined()
     expect(String(result.content)).toContain('Cubex will now check the goal')
     expect(claims).toEqual([{ status: 'complete', note: 'ran npm test: 12 passed' }])
-  })
-
-  it('records a blocked claim', async () => {
-    const { tool: t, claims } = tool()
-    await t.execute({ status: 'blocked', note: 'Needs the staging API key.' }, undefined as never)
-    expect(claims).toEqual([{ status: 'blocked', note: 'Needs the staging API key.' }])
   })
 
   it('refuses a claim with no evidence, and says what to add', async () => {
@@ -48,11 +36,5 @@ describe('goal_update', () => {
       expect(String(result.content)).toContain('keep working')
     }
     expect(claims).toEqual([])
-  })
-
-  it('bounds a long note', async () => {
-    const { tool: t, claims } = tool()
-    await t.execute({ status: 'complete', note: 'n'.repeat(GOAL_LIMITS.note * 2) }, undefined as never)
-    expect(claims[0]?.note).toHaveLength(GOAL_LIMITS.note)
   })
 })

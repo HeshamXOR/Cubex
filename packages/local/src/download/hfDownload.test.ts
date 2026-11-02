@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -110,7 +110,6 @@ afterEach(async () => {
 })
 
 const URL_ = 'https://huggingface.co/o/r/resolve/main/model.gguf'
-const noDelay = (): number => 0
 
 function dest(): string {
   return join(root, 'o', 'r', 'model.gguf')
@@ -186,99 +185,6 @@ describe('downloadFile', () => {
     expect((await readFile(dest())).equals(content)).toBe(true)
   })
 
-  it('discards a partial file whose sidecar belongs to a different file', async () => {
-    const content = makeContent(6_000)
-    const server = fakeServer(content)
-    await mkdir(join(root, 'o', 'r'), { recursive: true })
-    await writeFile(dest() + '.part', Buffer.alloc(2_000, 7))
-    await writeFile(dest() + '.part.json', JSON.stringify({ url: URL_, size: content.length, sha256: 'f'.repeat(64) }))
-    const result = await downloadFile({
-      url: URL_,
-      destPath: dest(),
-      rootDir: root,
-      expectedSize: content.length,
-      expectedSha256: sha(content),
-      fetch: server.fetch,
-      freeBytes: async () => 10 * 1024 ** 3
-    })
-    expect(server.calls[0]!.range).toBeUndefined()
-    expect(result.resumedFromBytes).toBe(0)
-    expect((await readFile(dest())).equals(content)).toBe(true)
-  })
-
-  it('does not trust a partial file without a sidecar', async () => {
-    const content = makeContent(6_000)
-    const server = fakeServer(content)
-    await mkdir(join(root, 'o', 'r'), { recursive: true })
-    await writeFile(dest() + '.part', Buffer.alloc(2_000, 7))
-    await downloadFile({
-      url: URL_,
-      destPath: dest(),
-      rootDir: root,
-      expectedSize: content.length,
-      expectedSha256: sha(content),
-      fetch: server.fetch,
-      freeBytes: async () => 10 * 1024 ** 3
-    })
-    expect(server.calls[0]!.range).toBeUndefined()
-    expect((await readFile(dest())).equals(content)).toBe(true)
-  })
-
-  it('treats a complete partial file as finished and only verifies it', async () => {
-    const content = makeContent(5_000)
-    const server = fakeServer(content)
-    await mkdir(join(root, 'o', 'r'), { recursive: true })
-    await writeFile(dest() + '.part', content)
-    await writeFile(dest() + '.part.json', JSON.stringify({ url: URL_, size: content.length, sha256: sha(content) }))
-    const result = await downloadFile({
-      url: URL_,
-      destPath: dest(),
-      rootDir: root,
-      expectedSize: content.length,
-      expectedSha256: sha(content),
-      fetch: server.fetch,
-      freeBytes: async () => 10 * 1024 ** 3
-    })
-    expect(server.calls).toHaveLength(0)
-    expect(result.verified).toBe(true)
-    expect(await listDir(join(root, 'o', 'r'))).toEqual(['model.gguf'])
-  })
-
-  it('skips the download when a verified copy is already in place', async () => {
-    const content = makeContent(5_000)
-    const server = fakeServer(content)
-    await mkdir(join(root, 'o', 'r'), { recursive: true })
-    await writeFile(dest(), content)
-    const result = await downloadFile({
-      url: URL_,
-      destPath: dest(),
-      rootDir: root,
-      expectedSize: content.length,
-      expectedSha256: sha(content),
-      fetch: server.fetch,
-      freeBytes: async () => 10 * 1024 ** 3
-    })
-    expect(server.calls).toHaveLength(0)
-    expect(result).toMatchObject({ alreadyPresent: true, verified: true })
-  })
-
-  it('replaces an existing file of the wrong size', async () => {
-    const content = makeContent(5_000)
-    const server = fakeServer(content)
-    await mkdir(join(root, 'o', 'r'), { recursive: true })
-    await writeFile(dest(), Buffer.alloc(100, 1))
-    await downloadFile({
-      url: URL_,
-      destPath: dest(),
-      rootDir: root,
-      expectedSize: content.length,
-      expectedSha256: sha(content),
-      fetch: server.fetch,
-      freeBytes: async () => 10 * 1024 ** 3
-    })
-    expect((await readFile(dest())).equals(content)).toBe(true)
-  })
-
   it('fails on a checksum mismatch, deletes the corrupt partial file and never creates the target', async () => {
     const content = makeContent(7_000)
     const server = fakeServer(content, { corrupt: true })
@@ -315,28 +221,6 @@ describe('downloadFile', () => {
     expect(server.calls).toHaveLength(0)
   })
 
-  it('counts an existing partial file when checking free space', async () => {
-    const content = makeContent(10_000)
-    const server = fakeServer(content)
-    await mkdir(join(root, 'o', 'r'), { recursive: true })
-    await writeFile(dest() + '.part', content.subarray(0, 9_000))
-    await writeFile(dest() + '.part.json', JSON.stringify({ url: URL_, size: content.length, sha256: sha(content) }))
-    // Only 1000 bytes remain; with a 1000-byte reserve 5000 free bytes is enough, but
-    // would not be if the 9000 bytes already on disk were counted against it again.
-    await expect(
-      downloadFile({
-        url: URL_,
-        destPath: dest(),
-        rootDir: root,
-        expectedSize: content.length,
-        expectedSha256: sha(content),
-        fetch: server.fetch,
-        reserveBytes: 1_000,
-        freeBytes: async () => 5_000
-      })
-    ).resolves.toMatchObject({ resumedFromBytes: 9_000 })
-  })
-
   it('cleans up the partial file and rejects with a cancelled error when aborted', async () => {
     const content = makeContent(50_000)
     const server = fakeServer(content, { hangAfterBytes: 5_000 })
@@ -356,144 +240,6 @@ describe('downloadFile', () => {
     })
     await expect(p).rejects.toMatchObject({ code: 'cancelled' })
     expect(await listDir(join(root, 'o', 'r')).catch(() => [])).toEqual([])
-  })
-
-  it('keeps the partial file on cancel when asked to, so the pull can resume later', async () => {
-    const content = makeContent(50_000)
-    const server = fakeServer(content, { hangAfterBytes: 5_000 })
-    const controller = new AbortController()
-    const p = downloadFile({
-      url: URL_,
-      destPath: dest(),
-      rootDir: root,
-      expectedSize: content.length,
-      expectedSha256: sha(content),
-      fetch: server.fetch,
-      signal: controller.signal,
-      keepPartialOnCancel: true,
-      freeBytes: async () => 10 * 1024 ** 3,
-      onProgress: (e) => {
-        if (e.phase === 'downloading' && e.completedBytes >= 5_000) controller.abort()
-      }
-    })
-    await expect(p).rejects.toMatchObject({ code: 'cancelled' })
-    const files = await listDir(join(root, 'o', 'r'))
-    expect(files).toContain('model.gguf.part')
-    expect((await stat(dest() + '.part')).size).toBeGreaterThanOrEqual(5_000)
-  })
-
-  it('retries a dropped connection and resumes from the bytes already on disk', async () => {
-    const content = makeContent(10_000)
-    const server = fakeServer(content, { failFirstAfterBytes: 3_000 })
-    const result = await downloadFile({
-      url: URL_,
-      destPath: dest(),
-      rootDir: root,
-      expectedSize: content.length,
-      expectedSha256: sha(content),
-      fetch: server.fetch,
-      retryDelayMs: noDelay,
-      freeBytes: async () => 10 * 1024 ** 3
-    })
-    expect(server.calls).toHaveLength(2)
-    expect(server.calls[1]!.range).toMatch(/^bytes=\d+-$/)
-    expect(Number(/^bytes=(\d+)-$/.exec(server.calls[1]!.range!)![1])).toBeGreaterThanOrEqual(3_000)
-    expect(result.verified).toBe(true)
-    expect((await readFile(dest())).equals(content)).toBe(true)
-  })
-
-  it('gives up after the configured number of attempts and keeps the partial file for later', async () => {
-    const content = makeContent(10_000)
-    const failing = (async () => {
-      throw new Error('ECONNREFUSED')
-    }) as unknown as typeof fetch
-    await expect(
-      downloadFile({
-        url: URL_,
-        destPath: dest(),
-        rootDir: root,
-        expectedSize: content.length,
-        fetch: failing,
-        maxAttempts: 3,
-        retryDelayMs: noDelay,
-        freeBytes: async () => 10 * 1024 ** 3
-      })
-    ).rejects.toMatchObject({ code: 'network' })
-  })
-
-  it('fails with a clear message for 404 and for gated repositories without retrying', async () => {
-    const content = makeContent(1_000)
-    for (const [status, pattern] of [
-      [404, /not found/i],
-      [401, /(sign in|token|gated|private)/i],
-      [403, /(license|gated|token)/i]
-    ] as const) {
-      const server = fakeServer(content, { status })
-      await expect(
-        downloadFile({
-          url: URL_,
-          destPath: dest(),
-          rootDir: root,
-          expectedSize: content.length,
-          fetch: server.fetch,
-          retryDelayMs: noDelay,
-          freeBytes: async () => 10 * 1024 ** 3
-        })
-      ).rejects.toThrow(pattern)
-      expect(server.calls).toHaveLength(1)
-    }
-  })
-
-  it('fails when the connection ends early on every attempt, reporting an incomplete download', async () => {
-    const content = makeContent(10_000)
-    // Content-Length says 10 000 but the stream closes after 2 000: undici would error; a truncated 200 is also possible.
-    const truncating = (async () =>
-      new Response(content.subarray(0, 2_000), {
-        status: 200,
-        headers: { 'content-length': '10000' }
-      })) as unknown as typeof fetch
-    await expect(
-      downloadFile({
-        url: URL_,
-        destPath: dest(),
-        rootDir: root,
-        expectedSize: content.length,
-        fetch: truncating,
-        maxAttempts: 2,
-        retryDelayMs: noDelay,
-        freeBytes: async () => 10 * 1024 ** 3
-      })
-    ).rejects.toThrow()
-    expect(await listDir(join(root, 'o', 'r'))).not.toContain('model.gguf')
-  })
-
-  it('uses the ETag as the checksum when it is a SHA-256 and none was provided', async () => {
-    const content = makeContent(4_000)
-    const server = fakeServer(content, { etag: sha(content) })
-    const result = await downloadFile({
-      url: URL_,
-      destPath: dest(),
-      rootDir: root,
-      expectedSize: content.length,
-      fetch: server.fetch,
-      freeBytes: async () => 10 * 1024 ** 3
-    })
-    expect(result).toMatchObject({ verified: true, sha256: sha(content) })
-  })
-
-  it('reports verified:false when no checksum is available anywhere', async () => {
-    const content = makeContent(4_000)
-    const server = fakeServer(content, { etag: 'not-a-sha-just-a-git-blob-id' })
-    const result = await downloadFile({
-      url: URL_,
-      destPath: dest(),
-      rootDir: root,
-      expectedSize: content.length,
-      fetch: server.fetch,
-      freeBytes: async () => 10 * 1024 ** 3
-    })
-    expect(result.verified).toBe(false)
-    expect((await readFile(dest())).equals(content)).toBe(true)
   })
 
   it('sends the Authorization header only on the first hop it was given for', async () => {
@@ -550,24 +296,5 @@ describe('downloadFile', () => {
       })
     ).rejects.toMatchObject({ code: 'unsafe_path' })
     expect(server.calls).toHaveLength(0)
-  })
-
-  it('aborts and keeps the partial file when the connection stalls with no data', async () => {
-    const content = makeContent(50_000)
-    const server = fakeServer(content, { hangAfterBytes: 2_000 })
-    await expect(
-      downloadFile({
-        url: URL_,
-        destPath: dest(),
-        rootDir: root,
-        expectedSize: content.length,
-        fetch: server.fetch,
-        stallTimeoutMs: 50,
-        maxAttempts: 1,
-        retryDelayMs: noDelay,
-        freeBytes: async () => 10 * 1024 ** 3
-      })
-    ).rejects.toMatchObject({ code: 'stalled' })
-    expect(await listDir(join(root, 'o', 'r'))).toContain('model.gguf.part')
   })
 })

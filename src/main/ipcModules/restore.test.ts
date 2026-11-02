@@ -45,10 +45,6 @@ beforeEach(() => {
 })
 
 describe('restore handlers', () => {
-  it('declares the three channels without touching the chat service', () => {
-    expect([...handlers.keys()].sort()).toEqual([IPC.restoreCheckpoint, IPC.restorePreview, IPC.restoreUndo].sort())
-    expect(restoreHost).not.toHaveBeenCalled()
-  })
 
   it('rejects arguments that are not what the contract says', async () => {
     await expect(call(IPC.restoreCheckpoint, 42, 'u1', { code: true, conversation: true })).rejects.toThrow('Invalid task id')

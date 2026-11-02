@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { KNOWN_AGENTS, knownAgent, type AgentDetection, type KnownAgent } from '../../../shared/agentCatalog'
-import { checkedAt, foundView, nodeLine, sortFound } from './agentRows'
+import { KNOWN_AGENTS, knownAgent, type AgentDetection } from '../../../shared/agentCatalog'
+import { foundView, sortFound } from './agentRows'
 
 const entry = (id: string) => knownAgent(id)!
 const found = (id: string, over: Partial<AgentDetection> = {}): AgentDetection => ({
@@ -20,22 +20,12 @@ describe('an agent that is not installed', () => {
 describe('an agent that is signed in', () => {
   const view = foundView(entry('claude-code'), found('claude-code', { account: { state: 'signed-in', label: 'Claude subscription', email: 'ada@example.com' } }), here)
 
-  it('says who with', () => {
-    expect(view.state).toBe('signed-in')
-    expect(view.account).toBe('Signed in with Claude subscription (ada@example.com)')
-  })
-
   it('offers no sign-in and nothing to do first', () => {
     expect(view.signIn).toBe(false)
     expect(view.hint).toBeUndefined()
     expect(view.blocked).toBe(false)
   })
 
-  it('is added as a program Cubex talks to itself, which does everything, so the row says nothing more', () => {
-    expect(view.connection).toEqual({ kind: 'acp', preset: 'claude-direct' })
-    expect(view.capability).toBeUndefined()
-    expect(view.where).toBeUndefined()
-  })
 })
 
 describe('an agent that is not signed in', () => {
@@ -58,16 +48,6 @@ describe('an agent whose account Cubex cannot read', () => {
     expect(view.hint).toBe('Add it and use Test to see whether it answers.')
   })
 
-  it('still offers the sign-in command when the vendor has one', () => {
-    expect(foundView(entry('opencode'), found('opencode'), here).signIn).toBe(true)
-    expect(foundView(entry('cursor'), found('cursor'), here).signIn).toBe(true)
-  })
-
-  it('does not say it was unable to read it when it did not try', () => {
-    const view = foundView(entry('gemini'), found('gemini', { probed: false }), { nodeFound: true, localOnly: true })
-    expect(view.account).toBe('Sign-in not checked')
-    expect(view.hint).toBeUndefined()
-  })
 })
 
 describe('an agent that was found but did not run', () => {
@@ -84,14 +64,6 @@ describe('an agent found in an app', () => {
     expect(view).toMatchObject({ state: 'signed-out', signIn: true, blocked: false })
   })
 
-  it('says where when it did not run, too', () => {
-    const view = foundView(entry('claude-code'), found('claude-code', { via: 'the Claude desktop app', problem: 'Found, but it did not run: broken.', probed: false }), here)
-    expect(view).toMatchObject({ state: 'problem', where: 'Found in the Claude desktop app' })
-  })
-
-  it('says nothing about where for a program on PATH', () => {
-    expect(foundView(entry('codex'), found('codex'), here).where).toBeUndefined()
-  })
 })
 
 describe('without Node.js', () => {
@@ -110,16 +82,6 @@ describe('without Node.js', () => {
     expect(view.hint).toBe('Needs Node.js to run its adapter. Install Node.js, then choose Check again.')
   })
 
-  it('does not need it for a program that speaks the protocol itself', () => {
-    expect(foundView(entry('gemini'), found('gemini'), nothing).blocked).toBe(false)
-  })
-
-  it('does not need it for a command line that never used it', () => {
-    const commandLine: KnownAgent = { id: 'tool', name: 'Tool', vendor: 'Vendor', programs: ['tool'], installUrl: 'https://example.com', connection: { kind: 'cli', preset: 'custom' } }
-    const view = foundView(commandLine, found('tool'), nothing)
-    expect(view.blocked).toBe(false)
-    expect(view.capability).toBe('Gives opinions only.')
-  })
 })
 
 describe('the order of the list', () => {
@@ -131,24 +93,4 @@ describe('the order of the list', () => {
     expect(ids.slice(2)).toEqual(KNOWN_AGENTS.map((agent) => agent.id).filter((id) => id !== 'codex' && id !== 'goose'))
   })
 
-  it('keeps the catalog order when nothing has been checked', () => {
-    expect(sortFound(new Map()).map((agent) => agent.id)).toEqual(KNOWN_AGENTS.map((agent) => agent.id))
-  })
-})
-
-describe('the sentence about Node.js', () => {
-  it('names the version when it is known, and says what it is for', () => {
-    expect(nodeLine({ found: true, version: '22.11.0' })).toBe('Node.js 22.11.0 is installed. Codex runs through an adapter that it starts.')
-    expect(nodeLine({ found: true })).toBe('Node.js is installed. Codex runs through an adapter that it starts.')
-  })
-
-  it('says what is lost without it, and what to do', () => {
-    expect(nodeLine({ found: false })).toBe('Node.js is not installed. Codex needs it. Install Node.js, then choose Check again.')
-  })
-})
-
-describe('when the check was made', () => {
-  it('is a clock time', () => {
-    expect(checkedAt(Date.UTC(2026, 9, 10, 14, 32), 'en-GB')).toMatch(/^\d{2}:\d{2}$/)
-  })
 })

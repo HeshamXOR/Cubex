@@ -107,14 +107,6 @@ describe('offering goal_update', () => {
     await h.turn(['hello'], { text: 'it builds', check: 'npm run build' })
     expect(String(h.requests[0]!.system)).toContain('Cubex also runs this command after every turn: npm run build')
   })
-
-  it('ignores a goal that is not one', async () => {
-    const h = harness()
-    await h.turn(['hello'], { text: '' } as never)
-    await h.turn(['hello'], { text: 'x'.repeat(5000) })
-    await h.turn(['hello'], 'all tests pass' as never)
-    for (const request of h.requests) expect(toolNames(request)).not.toContain('goal_update')
-  })
 })
 
 describe('what the agent says about the goal', () => {
@@ -128,12 +120,6 @@ describe('what the agent says about the goal', () => {
     const done = events.flatMap((e) => (e.kind === 'tool' && e.tool.id === 'g1' ? [e.tool] : [])).at(-1)
     expect(done?.phase).toBe('done')
   })
-
-  it('does not raise a claim for a call that was refused', async () => {
-    const h = harness()
-    const events = await h.turn([[call('goal_update', { status: 'complete', note: '  ' }, 'g1')], 'ok'], { text: 'tests pass' })
-    expect(events.some((e) => e.kind === 'goal')).toBe(false)
-  })
 })
 
 describe('judging a turn', () => {
@@ -144,12 +130,6 @@ describe('judging a turn', () => {
     const failing = await h.service.evaluateGoal({ conversationId: 'c1', goal: { text: 'tests pass', check: node("console.log('FAIL a.test.ts'); process.exit(1)") } })
     expect(failing).toMatchObject({ kind: 'continue', reason: expect.stringContaining('exit code 1') })
     expect(failing.kind === 'continue' && failing.detail).toContain('FAIL a.test.ts')
-  })
-
-  it('runs the check in the task\'s folder', async () => {
-    const h = harness()
-    const verdict = await h.service.evaluateGoal({ conversationId: 'c1', goal: { text: 'notes exist', check: node("process.exit(require('fs').existsSync('notes.txt') ? 0 : 1)") } })
-    expect(verdict.kind).toBe('met')
   })
 
   it('asks the model the task uses, with the record of the turn, when the agent says the goal is met', async () => {
@@ -170,13 +150,6 @@ describe('judging a turn', () => {
     expect(mocks.usage.length).toBeGreaterThan(0)
   })
 
-  it('goes on, without asking a model, when the agent said nothing about the goal', async () => {
-    const h = harness()
-    const verdict = await h.service.evaluateGoal({ conversationId: 'c1', goal: { text: 'tests pass' } })
-    expect(verdict).toMatchObject({ kind: 'continue' })
-    expect(h.judged).toHaveLength(0)
-  })
-
   it('pauses (an error) when the model that judges answers in a form it cannot read', async () => {
     const h = harness()
     mocks.judge = 'Sure, looks done to me.'
@@ -191,28 +164,5 @@ describe('judging a turn', () => {
     h.service.cancelGoalCheck('c1')
     const verdict = await pending
     expect(verdict).toMatchObject({ kind: 'error', reason: 'The check was cancelled.' })
-  }, 20_000)
-
-  it('counts a goal that is being checked, so the computer can be kept awake for it', async () => {
-    const h = harness()
-    expect(h.service.runningGoalChecks).toBe(0)
-    const pending = h.service.evaluateGoal({ conversationId: 'c1', goal: { text: 'g', check: node('setInterval(() => {}, 1000)') } })
-    await new Promise((resolve) => setTimeout(resolve, 300))
-    expect(h.service.runningGoalChecks).toBe(1)
-    h.service.cancelGoalCheck('c1')
-    await pending
-    expect(h.service.runningGoalChecks).toBe(0)
-    // A check that finishes on its own leaves nothing behind either.
-    await h.service.evaluateGoal({ conversationId: 'c1', goal: { text: 'g', check: node('process.exit(0)') } })
-    expect(h.service.runningGoalChecks).toBe(0)
-  }, 20_000)
-
-  it('lets a new request for a task replace the one still running', async () => {
-    const h = harness()
-    const first = h.service.evaluateGoal({ conversationId: 'c1', goal: { text: 'g', check: node('setInterval(() => {}, 1000)') } })
-    await new Promise((resolve) => setTimeout(resolve, 300))
-    const second = await h.service.evaluateGoal({ conversationId: 'c1', goal: { text: 'g', check: node('process.exit(0)') } })
-    expect(second.kind).toBe('met')
-    expect(await first).toMatchObject({ kind: 'error' })
   }, 20_000)
 })

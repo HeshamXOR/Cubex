@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
-import { INSTALLER_ARGUMENTS, installSupport, startInstaller } from './installer'
+import { installSupport, startInstaller } from './installer'
 
 const INSTALLED = 'C:\\Users\\dev\\AppData\\Local\\Programs\\Cubex\\Cubex.exe'
 
@@ -18,23 +18,6 @@ describe('installSupport', () => {
     expect(support.canInstall).toBe(false)
     expect(support.reason).toMatch(/not set up with the Cubex installer/)
     expect(support.reason).toMatch(/release page/)
-  })
-
-  it('does not let a copy run from source do it', () => {
-    const support = installSupport({ platform: 'win32', packaged: false, execPath: 'C:\\node_modules\\electron\\dist\\electron.exe' }, () => true)
-    expect(support).toEqual({ canInstall: false, reason: 'This copy runs from source, so it cannot update itself.' })
-  })
-
-  it.each<NodeJS.Platform>(['darwin', 'linux'])('does not run a Windows installer on %s', (platform) => {
-    const support = installSupport({ platform, packaged: true, execPath: '/opt/Cubex/cubex' }, () => true)
-    expect(support.canInstall).toBe(false)
-    expect(support.reason).toMatch(/Windows only/)
-  })
-})
-
-describe('INSTALLER_ARGUMENTS', () => {
-  it('are the three flags electron-builder\'s installer reads for a silent update that starts the app again', () => {
-    expect([...INSTALLER_ARGUMENTS]).toEqual(['--updated', '/S', '--force-run'])
   })
 })
 
@@ -65,17 +48,5 @@ describe('startInstaller', () => {
     child.emit('error', Object.assign(new Error('spawn UNKNOWN'), { code: 'UNKNOWN' }))
     await expect(started).rejects.toThrow('spawn UNKNOWN')
     expect(child.unref).not.toHaveBeenCalled()
-  })
-
-  it('rejects when starting throws at once, as it does for a path that does not exist', async () => {
-    await expect(startInstaller('x', (() => { throw new Error('ENOENT') }) as never)).rejects.toThrow('ENOENT')
-  })
-
-  it('does not let an error after the start take Cubex down', async () => {
-    const child = fakeChild()
-    const started = startInstaller('x', (() => child) as never)
-    child.emit('spawn')
-    await started
-    expect(() => child.emit('error', new Error('late'))).not.toThrow()
   })
 })

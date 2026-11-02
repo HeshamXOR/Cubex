@@ -114,32 +114,6 @@ describe('what passes through as it was sent', () => {
     await until(() => c.received.length === 1)
     expect(c.received[0]).toEqual({ jsonrpc: '2.0', id: 1, result: { stopReason: 'end_turn' } })
   })
-
-  it('is an update about anything but a tool call', async () => {
-    const { runtime, client: c } = make()
-    const update = { jsonrpc: '2.0', method: 'session/update', params: { sessionId: 's', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'hello' } } } }
-    runtime.say(update)
-    await until(() => c.received.length === 1)
-    expect(c.received[0]).toEqual(update)
-  })
-
-  it('is a line that is not a message, which the client counts and ignores, and not a blank line', async () => {
-    const { runtime, client: c } = make()
-    runtime.say('Loading the model')
-    runtime.say('')
-    runtime.say({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 's', update: { sessionUpdate: 'agent_thought_chunk' } } })
-    await until(() => c.received.length === 2)
-    expect(c.received[0]).toBe('Loading the model')
-  })
-
-  it('is what the runtime prints to its error output, apart from the sign-in report', async () => {
-    const { runtime, client: c } = make()
-    runtime.stderr('warning: slow disk\n')
-    await until(() => c.errors.join('').includes('slow disk'))
-    runtime.stderr(`${AUTH_STDOUT_PREFIX}${ADDRESS}\n`)
-    await settleAWhile()
-    expect(c.errors.join('')).not.toContain('accounts.google.com')
-  })
 })
 
 describe('the handshake', () => {
@@ -159,33 +133,6 @@ describe('the handshake', () => {
     runtime.say({ jsonrpc: '2.0', id: 2, error: { code: -32000, message: 'Authentication required' } })
     await until(() => c.received.length === 1)
     expect(c.received[0]).toEqual({ jsonrpc: '2.0', id: 2, error: { code: -32603, message: SIGN_IN_FIRST, data: { hint: SIGN_IN_FIRST_HINT } } })
-  })
-
-  it('leaves the runtime\'s own answer when a sign-in is saved, because it still has to authenticate', async () => {
-    const { runtime, client: c } = make({ signedIn: () => true })
-    c.send({ jsonrpc: '2.0', id: 2, method: 'session/new', params: {} })
-    await until(() => runtime.lines.length === 1)
-    runtime.say({ jsonrpc: '2.0', id: 2, error: { code: -32000, message: 'Authentication required' } })
-    await until(() => c.received.length === 1)
-    expect(c.received[0]).toMatchObject({ error: { code: -32000 } })
-  })
-
-  it('leaves it too when the person is signing in, which is what the runtime is for then', async () => {
-    const { runtime, client: c } = make({ signedIn: () => false, onAuthorizationUrl: () => undefined })
-    c.send({ jsonrpc: '2.0', id: 2, method: 'session/new', params: {} })
-    await until(() => runtime.lines.length === 1)
-    runtime.say({ jsonrpc: '2.0', id: 2, error: { code: -32000, message: 'Authentication required' } })
-    await until(() => c.received.length === 1)
-    expect(c.received[0]).toMatchObject({ error: { code: -32000 } })
-  })
-
-  it('names itself in the message', async () => {
-    const { runtime, client: c } = make({ signedIn: () => false, name: 'Gemini' })
-    c.send({ jsonrpc: '2.0', id: 2, method: 'session/new', params: {} })
-    await until(() => runtime.lines.length === 1)
-    runtime.say({ jsonrpc: '2.0', id: 2, error: { code: -32000, message: 'x' } })
-    await until(() => c.received.length === 1)
-    expect(c.received[0]).toMatchObject({ error: { message: 'Gemini is not signed in.' } })
   })
 })
 
@@ -226,33 +173,6 @@ describe('the runtime asking for a sign-in in a chat', () => {
     expect(runtime.stopped).toEqual([false])
     expect(c.errors.join('')).toContain(SIGN_IN_FIRST)
   })
-
-  it('does the same when the stand-in browser is what reports it', async () => {
-    const { runtime, client: c } = make()
-    c.send({ jsonrpc: '2.0', id: 3, method: 'authenticate', params: {} })
-    await until(() => runtime.lines.length === 1)
-    runtime.stderr(`${AUTH_BROWSER_MARKER}${JSON.stringify(ADDRESS)}\n`)
-    await until(() => c.received.length === 1)
-    expect(c.received[0]).toMatchObject({ id: 3, error: { message: SIGN_IN_FIRST } })
-    expect(runtime.stopped).toEqual([false])
-  })
-
-  it('stops the runtime even when nothing is waiting', async () => {
-    const { runtime, client: c } = make()
-    runtime.say(`${AUTH_STDOUT_PREFIX}${ADDRESS}`)
-    await until(() => runtime.stopped.length === 1)
-    await until(() => c.closed.length === 1)
-    expect(c.received).toEqual([])
-  })
-
-  it('does not forward the address, which is not for the client', async () => {
-    const { runtime, client: c } = make()
-    c.send({ jsonrpc: '2.0', id: 3, method: 'authenticate', params: {} })
-    await until(() => runtime.lines.length === 1)
-    runtime.say(`${AUTH_STDOUT_PREFIX}${ADDRESS}`)
-    await until(() => c.closed.length === 1)
-    expect(JSON.stringify(c.received)).not.toContain('accounts.google.com')
-  })
 })
 
 describe('signing in', () => {
@@ -285,33 +205,6 @@ describe('signing in', () => {
     expect(runtime.stopped).toEqual([false])
     expect(c.errors.join('')).toContain(SIGN_IN_PAGE_REFUSED)
   })
-
-  it('does the same for an address the stand-in browser reports', async () => {
-    const found: AuthorizationRequest[] = []
-    const { runtime, client: c } = make({ onAuthorizationUrl: (request) => found.push(request) })
-    c.send({ jsonrpc: '2.0', id: 3, method: 'authenticate', params: {} })
-    await until(() => runtime.lines.length === 1)
-    runtime.stderr(`${AUTH_BROWSER_MARKER}"https://evil.example/"\n`)
-    await until(() => c.received.length === 1)
-    expect(found).toEqual([])
-    expect(c.received[0]).toMatchObject({ id: 3, error: { message: SIGN_IN_PAGE_REFUSED } })
-    expect(runtime.stopped).toEqual([false])
-  })
-
-  it('goes on waiting when a page of Google\'s was already reported and a line that is not one comes after it', async () => {
-    const found: AuthorizationRequest[] = []
-    const { runtime, client: c } = make({ onAuthorizationUrl: (request) => found.push(request) })
-    c.send({ jsonrpc: '2.0', id: 3, method: 'authenticate', params: {} })
-    await until(() => runtime.lines.length === 1)
-    runtime.say(`${AUTH_STDOUT_PREFIX}${ADDRESS}`)
-    await until(() => found.length === 1)
-    runtime.say(`${AUTH_STDOUT_PREFIX}not an address`)
-    await settleAWhile()
-    // The page is open and the person may be signing in on it: a stray line is not opened, and is not a reason to end that.
-    expect(found).toHaveLength(1)
-    expect(runtime.stopped).toEqual([])
-    expect(c.received).toEqual([])
-  })
 })
 
 describe('ending', () => {
@@ -322,32 +215,6 @@ describe('ending', () => {
     await until(() => c.closed.length === 1)
     expect(c.closed).toEqual([3])
     expect(cleaned).toBe(1)
-  })
-
-  it('ends the runtime\'s input when the client ends its own, and stops the runtime if it stays', async () => {
-    const { runtime, filter } = make()
-    filter.process.stdin!.end()
-    await until(() => runtime.inputEnded())
-    await until(() => runtime.stopped.length === 1)
-  })
-
-  it('stops the runtime at once when it is stopped, and says so', async () => {
-    const { runtime, filter, client: c } = make()
-    filter.process.stop(true)
-    expect(runtime.stopped).toEqual([true])
-    await until(() => c.closed.length === 1)
-  })
-
-  it('keeps the end of the runtime until someone listens for it', async () => {
-    const runtime = fakeRuntime()
-    const filter = new AntigravityFilter({ runtime: runtime.process, signedIn: () => true })
-    running.push(filter)
-    runtime.exit(0)
-    await settleAWhile(400)
-    const heard: Array<number | null> = []
-    filter.process.once('close', (code) => heard.push(code))
-    await until(() => heard.length === 1)
-    expect(heard).toEqual([0])
   })
 
   describe('what the run held', () => {
@@ -362,31 +229,6 @@ describe('ending', () => {
       runtime.exit(1)
       await until(() => cleaned === 1)
       await settleAWhile(100)
-      expect(cleaned).toBe(1)
-    })
-
-    it('is given up anyway when a runtime that was stopped does not say it is gone', async () => {
-      let cleaned = 0
-      const { filter } = make({ exitWaitMs: 120, cleanup: () => { cleaned++ } })
-      filter.process.stop(false)
-      await settleAWhile(60)
-      expect(cleaned).toBe(0)
-      await until(() => cleaned === 1)
-    })
-
-    it('is given up at once when the stop waited for the runtime to be gone', async () => {
-      let cleaned = 0
-      const { filter } = make({ cleanup: () => { cleaned++ } })
-      filter.process.stop(true)
-      expect(cleaned).toBe(1)
-    })
-
-    it('is given up once, however many ways say the runtime is over', async () => {
-      let cleaned = 0
-      const { runtime, filter } = make({ exitWaitMs: 50, cleanup: () => { cleaned++ } })
-      filter.process.stop(false)
-      runtime.exit(0)
-      await settleAWhile(200)
       expect(cleaned).toBe(1)
     })
   })

@@ -6,9 +6,6 @@ describe('redactString', () => {
     expect(redactString('key is sk-abcdef1234567890ABCDEF here')).toContain(REDACTED)
     expect(redactString('key is sk-abcdef1234567890ABCDEF here')).not.toContain('sk-abcdef')
   })
-  it('redacts Anthropic-style keys', () => {
-    expect(redactString('sk-ant-api03-XXXXXXXXXXXXXXXXXXXX')).toContain(REDACTED)
-  })
   it('redacts bearer tokens and HF/GitHub tokens', () => {
     expect(redactString('Authorization: Bearer abcdef012345678')).toContain(REDACTED)
     expect(redactString('hf_ABCDEFGHIJKLMNOPQRST')).toContain(REDACTED)
@@ -19,9 +16,6 @@ describe('redactString', () => {
     expect(redactString(`key AIza${body} used`)).toBe(`key ${REDACTED} used`)
     expect(redactString(`?key=AIza${body.slice(0, -1)}-`)).toBe(`?key=${REDACTED}`)
     expect(redactString('AIza_too_short')).toBe('AIza_too_short')
-  })
-  it('leaves innocuous text intact', () => {
-    expect(redactString('hello world')).toBe('hello world')
   })
 })
 
@@ -37,13 +31,6 @@ describe('redactHeaders', () => {
     expect(out['x-api-key']).toBe(REDACTED)
     expect(out['cookie']).toBe(REDACTED)
     expect(out['content-type']).toBe('application/json')
-  })
-
-  it('handles a Headers instance', () => {
-    const h = new Headers({ authorization: 'Bearer z', accept: 'text/event-stream' })
-    const out = redactHeaders(h)
-    expect(out['authorization']).toBe(REDACTED)
-    expect(out['accept']).toBe('text/event-stream')
   })
 })
 

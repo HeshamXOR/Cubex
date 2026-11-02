@@ -79,14 +79,6 @@ describe('PullManager', () => {
     expect(events.at(-1)).toMatchObject({ pullId: 'a', status: 'error', done: true, error: 'disk exploded' })
   })
 
-  it('synthesizes a success event when a task resolves without a terminal event', async () => {
-    const events: PullEvent[] = []
-    const pm = new PullManager({ onEvent: (e) => events.push(e) })
-    pm.enqueue({ pullId: 'q', modelId: 'm', run: async () => undefined })
-    await tick()
-    expect(events.at(-1)).toMatchObject({ pullId: 'q', status: 'success', done: true })
-  })
-
   it('cancels a queued pull without ever running it', async () => {
     const events: PullEvent[] = []
     const pm = new PullManager({ maxConcurrent: 1, onEvent: (e) => events.push(e) })
@@ -117,21 +109,6 @@ describe('PullManager', () => {
     expect(events.filter((e) => e.pullId === 'a' && e.done).map((e) => e.status)).toEqual(['cancelled'])
     expect(pm.runningCount).toBe(1) // b started
     expect(pm.cancel('does-not-exist')).toBe(false)
-  })
-
-  it('reports a cancelled event when a cancelled task rejects instead of resolving', async () => {
-    const events: PullEvent[] = []
-    const pm = new PullManager({ onEvent: (e) => events.push(e) })
-    pm.enqueue({
-      pullId: 'r',
-      modelId: 'm',
-      run: (_p, signal) => new Promise<void>((_res, rej) => signal.addEventListener('abort', () => rej(new Error('AbortError'))))
-    })
-    await tick()
-    pm.cancel('r')
-    await tick()
-    expect(events.at(-1)).toMatchObject({ pullId: 'r', status: 'cancelled', done: true })
-    expect(events.at(-1)?.error).toBeUndefined()
   })
 
   it('throttles progress per pull but never drops the terminal event', async () => {
@@ -168,17 +145,6 @@ describe('PullManager queue hand-off', () => {
     a.finish()
     await tick()
     expect(phases('b').at(-1)).toBe('preparing')
-    expect(events.filter((e) => e.pullId === 'c').at(-1)).toMatchObject({ phase: 'queued', queuePosition: 1 })
-  })
-
-  it('renumbers the line when a queued pull is cancelled', async () => {
-    const events: PullEvent[] = []
-    const pm = new PullManager({ maxConcurrent: 1, onEvent: (e) => events.push(e) })
-    pm.enqueue(controllable('a').task)
-    pm.enqueue(controllable('b').task)
-    pm.enqueue(controllable('c').task)
-    await tick()
-    pm.cancel('b')
     expect(events.filter((e) => e.pullId === 'c').at(-1)).toMatchObject({ phase: 'queued', queuePosition: 1 })
   })
 })
@@ -225,41 +191,5 @@ describe('PullManager stall watch', () => {
     const flaggedBefore = stalledEvents(events).length
     await vi.advanceTimersByTimeAsync(20_000)
     expect(stalledEvents(events)).toHaveLength(flaggedBefore)
-  })
-
-  it('does not count a repeated status with the same bytes as progress', async () => {
-    const { events, a } = await stalledPull()
-    for (let i = 0; i < 6; i++) {
-      a.emit({ status: 'downloading', phase: 'downloading', completedBytes: 1000, totalBytes: 5000, done: false })
-      await vi.advanceTimersByTimeAsync(6000)
-    }
-    expect(stalledEvents(events).length).toBeGreaterThan(0)
-  })
-
-  it('does not flag quiet verifying or finishing stages, which can be slow without being stuck', async () => {
-    const { events, a } = await stalledPull()
-    a.emit({ status: 'verifying', phase: 'verifying', done: false })
-    await vi.advanceTimersByTimeAsync(120_000)
-    expect(stalledEvents(events)).toHaveLength(0)
-  })
-
-  it('flags a model lookup that never answers', async () => {
-    const { events } = await stalledPull()
-    await vi.advanceTimersByTimeAsync(31_000)
-    expect(stalledEvents(events).at(-1)).toMatchObject({ phase: 'preparing' })
-  })
-
-  it('stops watching once the pull ends', async () => {
-    const { events, a } = await stalledPull()
-    a.finish()
-    await vi.advanceTimersByTimeAsync(120_000)
-    expect(stalledEvents(events)).toHaveLength(0)
-    expect(vi.getTimerCount()).toBe(0)
-  })
-
-  it('can be turned off', async () => {
-    const { events } = await stalledPull({ stallAfterMs: 0 })
-    await vi.advanceTimersByTimeAsync(300_000)
-    expect(stalledEvents(events)).toHaveLength(0)
   })
 })

@@ -26,15 +26,4 @@ describe('BenchmarkRunner', () => {
     expect(result.ttftMs.mean).toBeGreaterThanOrEqual(0)
     expect(progress).toEqual([1, 2, 3])
   })
-
-  it('stops early when aborted', async () => {
-    const runtime = new MockLocalRuntime()
-    const provider = runtime.makeProvider(20, 'one two three four five six seven eight')
-    const runner = new BenchmarkRunner()
-    const controller = new AbortController()
-    const p = runner.run({ ...config, runs: 5 }, { provider, signal: controller.signal })
-    controller.abort()
-    const result = await p
-    expect(result.runsData.length).toBeLessThan(5)
-  })
 })

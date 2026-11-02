@@ -1,0 +1,6 @@
+{
+  "title": "A feature that touches the model, the store and the CLI",
+  "prompt": "Add priorities to the todo CLI. `add` takes an optional `--priority high|normal|low` (default normal) in front of the text, for example `node src/cli.mjs add --priority high Pay rent`. An unknown priority prints an error to stderr and exits with code 2 without saving anything. `list` shows todos ordered high, then normal, then low (in id order inside the same priority) and every line shows the priority in parentheses after the id, like `[ ] 2 (high) Pay rent`. The todo file written by earlier versions has no priority on its items: those must still load and count as normal.",
+  "timeoutSec": 360,
+  "stub": { "command": "node --test" }
+}

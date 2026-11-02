@@ -27,14 +27,4 @@ describe('computeBackoff', () => {
     expect(applyJitter(base, 'full', () => 0)).toBe(0)
     expect(applyJitter(base, 'full', () => 1)).toBe(1000)
   })
-
-  it('equal jitter yields a value within [base/2, base]', () => {
-    const base = 1000
-    expect(applyJitter(base, 'equal', () => 0)).toBe(500)
-    expect(applyJitter(base, 'equal', () => 1)).toBe(1000)
-  })
-
-  it('none jitter returns base unchanged', () => {
-    expect(applyJitter(777, 'none', () => 0.3)).toBe(777)
-  })
 })

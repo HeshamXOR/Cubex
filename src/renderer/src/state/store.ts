@@ -616,7 +616,8 @@ export const useStore = create<CubexState>((set, get) => ({
       composerText: '', composerRevision: 0, composerInsert: undefined, startingRequest: false,
       status: 'idle',
       debug: emptyDebug(),
-      contextUsage: undefined,
+      // What the last finished turn left in the meter; a run still in this window brings its live one below.
+      contextUsage: conv.lastContext,
       todos: [],
       streamId: undefined,
       pendingPlan: undefined, pendingQuestion: undefined, pendingPermission: undefined,

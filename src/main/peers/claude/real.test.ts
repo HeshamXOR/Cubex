@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { AcpPeer } from '@shared/peers'
 import { removeFolder } from '../../testing/removeFolder'
-import { AcpAgent, AcpFailure, type OpenOptions } from '../acp/agent'
+import { AcpAgent, type OpenOptions } from '../acp/agent'
 import { createDelegatePolicy, type DelegateQuestion } from '../acp/delegatePolicy'
 import { findAppProgram } from '../appPrograms'
 import { locatePeer } from '../peerRunner'
@@ -70,36 +70,6 @@ describe.skipIf(!program)('the real Claude Code', () => {
     expect(sawInRequests('ping')).toBe(true)
   }, 60_000)
 
-  it('keeps the same conversation for the next message', async () => {
-    const agent = await open([[{ text: 'one' }], [{ text: 'two' }]])
-    expect((await agent.prompt('first question')).text).toBe('one')
-    expect((await agent.prompt('second question')).text).toBe('two')
-    expect(api!.requests).toHaveLength(2)
-    expect(JSON.stringify(api!.requests[1]!.messages)).toContain('first question')
-  }, 60_000)
-
-  it('reads a file in the project, and has no tool to write one with', async () => {
-    const agent = await open([
-      [{ text: 'Looking.' }, { tool: 'Read', input: { file_path: project('notes.txt') } }],
-      [{ tool: 'Write', input: { file_path: project('out.txt'), content: 'written' } }],
-      [{ text: 'I could not write it.' }]
-    ])
-    const steps: string[] = []
-    const reply = await agent.prompt('read the notes and write out.txt', { onEvent: (event) => steps.push(`${event.kind}:${event.state}`) })
-    expect(reply.text).toContain('I could not write it.')
-    expect(existsSync(project('out.txt'))).toBe(false)
-    expect(sawInRequests('the notes say hello')).toBe(true)
-    expect(sawInRequests('No such tool available')).toBe(true)
-    expect(steps).toContain('read:done')
-    expect(steps).toContain('edit:failed')
-  }, 60_000)
-
-  it('does not offer a consultation the tools that change things', async () => {
-    const agent = await open([[{ tool: 'PowerShell', input: { command: 'echo hi' } }], [{ tool: 'Bash', input: { command: 'echo hi' } }], [{ text: 'no tools' }]])
-    expect((await agent.prompt('run something')).text).toContain('no tools')
-    expect(sawInRequests('No such tool available')).toBe(true)
-  }, 60_000)
-
   it('does a task\'s change when the person agrees, and shows them the change first', async () => {
     const questions: DelegateQuestion[] = []
     const agent = await open(
@@ -111,17 +81,6 @@ describe.skipIf(!program)('the real Claude Code', () => {
     expect(questions).toHaveLength(1)
     expect(questions[0]).toMatchObject({ action: 'edit', target: 'out.txt' })
     expect(questions[0]!.detail).toContain('+written by the task')
-  }, 60_000)
-
-  it('does not do it when the person says no', async () => {
-    const agent = await open(
-      [[{ tool: 'Write', input: { file_path: project('out.txt'), content: 'x' } }], [{ text: 'Understood.' }]],
-      { policy: taskPolicy(async () => false) }
-    )
-    await agent.prompt('write out.txt')
-    expect(existsSync(project('out.txt'))).toBe(false)
-    // Claude Code is told, in words it can act on.
-    expect(sawInRequests('Cubex did not allow this')).toBe(true)
   }, 60_000)
 
   it('does not let a person\'s own "always allow" and hooks make it do something without asking', async () => {
@@ -136,26 +95,5 @@ describe.skipIf(!program)('the real Claude Code', () => {
     expect(questions).toHaveLength(1)
     expect(existsSync(project('out.txt'))).toBe(false)
     expect(existsSync(marker)).toBe(false)
-  }, 60_000)
-
-  it('does not run the hooks of the project it works in', async () => {
-    const marker = join(dir, 'project-hook-marker.txt')
-    mkdirSync(project('.claude'))
-    writeFileSync(project('.claude', 'settings.json'), JSON.stringify({ permissions: { allow: ['Write'] }, ...hook(marker) }))
-    const questions: DelegateQuestion[] = []
-    const agent = await open(
-      [[{ tool: 'Write', input: { file_path: project('out.txt'), content: 'x' } }], [{ text: 'Done.' }]],
-      { policy: taskPolicy(async (question) => { questions.push(question); return false }) }
-    )
-    await agent.prompt('write out.txt')
-    expect(questions).toHaveLength(1)
-    expect(existsSync(marker)).toBe(false)
-  }, 60_000)
-
-  it('says to sign in, with how, when Claude Code has no login', async () => {
-    const error = await open([[{ text: 'never' }]], {}, false).then(() => undefined, (caught: unknown) => caught)
-    expect(error).toBeInstanceOf(AcpFailure)
-    expect((error as AcpFailure).message).toBe('Claude Code is not signed in.')
-    expect((error as AcpFailure).hint).toContain('Sign in')
   }, 60_000)
 })

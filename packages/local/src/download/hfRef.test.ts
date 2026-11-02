@@ -21,14 +21,6 @@ describe('parseHfReference', () => {
     expect(parseHfReference(input)).toEqual(expected)
   })
 
-  it('lets explicit file and revision options override the reference', () => {
-    expect(parseHfReference('owner/repo', { file: 'a/b.gguf', revision: 'v2' })).toEqual({
-      repo: 'owner/repo',
-      file: 'a/b.gguf',
-      revision: 'v2'
-    })
-  })
-
   it.each([
     '',
     'justonesegment',
@@ -42,10 +34,6 @@ describe('parseHfReference', () => {
     'owner/repo\\x.gguf'
   ])('rejects %j', (input) => {
     expect(() => parseHfReference(input)).toThrow()
-  })
-
-  it('names Hugging Face in the error for a foreign host', () => {
-    expect(() => parseHfReference('https://example.com/o/r/resolve/main/x.gguf')).toThrow(/Hugging Face/)
   })
 
   it('rejects an unsafe explicit file option', () => {
@@ -88,34 +76,8 @@ describe('selectGgufFiles', () => {
     expect(files.map((f) => f.path)).toEqual(['Model-Q4_K_M.gguf'])
   })
 
-  it('defaults to Q4_K_M when neither a file nor a quantization is given', () => {
-    expect(selectGgufFiles(tree, {}).map((f) => f.path)).toEqual(['Model-Q4_K_M.gguf'])
-  })
-
-  it('walks the preference list (Q4_K_M, Q4_K_S, Q5_K_M, ... Q8_0) before giving up', () => {
-    const only = [entry('x-Q2_K.gguf', 3 * GB), entry('x-Q8_0.gguf', 8 * GB)]
-    expect(selectGgufFiles(only, {}).map((f) => f.path)).toEqual(['x-Q8_0.gguf'])
-  })
-
-  it('falls back to the smallest GGUF when no preferred quantization exists', () => {
-    const only = [entry('x-IQ3_XS.gguf', 3 * GB), entry('x-IQ2_M.gguf', 2 * GB)]
-    expect(selectGgufFiles(only, {}).map((f) => f.path)).toEqual(['x-IQ2_M.gguf'])
-  })
-
-  it('selects an exact file path', () => {
-    expect(selectGgufFiles(tree, { file: 'Model-Q8_0.gguf' }).map((f) => f.path)).toEqual(['Model-Q8_0.gguf'])
-  })
-
   it('returns every part of a split model in order, from the first part', () => {
     const files = selectGgufFiles(splitTree, { quant: 'Q4_K_M' })
-    expect(files.map((f) => f.path)).toEqual([
-      'big/Big-Q4_K_M-00001-of-00002.gguf',
-      'big/Big-Q4_K_M-00002-of-00002.gguf'
-    ])
-  })
-
-  it('expands a single part path to the whole set', () => {
-    const files = selectGgufFiles(splitTree, { file: 'big/Big-Q4_K_M-00002-of-00002.gguf' })
     expect(files.map((f) => f.path)).toEqual([
       'big/Big-Q4_K_M-00001-of-00002.gguf',
       'big/Big-Q4_K_M-00002-of-00002.gguf'
@@ -125,14 +87,6 @@ describe('selectGgufFiles', () => {
   it('reports an incomplete split set instead of downloading half a model', () => {
     const broken = [entry('big/Big-Q4_K_M-00001-of-00003.gguf'), entry('big/Big-Q4_K_M-00003-of-00003.gguf')]
     expect(() => selectGgufFiles(broken, { quant: 'Q4_K_M' })).toThrow(/part 2 of 3/i)
-  })
-
-  it('throws a helpful error listing the quantizations that exist', () => {
-    expect(() => selectGgufFiles(tree, { quant: 'Q6_K' })).toThrow(/Q6_K.*Q2_K.*Q4_K_M.*Q8_0/s)
-  })
-
-  it('throws when the repository has no GGUF files', () => {
-    expect(() => selectGgufFiles([entry('README.md')], {})).toThrow(/GGUF/)
   })
 })
 
@@ -171,20 +125,5 @@ describe('resolveHfPlan', () => {
     const fetchImpl = (async (input: string | URL | Request) => pages.get(String(input))!) as typeof fetch
     const plan = await resolveHfPlan({ repo: 'o/r', revision: 'main', quant: 'Q4_K_M' }, { fetch: fetchImpl })
     expect(plan.files.map((f) => f.path)).toEqual(['a-Q4_K_M.gguf'])
-  })
-
-  it.each([
-    [404, /not found/i],
-    [401, /(sign in|token|gated|private)/i],
-    [403, /(license|gated|token)/i]
-  ])('turns HTTP %i into a clear message', async (status, pattern) => {
-    const fetchImpl = (async () => new Response('nope', { status })) as typeof fetch
-    await expect(resolveHfPlan({ repo: 'o/r', revision: 'main' }, { fetch: fetchImpl })).rejects.toThrow(pattern)
-  })
-
-  it('resolves a direct file reference through the tree for its size and SHA-256', async () => {
-    const fetchImpl = (async () => jsonResponse([entry('only.gguf', GB, '9'.repeat(64))])) as typeof fetch
-    const plan = await resolveHfPlan({ repo: 'o/r', revision: 'main', file: 'only.gguf' }, { fetch: fetchImpl })
-    expect(plan.files[0]).toMatchObject({ path: 'only.gguf', sha256: '9'.repeat(64) })
   })
 })

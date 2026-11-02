@@ -9,7 +9,7 @@ Cubex talks to every provider through one interface (see [ARCHITECTURE.md](ARCHI
 | `openai` | `OpenAIProvider` | The official `openai` SDK. Uses the Responses API by default, or Chat Completions when `apiMode` is `chat_completions`. |
 | `anthropic` | `AnthropicProvider` | The official `@anthropic-ai/sdk`, speaking the native Messages API. |
 | `gemini` | `GeminiProvider` | Raw `fetch` and server-sent events against the native `generateContent` and `streamGenerateContent` endpoints. |
-| `openai-compat` | `OpenAICompatProvider` | Raw `fetch` and server-sent events in the OpenAI Chat Completions format, against any base URL. |
+| `openai-compat` | `OpenAICompatProvider` | Raw `fetch` and server-sent events in the OpenAI Chat Completions format, against any base URL. A model the server only serves through the Responses API (`apiMode: 'responses'`, or a refusal naming `/v1/responses`) is handed to `OpenAIProvider` on the same host, and remembered for the life of the provider. |
 | `openai-compat` with `apiMode: 'azure'` | `AzureOpenAIProvider` | The same wire format, routed by Azure deployment. |
 | `custom` | `CustomProvider` | Raw `fetch` with a declarative request and response mapping, or a hand-off to the OpenAI-compatible or Anthropic adapter. |
 | `ollama` | `OllamaProvider` | Raw `fetch` against `/api/chat`, newline-delimited JSON. Local. |
@@ -31,7 +31,7 @@ interface ProviderConfig {
   name: string
   accessType: 'api' | 'oauth' | 'subscription' | 'local'
   baseUrl?: string
-  apiMode?: string          // 'responses' | 'chat_completions' for OpenAI; 'azure' for Azure OpenAI
+  apiMode?: string          // 'responses' | 'chat_completions' for OpenAI and OpenAI-compatible; 'azure' for Azure OpenAI
   apiVersion?: string       // Gemini: path version (default 'v1beta'); Azure: 'v1' or a dated version
   azureResource?: string    // Azure OpenAI: the {resource} in https://{resource}.openai.azure.com
   azureDeployments?: string[]   // Azure OpenAI: deployment names offered as models

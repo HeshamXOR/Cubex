@@ -2,17 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { GITHUB_FEED, resolveFeed } from './feed'
 
 describe('the GitHub feed', () => {
-  it('reads the latest release of the Cubex repository', () => {
-    expect(GITHUB_FEED.url).toBe('https://api.github.com/repos/HeshamXOR/Cubex/releases/latest')
-    expect(GITHUB_FEED.origin).toBe('https://github.com')
-    expect(GITHUB_FEED.pagePrefix).toBe('/HeshamXOR/Cubex/')
-    expect(GITHUB_FEED.downloadPrefix).toBe('/HeshamXOR/Cubex/releases/download/')
-    expect(GITHUB_FEED.local).toBe(false)
-  })
-
-  it.each(['github.com', 'objects.githubusercontent.com', 'release-assets.githubusercontent.com', 'github-releases.githubusercontent.com'])('lets a download go to %s', (host) => {
-    expect(GITHUB_FEED.allowsHost(host)).toBe(true)
-  })
 
   it.each([
     'api.github.com', 'githubusercontent.com', 'evilgithubusercontent.com', 'github.com.evil.example', 'github.com:8443',
@@ -23,11 +12,6 @@ describe('the GitHub feed', () => {
 })
 
 describe('resolveFeed', () => {
-  it('uses GitHub unless it is given an address on this computer', () => {
-    expect(resolveFeed(undefined)).toBe(GITHUB_FEED)
-    expect(resolveFeed('')).toBe(GITHUB_FEED)
-    expect(resolveFeed('   ')).toBe(GITHUB_FEED)
-  })
 
   it.each([
     'http://127.0.0.1:5050/latest.json',

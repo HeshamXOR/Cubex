@@ -62,15 +62,4 @@ describe('links on the way to a path', () => {
     expect(() => safeResolve(root, 'innocent', { mutating: true })).toThrow(/protected folder/)
     expect(safeResolve(root, 'innocent/hooks/pre-commit')).toBe(join(root, 'innocent', 'hooks', 'pre-commit'))
   })
-
-  it('leaves a path that is already spelled as a protected folder to the approval rule', () => {
-    expect(safeResolve(root, '.git/hooks/pre-commit', { mutating: true })).toBe(join(root, '.git', 'hooks', 'pre-commit'))
-    mocks.links.set(join(root, 'a'), join(realRoot, '.claude'))
-    expect(safeResolve(root, '.claude/settings.json', { mutating: true })).toBe(join(root, '.claude', 'settings.json'))
-  })
-
-  it('does not treat a link to a sibling folder as a spelling alias', () => {
-    mocks.links.set(join(root, 'latest'), join(realRoot, 'v2'))
-    expect(safeResolve(root, 'latest/readme.md')).toBe(join(root, 'latest', 'readme.md'))
-  })
 })

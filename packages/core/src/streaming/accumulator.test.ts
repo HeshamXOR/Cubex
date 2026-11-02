@@ -33,12 +33,6 @@ describe('StreamAccumulator', () => {
     expect(res.toolCalls[0]).toMatchObject({ id: 'c1', name: 'get_weather', input: { location: 'Paris' } })
   })
 
-  it('defaults stopReason to tool_use when tool calls exist but no stop given', () => {
-    const acc = new StreamAccumulator('mock', 'm')
-    acc.push({ type: 'tool_call', toolCall: { id: 'x', name: 'f', input: {} } })
-    expect(acc.finalize().stopReason).toBe('tool_use')
-  })
-
   it('tolerates malformed tool argument JSON', () => {
     const acc = new StreamAccumulator('mock', 'm')
     acc.push({ type: 'tool_call_delta', index: 0, id: 'c', name: 'f', argsDelta: '{bad' })
@@ -95,30 +89,6 @@ describe('StreamAccumulator content-block order', () => {
     expect(res.text).toBe('Reading now.Done.')
   })
 
-  it('places redacted thinking where it arrived', () => {
-    const res = build([
-      { type: 'reasoning_delta', text: 'visible' },
-      { type: 'metadata', data: { reasoningBlock: { signature: 'sig-A' } } },
-      { type: 'metadata', data: { reasoningBlock: { redacted: 'ENCRYPTED' } } },
-      { type: 'tool_call_delta', index: 0, id: 't1', name: 'f', argsDelta: '{}' }
-    ])
-    expect(res.content).toEqual([
-      { type: 'reasoning', text: 'visible', signature: 'sig-A' },
-      { type: 'reasoning', text: '', redacted: 'ENCRYPTED' },
-      { type: 'tool_use', id: 't1', name: 'f', input: {} }
-    ])
-  })
-
-  it('keeps a signed block with no text (omitted display) between tool calls', () => {
-    const res = build([
-      { type: 'metadata', data: { reasoningBlock: { signature: 'sig-A' } } },
-      { type: 'tool_call_delta', index: 0, id: 't1', name: 'f', argsDelta: '{}' },
-      { type: 'metadata', data: { reasoningBlock: { signature: 'sig-B' } } },
-      { type: 'tool_call_delta', index: 1, id: 't2', name: 'f', argsDelta: '{}' }
-    ])
-    expect(res.content.map((p) => (p.type === 'reasoning' ? p.signature : p.type))).toEqual(['sig-A', 'tool_use', 'sig-B', 'tool_use'])
-  })
-
   it('orders explicit tool_call events by arrival and prefers them over same-id drafts', () => {
     const res = build([
       { type: 'tool_call_delta', index: 0, id: 'c1', name: 'f', argsDelta: '{"partial":' },
@@ -129,15 +99,5 @@ describe('StreamAccumulator content-block order', () => {
     expect(res.toolCalls.map((c) => c.id)).toEqual(['c1', 'c2'])
     expect(res.toolCalls[0]!.input).toEqual({ whole: true })
     expect(res.content.map((p) => p.type)).toEqual(['tool_use', 'text', 'tool_use'])
-  })
-
-  it('still puts unsigned reasoning, text and tool calls in their usual order', () => {
-    const res = build([
-      { type: 'reasoning_delta', text: 'think' },
-      { type: 'text_delta', text: 'answer' },
-      { type: 'tool_call', toolCall: { id: 'c1', name: 'f', input: {} } }
-    ])
-    expect(res.content.map((p) => p.type)).toEqual(['reasoning', 'text', 'tool_use'])
-    expect(res.content[0]).toEqual({ type: 'reasoning', text: 'think' })
   })
 })

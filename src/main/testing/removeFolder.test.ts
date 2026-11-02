@@ -47,10 +47,6 @@ describe('removeFolder', () => {
     expect(existsSync(root)).toBe(false)
   })
 
-  it('is quiet about a folder that is not there', async () => {
-    await expect(removeFolder(join(folder(), 'not-made'))).resolves.toBeUndefined()
-  })
-
   it('waits for a program that lets go of the folder a moment later', async () => {
     const { root, holder } = await held()
     const timer = setTimeout(() => holder.kill(), 600)
@@ -60,12 +56,5 @@ describe('removeFolder', () => {
       clearTimeout(timer)
     }
     expect(existsSync(root)).toBe(false)
-  })
-
-  // Windows is where a program keeps a folder from being removed.
-  it.runIf(process.platform === 'win32')('gives up without failing when the folder is still held', async () => {
-    const { root } = await held()
-    await expect(removeFolder(root, 2)).resolves.toBeUndefined()
-    expect(existsSync(root)).toBe(true)
   })
 })

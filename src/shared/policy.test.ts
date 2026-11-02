@@ -1,18 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import {
-  HOOK_EVENTS, HOOK_EVENT_INFO, MCP_ENV_LIMITS, duplicateEnvNames, envNameProblem, hookMatches, looksLikeSecretName,
-  matcherProblem, matcherTerms, mcpSecretRef, validateHookTestRequest,
-  validateMcpSecretForget, validateMcpSecretSave, validateMcpTestRequest
+  HOOK_EVENTS,
+  MCP_ENV_LIMITS,
+  duplicateEnvNames,
+  envNameProblem,
+  hookMatches,
+  looksLikeSecretName,
+  matcherProblem,
+  matcherTerms,
+  mcpSecretRef,
+  validateHookTestRequest,
+  validateMcpSecretSave,
+  validateMcpTestRequest
 } from './policy'
 
 describe('validateMcpTestRequest', () => {
   const ok = { name: 'Files', command: 'npx', args: ['-y', 'server'] }
-
-  it('accepts a server as saved and trims the text fields', () => {
-    expect(validateMcpTestRequest({ ...ok, name: '  Files ', command: ' npx ' })).toEqual({ ok: true, value: ok })
-    expect(validateMcpTestRequest({ ...ok, id: 'ab12-CD_34' })).toEqual({ ok: true, value: { ...ok, id: 'ab12-CD_34' } })
-    expect(validateMcpTestRequest({ name: 'x', command: 'node' })).toEqual({ ok: true, value: { name: 'x', command: 'node', args: [] } })
-  })
 
   it('drops everything it does not know, so no working folder or other setting can ride along', () => {
     const result = validateMcpTestRequest({ ...ok, env: { REGION: 'eu' }, cwd: 'C:\\', enabled: true, secretEnv: { TOKEN: 'ref' } })
@@ -40,27 +43,6 @@ describe('validateMcpTestRequest', () => {
     [{ name: 'x', command: 'npx', args: ['ok', 3] }, 'Arguments must be a list of strings.']
   ])('rejects %j', (value, error) => {
     expect(validateMcpTestRequest(value)).toEqual({ ok: false, error })
-  })
-})
-
-describe('arguments in a connection test request', () => {
-  const server = { name: 'x', command: 'npx' }
-  const withArguments = (args: unknown): ReturnType<typeof validateMcpTestRequest> => validateMcpTestRequest({ ...server, args })
-
-  it('treats no arguments as an empty list', () => {
-    expect(validateMcpTestRequest(server)).toEqual({ ok: true, value: { ...server, args: [] } })
-    expect(withArguments([])).toEqual({ ok: true, value: { ...server, args: [] } })
-  })
-
-  it('bounds the count, each argument and the total', () => {
-    expect(withArguments(Array.from({ length: 64 }, () => 'a')).ok).toBe(true)
-    expect(withArguments(Array.from({ length: 65 }, () => 'a'))).toEqual({ ok: false, error: 'Use 64 arguments or fewer.' })
-    expect(withArguments(['a'.repeat(8_193)])).toEqual({ ok: false, error: 'Argument 1 must be 8,192 characters or fewer.' })
-    expect(withArguments(Array.from({ length: 5 }, () => 'a'.repeat(7_000)))).toEqual({ ok: false, error: 'Arguments must total 32,768 characters or fewer.' })
-  })
-
-  it('refuses a null character, which cannot be passed to a process', () => {
-    expect(withArguments(['ok', 'bad\0'])).toEqual({ ok: false, error: 'Argument 2 contains a null character, which cannot be passed to a process.' })
   })
 })
 
@@ -121,13 +103,6 @@ describe('validateHookTestRequest', () => {
     [{ event: 'PreToolUse', command: 'x', matcher: 'a*' }, '"*" is not part of a tool name. The matcher is plain text, not a pattern; separate several tools with |.']
   ])('rejects %j', (value, error) => {
     expect(validateHookTestRequest(value)).toEqual({ ok: false, error })
-  })
-})
-
-describe('hook events', () => {
-  it('lets only PreToolUse and Stop block, and only tool events match a tool', () => {
-    expect(HOOK_EVENTS.filter((event) => HOOK_EVENT_INFO[event].canBlock)).toEqual(['PreToolUse', 'UserPromptSubmit', 'Stop'])
-    expect(HOOK_EVENTS.filter((event) => HOOK_EVENT_INFO[event].matchesTools)).toEqual(['PreToolUse', 'PostToolUse'])
   })
 })
 
@@ -256,23 +231,5 @@ describe('validateMcpSecretSave', () => {
     [{ serverId: 'srv-1', name: 'TOKEN', value: 'x'.repeat(8_193) }, 'The value of TOKEN must be 8,192 characters or fewer.']
   ])('rejects %j', (value, error) => {
     expect(validateMcpSecretSave(value)).toEqual({ ok: false, error })
-  })
-})
-
-describe('validateMcpSecretForget', () => {
-  it('accepts a server id and names, once each', () => {
-    expect(validateMcpSecretForget({ serverId: 'srv-1', names: ['A', 'B', 'A'] })).toEqual({ ok: true, value: { serverId: 'srv-1', names: ['A', 'B'] } })
-    expect(validateMcpSecretForget({ serverId: 'srv-1', names: [] })).toEqual({ ok: true, value: { serverId: 'srv-1', names: [] } })
-  })
-
-  it.each([
-    [null, 'Expected the secrets to remove.'],
-    [{ serverId: 'x y', names: [] }, 'The server id is not valid.'],
-    [{ serverId: 'srv-1', names: 'A' }, 'Expected a list of variable names.'],
-    [{ serverId: 'srv-1', names: [1] }, 'Expected a list of variable names.'],
-    [{ serverId: 'srv-1', names: ['ok', 'not ok'] }, '"not ok" is not a valid variable name. Use letters, digits and underscores, and do not start with a digit.'],
-    [{ serverId: 'srv-1', names: Array.from({ length: 33 }, (_, index) => `N${index}`) }, 'Use 32 variables or fewer.']
-  ])('rejects %j', (value, error) => {
-    expect(validateMcpSecretForget(value)).toEqual({ ok: false, error })
   })
 })

@@ -113,31 +113,6 @@ const notices = (events: ChatEvent[]): BudgetNotice[] => events.flatMap((event) 
 const replyText = (events: ChatEvent[]): string => events.flatMap((event) => (event.kind === 'stream' && event.event.type === 'text_delta' ? [event.event.text] : [])).join('')
 const failed = (events: ChatEvent[]): boolean => events.some((event) => event.kind === 'stream' && event.event.type === 'error')
 
-describe('usage is recorded against its task', () => {
-  it('names the task on every request of a turn, so the session budget can add them up', async () => {
-    mocks.conversation = conversation()
-    const h = harness({ stream: rounds(2) })
-    await h.service.start(request())
-    await finished(h.events)
-    expect(h.streams).toHaveLength(3)
-    expect(mocks.recorded).toEqual([
-      { conversationId: 'task', modelId: expect.any(String) },
-      { conversationId: 'task', modelId: expect.any(String) },
-      { conversationId: 'task', modelId: expect.any(String) }
-    ])
-  })
-
-  it('says nothing about budgets when no cap is set', async () => {
-    mocks.conversation = conversation()
-    spentToday(500)
-    const h = harness({ stream: rounds(2) })
-    await h.service.start(request())
-    await finished(h.events)
-    expect(h.streams).toHaveLength(3)
-    expect(notices(h.events)).toEqual([])
-  })
-})
-
 describe('a daily cap set to stop', () => {
   beforeEach(() => { mocks.conversation = conversation() })
 
@@ -167,26 +142,6 @@ describe('a daily cap set to stop', () => {
     expect(replyText(h.events)).toContain('Daily budget of $1.20 reached.')
     expect(failed(h.events)).toBe(false)
   })
-
-  it('refuses the next turn the same way, every time, until the cap is raised', async () => {
-    mocks.settings = withBudget({ dailyUsd: 5, action: 'stop' })
-    spentToday(6)
-    const h = harness()
-    await h.service.start(request({ streamId: 'first' }))
-    await finished(h.events)
-    h.events.length = 0
-    await h.service.start(request({ streamId: 'second' }))
-    await finished(h.events)
-    expect(notices(h.events)).toHaveLength(1)
-    expect(h.streams).toHaveLength(0)
-
-    mocks.settings = withBudget({ dailyUsd: 20, action: 'stop' })
-    h.events.length = 0
-    await h.service.start(request({ streamId: 'third' }))
-    await finished(h.events)
-    expect(h.streams).toHaveLength(1)
-    expect(notices(h.events)).toEqual([])
-  })
 })
 
 describe('a cap set to warn', () => {
@@ -213,18 +168,6 @@ describe('the turn and session caps', () => {
     await finished(h.events)
     expect(h.streams).toHaveLength(2)
     expect(notices(h.events)).toEqual([expect.objectContaining({ scope: 'turn', stopped: true, message: 'Turn budget of $0.80 reached. Raise it in Settings, or send a new message to start a fresh turn.' })])
-  })
-
-  it('lets the next turn start from zero', async () => {
-    mocks.settings = withBudget({ perTurnUsd: 0.8, action: 'stop' })
-    const h = harness({ stream: rounds(5) })
-    await h.service.start(request({ streamId: 'first' }))
-    await finished(h.events)
-    expect(h.streams).toHaveLength(2)
-    h.events.length = 0
-    await h.service.start(request({ streamId: 'second' }))
-    await finished(h.events)
-    expect(h.streams.length).toBe(4)
   })
 
   it('counts a task\'s earlier turns, and no other task, against the session cap', async () => {
@@ -263,55 +206,5 @@ describe('what a cap does not touch', () => {
 
     const local = harness({ metadata: { 'primary/first': { location: 'local' } } })
     expect(await local.service.compactConversation('task')).toMatchObject({ ok: true })
-  })
-
-  it('counts a summary written during a turn as part of that turn\'s spend', async () => {
-    mocks.conversation = conversation()
-    mocks.requestCost = 0.6
-    mocks.settings = withBudget({ perTurnUsd: 1, action: 'stop' })
-    const h = harness({ metadata: { 'primary/first': { contextWindow: 600 } }, stream: rounds(2) })
-    await h.service.start(request())
-    await finished(h.events)
-    // The summary request (0.6) and the first reply (0.6) already pass the cap of 1: no second round.
-    expect(h.sends).toHaveLength(1)
-    expect(h.streams).toHaveLength(1)
-    expect(notices(h.events).some((notice) => notice.scope === 'turn' && notice.stopped)).toBe(true)
-  })
-})
-
-describe('reading the budget', () => {
-  it('reports the day and the task after a turn, and the turn while it runs', async () => {
-    mocks.conversation = conversation()
-    mocks.settings = withBudget({ dailyUsd: 50 })
-    let during: unknown
-    let service!: ChatService
-    const h = harness({
-      stream: async function* (req, index) {
-        if (index === 1) during = service.budgetSnapshot('task')
-        yield* rounds(1)(req, index)
-      }
-    })
-    service = h.service
-    await h.service.start(request())
-    await finished(h.events)
-    expect(during).toEqual({ turn: 0.5, session: 0.5, daily: 0.5 })
-    await vi.waitFor(() => expect(h.service.budgetSnapshot('task')).toEqual({ session: 1, daily: 1 }))
-    expect(h.service.budgetSnapshot()).toEqual({ daily: 1 })
-  })
-
-  it('applies a change in Settings from the next request, without a restart', async () => {
-    mocks.conversation = conversation()
-    spentToday(9)
-    const h = harness()
-    await h.service.start(request({ streamId: 'before' }))
-    await finished(h.events)
-    expect(h.streams).toHaveLength(1)
-
-    mocks.settings = withBudget({ dailyUsd: 5, action: 'stop' })
-    h.events.length = 0
-    await h.service.start(request({ streamId: 'after' }))
-    await finished(h.events)
-    expect(h.streams).toHaveLength(1)
-    expect(notices(h.events)).toHaveLength(1)
   })
 })

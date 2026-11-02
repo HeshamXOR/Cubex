@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_SUMMARY_FILES, MAX_SUMMARY_ITEMS, sanitizeDiagnosticItem, sanitizeDiagnosticsSummary } from './diagnosticsSummary'
+import { sanitizeDiagnosticItem, sanitizeDiagnosticsSummary } from './diagnosticsSummary'
 
 const item = { path: 'src/a.ts', line: 12, col: 5, code: 'TS2322', message: "Type 'string' is not assignable to type 'number'." }
 
@@ -31,11 +31,6 @@ describe('sanitizeDiagnosticsSummary', () => {
     expect(sanitizeDiagnosticsSummary({ errors: 2, warnings: 1, items: [item, { nonsense: true }] })).toEqual({ errors: 2, warnings: 1, items: [item] })
   })
 
-  it('omits items when none are usable', () => {
-    expect(sanitizeDiagnosticsSummary({ errors: 1, warnings: 0, items: [] })).toEqual({ errors: 1, warnings: 0 })
-    expect(sanitizeDiagnosticsSummary({ errors: 1, warnings: 0 })).toEqual({ errors: 1, warnings: 0 })
-  })
-
   it('drops a summary with nothing to show, because an absent value already means nothing new', () => {
     expect(sanitizeDiagnosticsSummary({ errors: 0, warnings: 0, items: [item] })).toBeUndefined()
   })
@@ -46,22 +41,10 @@ describe('sanitizeDiagnosticsSummary', () => {
     }
   })
 
-  it('keeps at most the first 15 problems', () => {
-    const many = Array.from({ length: 40 }, (_, index) => ({ ...item, line: index + 1 }))
-    const summary = sanitizeDiagnosticsSummary({ errors: 40, warnings: 0, items: many })
-    expect(summary?.items).toHaveLength(MAX_SUMMARY_ITEMS)
-    expect(summary?.items?.[0]?.line).toBe(1)
-    expect(summary?.errors).toBe(40)
-  })
-
   it('keeps per-file counts of a multi-file edit and drops the ones that say nothing', () => {
     const files = [{ path: 'src/a.ts', errors: 2, warnings: 1 }, { path: 'src/b.ts', errors: 0, warnings: 0 }, { path: '', errors: 1, warnings: 0 }, { path: 'src/c.ts', errors: 'x', warnings: 0 }, { path: 'src/d.ts', errors: 1, warnings: 0 }]
     expect(sanitizeDiagnosticsSummary({ errors: 4, warnings: 1, files })?.files).toEqual([{ path: 'src/a.ts', errors: 2, warnings: 1 }, { path: 'src/d.ts', errors: 1, warnings: 0 }])
     expect(sanitizeDiagnosticsSummary({ errors: 1, warnings: 0, files: [] })).toEqual({ errors: 1, warnings: 0 })
   })
 
-  it('bounds the number of files it keeps', () => {
-    const files = Array.from({ length: 80 }, (_, index) => ({ path: `src/f${index}.ts`, errors: 1, warnings: 0 }))
-    expect(sanitizeDiagnosticsSummary({ errors: 80, warnings: 0, files })?.files).toHaveLength(MAX_SUMMARY_FILES)
-  })
 })

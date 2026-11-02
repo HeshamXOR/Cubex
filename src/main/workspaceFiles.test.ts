@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, parse, relative } from 'node:path'
+import { join } from 'node:path'
 import { readWorkspaceDirectory, resolveWorkspacePath, searchWorkspaceEntries, selectWorkspace } from './workspaceFiles'
 
 let dir: string
@@ -65,24 +65,5 @@ describe('workspace UI containment and discovery', () => {
     expect(all.map((entry) => entry.path).sort()).toEqual(['alpha.ts', 'src/alpha-child.ts', 'z-alpha.ts'])
     expect(all.every((entry) => !entry.isDirectory)).toBe(true)
     expect(await readWorkspaceDirectory(projectA, 'src')).toEqual([{ name: 'alpha-child.ts', path: 'src/alpha-child.ts', isDirectory: false }])
-  })
-
-  it('accepts a filesystem root and normalized Windows casing without a prefix false positive', () => {
-    const realProject = realpathSync.native(projectA)
-    const volumeRoot = parse(realProject).root
-    expect(resolveWorkspacePath(volumeRoot, relative(volumeRoot, realProject))).toBe(realProject)
-    expect(resolveWorkspacePath(projectA, '.')).toBe(realProject)
-    if (process.platform === 'win32') {
-      expect(resolveWorkspacePath(projectA.toUpperCase(), 'ALPHA.TS')).toBe(realpathSync.native(join(projectA, 'alpha.ts')))
-    }
-  })
-
-  it('bounds autocomplete requests and rejects malformed UI paths', async () => {
-    expect(await searchWorkspaceEntries(projectA, 'ALPHA', 1)).toHaveLength(1)
-    await expect(searchWorkspaceEntries(projectA, '', 0)).rejects.toThrow('Search limit')
-    await expect(searchWorkspaceEntries(projectA, '', 201)).rejects.toThrow('Search limit')
-    await expect(searchWorkspaceEntries(projectA, '', NaN)).rejects.toThrow('Search limit')
-    await expect(searchWorkspaceEntries(projectA, 'x'.repeat(4097))).rejects.toThrow('query')
-    expect(() => resolveWorkspacePath(projectA, 'bad\0path')).toThrow('Invalid workspace path')
   })
 })

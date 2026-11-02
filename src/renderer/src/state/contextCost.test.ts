@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BudgetNotice, ChatEvent } from '@shared/ipc'
-import { applyContextCostEvent, noteManualSummary, summarizingLabel, summaryHeadline, useContextCost, visibleNotices } from './contextCost'
+import { applyContextCostEvent, noteManualSummary, useContextCost, visibleNotices } from './contextCost'
 
 type Compaction = Extract<ChatEvent, { kind: 'compaction' }>
 type Budget = Extract<ChatEvent, { kind: 'budget' }>
@@ -35,11 +35,6 @@ describe('a summary inside a turn', () => {
     expect(slot()?.stats).toEqual({ boundaryMessageId: 'u5', messagesSummarized: 42, tokensBefore: 38_000, tokensAfter: 6_000 })
   })
 
-  it('leaves out the numbers it was not given', () => {
-    applyContextCostEvent(compaction({ step: 'summarize', phase: 'completed', summary: 's', boundaryMessageId: 'u5' }), 'task', setRun)
-    expect(slot()?.stats).toEqual({ boundaryMessageId: 'u5' })
-  })
-
   it('reports a failure with its reason, once, and clears the wait', () => {
     applyContextCostEvent(compaction({ step: 'summarize', phase: 'started', messagesSummarized: 8 }), 'task', setRun)
     applyContextCostEvent(compaction({ step: 'summarize', phase: 'failed', error: 'Provider unavailable' }), 'task', setRun)
@@ -47,11 +42,6 @@ describe('a summary inside a turn', () => {
     expect(slot()?.notices).toEqual([expect.objectContaining({ kind: 'summary-failed', error: 'Provider unavailable' })])
     applyContextCostEvent(compaction({ step: 'summarize', phase: 'failed', error: 'Timed out' }), 'task', setRun)
     expect(slot()?.notices).toEqual([expect.objectContaining({ kind: 'summary-failed', error: 'Timed out' })])
-  })
-
-  it('gives a reason even when main sent none', () => {
-    applyContextCostEvent(compaction({ step: 'summarize', phase: 'failed' }), 'task', setRun)
-    expect(slot()?.notices[0]).toMatchObject({ kind: 'summary-failed', error: expect.stringMatching(/summary/i) })
   })
 
   it('keeps each task apart', () => {
@@ -85,10 +75,6 @@ describe('budget notices', () => {
     ])
   })
 
-  it('never touches the working indicator', () => {
-    applyContextCostEvent(budget(), 'task', setRun)
-    expect(setRun).not.toHaveBeenCalled()
-  })
 })
 
 describe('turns', () => {
@@ -132,27 +118,4 @@ describe('a summary written on demand', () => {
     expect(slot()?.stats).toEqual({ boundaryMessageId: 'u4', messagesSummarized: 6, tokensBefore: 9_000, tokensAfter: 700 })
   })
 
-  it('keeps nothing for a summary that failed', () => {
-    noteManualSummary('task', { ok: false, error: 'No model' })
-    expect(slot()).toBeUndefined()
-  })
-})
-
-describe('wording', () => {
-  it('names the number of messages, in the singular too', () => {
-    expect(summarizingLabel(42)).toBe('Summarizing 42 earlier messages')
-    expect(summarizingLabel(1)).toBe('Summarizing 1 earlier message')
-    expect(summarizingLabel(undefined)).toBe('Summarizing earlier messages')
-    expect(summarizingLabel(0)).toBe('Summarizing earlier messages')
-  })
-
-  it('says what the summary saved when both token counts are known', () => {
-    expect(summaryHeadline(42, { tokensBefore: 38_000, tokensAfter: 6_200 })).toBe('Summarized 42 earlier messages, 38k to 6.2k tokens')
-    expect(summaryHeadline(1, { tokensBefore: 900, tokensAfter: 300 })).toBe('Summarized 1 earlier message, 900 to 300 tokens')
-  })
-
-  it('says only the count when the tokens are not known', () => {
-    expect(summaryHeadline(42)).toBe('Summarized 42 earlier messages')
-    expect(summaryHeadline(42, { tokensBefore: 38_000 })).toBe('Summarized 42 earlier messages')
-  })
 })

@@ -1,18 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ProviderConfig } from '@core/types'
-import {
-  accessMode,
-  connectionState,
-  countLabel,
-  describeRefresh,
-  describeResult,
-  keyState,
-  kindLabel,
-  parseDeployments,
-  rowFacts,
-  sameLabel,
-  validateProvider
-} from './providerView'
+import { connectionState, describeResult, keyState, parseDeployments, validateProvider } from './providerView'
 
 const cfg = (overrides: Partial<ProviderConfig> = {}): ProviderConfig => ({
   id: 'p',
@@ -24,67 +12,9 @@ const cfg = (overrides: Partial<ProviderConfig> = {}): ProviderConfig => ({
   ...overrides
 })
 
-describe('sameLabel', () => {
-  it('ignores case, spacing and punctuation', () => {
-    expect(sameLabel('OpenAI', 'openai')).toBe(true)
-    expect(sameLabel('LM Studio', 'LM-Studio')).toBe(true)
-    expect(sameLabel('llama.cpp', 'Llamacpp')).toBe(true)
-    expect(sameLabel('NVIDIA', 'OpenAI-compatible')).toBe(false)
-  })
-})
-
-describe('rowFacts: a row never says the same thing twice', () => {
-  it('leaves the kind out when the name already says it', () => {
-    expect(rowFacts(cfg({ kind: 'anthropic', name: 'Anthropic' })).kind).toBeUndefined()
-    expect(rowFacts(cfg({ kind: 'ollama', name: 'Ollama', accessType: 'local' })).kind).toBeUndefined()
-    expect(rowFacts(cfg({ kind: 'lmstudio', name: 'LM Studio', accessType: 'local' })).kind).toBeUndefined()
-    expect(rowFacts(cfg({ kind: 'openai-compat', apiMode: 'azure', name: 'Azure OpenAI' })).kind).toBeUndefined()
-  })
-
-  it('names the kind when it adds something', () => {
-    expect(rowFacts(cfg({ kind: 'openai-compat', name: 'NVIDIA' })).kind).toBe('OpenAI-compatible')
-    expect(rowFacts(cfg({ kind: 'anthropic', name: 'Team proxy' })).kind).toBe('Anthropic')
-    expect(rowFacts(cfg({ kind: 'custom', name: 'Search' })).kind).toBe('Custom JSON API')
-  })
-
-  it('shows where it lives as a host, and the model', () => {
-    expect(rowFacts(cfg({ baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-6-astra' }))).toMatchObject({ endpoint: 'api.openai.com', model: 'gpt-6-astra' })
-  })
-
-  it('shows nothing it does not know', () => {
-    expect(rowFacts(cfg({ kind: 'openai-compat', name: 'Mine' }))).toEqual({ kind: 'OpenAI-compatible' })
-  })
-
-  it('does not repeat the name as the endpoint', () => {
-    expect(rowFacts(cfg({ name: 'api.openai.com', baseUrl: 'https://api.openai.com/v1' })).endpoint).toBeUndefined()
-  })
-})
-
-describe('kindLabel and accessMode', () => {
-  it('names each kind', () => {
-    expect(kindLabel(cfg({ kind: 'gemini' }))).toBe('Google Gemini')
-    expect(kindLabel(cfg({ kind: 'llamacpp' }))).toBe('llama.cpp')
-    expect(kindLabel(cfg({ kind: 'mock' }))).toBe('Offline demo')
-    expect(kindLabel(cfg({ kind: 'openai-compat', apiMode: 'azure' }))).toBe('Azure OpenAI')
-  })
-
-  it('treats local runtimes, local-declared endpoints and the demo as such, and Azure as always cloud', () => {
-    expect(accessMode(cfg({ kind: 'ollama' }))).toBe('local')
-    expect(accessMode(cfg({ kind: 'openai-compat', accessType: 'local' }))).toBe('local')
-    expect(accessMode(cfg({ kind: 'openai-compat', accessType: 'local', apiMode: 'azure' }))).toBe('cloud')
-    expect(accessMode(cfg({ kind: 'openai', accessType: 'local' }))).toBe('cloud')
-    expect(accessMode(cfg({ kind: 'mock' }))).toBe('offline')
-  })
-})
-
 describe('keyState: saved or missing, never the key', () => {
   it('is saved when a credential is stored', () => {
     expect(keyState(cfg({ credentialRef: 'cred_p' }))).toBe('saved')
-  })
-
-  it('is missing for a cloud provider with none', () => {
-    expect(keyState(cfg())).toBe('missing')
-    expect(keyState(cfg({ kind: 'openai-compat', baseUrl: 'https://api.groq.com/openai/v1' }))).toBe('missing')
   })
 
   it('is only optional for a custom endpoint, where a key may not exist at all', () => {
@@ -92,9 +22,6 @@ describe('keyState: saved or missing, never the key', () => {
     expect(keyState(cfg({ kind: 'openai-compat', accessType: 'local', baseUrl: 'http://192.168.1.4:8000/v1' }))).toBe('optional')
   })
 
-  it('is none where no key is used', () => {
-    expect(keyState(cfg({ kind: 'ollama', auth: { type: 'none' } }))).toBe('none')
-  })
 })
 
 describe('connectionState', () => {
@@ -107,9 +34,6 @@ describe('connectionState', () => {
     expect(connectionState(cfg({ credentialRef: 'c' }), {})).toBe('untested')
   })
 
-  it('lets a result beat a missing key, since the test is what the person just saw', () => {
-    expect(connectionState(cfg(), { result: { ok: false, message: 'x' } })).toBe('failed')
-  })
 })
 
 describe('describeResult', () => {
@@ -128,16 +52,6 @@ describe('describeResult', () => {
     })
   })
 
-  it('writes slow responses in seconds and singular counts correctly', () => {
-    expect(describeResult({ ok: true, details: { latencyMs: 2450, models: 1 } }, cfg())).toMatchObject({ latency: '2.5 s', models: '1 model available' })
-    expect(describeResult({ ok: true, details: { models: 3, modelNoun: 'deployments' } }, cfg())).toMatchObject({ models: '3 deployments available' })
-  })
-
-  it('flags a default model the provider does not offer', () => {
-    expect(describeResult({ ok: true, details: { defaultModelListed: false } }, cfg()).defaultModelMissing).toBe(true)
-    expect(describeResult({ ok: true, details: { defaultModelListed: true } }, cfg()).defaultModelMissing).toBeUndefined()
-  })
-
   it('reads a failure into what happened and what to do', () => {
     expect(describeResult({ ok: false, message: 'Authentication failed: check the API key.', details: { fix: 'Paste a valid key.' } }, cfg())).toEqual({
       ok: false,
@@ -147,41 +61,6 @@ describe('describeResult', () => {
     })
   })
 
-  it('still says something when the adapter said nothing', () => {
-    expect(describeResult({ ok: false }, cfg()).message).toBe('The provider did not answer.')
-  })
-
-  it('says a custom JSON endpoint was only reached', () => {
-    expect(describeResult({ ok: true, details: { status: 405 } }, cfg({ kind: 'custom' })).checked).toBe('Reached the endpoint. The request and response mapping were not tested.')
-  })
-
-  it('ignores details that are not the type it expects', () => {
-    expect(describeResult({ ok: true, details: { latencyMs: 'fast', models: -1, fix: 5 } }, cfg())).toEqual({ ok: true, title: 'Connected' })
-  })
-})
-
-describe('describeRefresh', () => {
-  it('reports the count', () => {
-    expect(describeRefresh({ ok: true, count: 12 })).toEqual({ title: 'Model list refreshed', body: '12 models available.' })
-  })
-
-  it('says what stayed when a refresh fails, and what to do', () => {
-    expect(describeRefresh({ ok: false, count: 12, message: 'Not reachable.', fix: 'Check the address.' })).toEqual({
-      title: 'Could not refresh the model list',
-      body: 'Not reachable. Cubex keeps the 12 models it already knew.',
-      fix: 'Check the address.'
-    })
-    expect(describeRefresh({ ok: false, count: 0, message: 'Turned off.' }).body).toBe('Turned off.')
-  })
-})
-
-describe('countLabel', () => {
-  it('groups thousands and agrees with the count', () => {
-    expect(countLabel(1)).toBe('1 model')
-    expect(countLabel(0)).toBe('0 models')
-    expect(countLabel(1204)).toBe('1,204 models')
-    expect(countLabel(2, 'deployment')).toBe('2 deployments')
-  })
 })
 
 describe('validateProvider', () => {

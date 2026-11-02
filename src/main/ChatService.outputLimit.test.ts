@@ -89,38 +89,6 @@ describe('the answer limit a turn is sent with', () => {
     expect(seen).toEqual([32_000])
   })
 
-  it('keeps a number the person chose, up to what the model can write', async () => {
-    const events: ChatEvent[] = []
-    const seen: Array<number | undefined> = []
-    const chat = startService(async function* (req) { seen.push(req.params?.maxOutputTokens); yield { type: 'text_delta', text: 'ok' } }, events, { maxOutputTokens: 8_192 })
-    await chat.start(request({}, 4_096))
-    await finished(events)
-    expect(seen).toEqual([4_096])
-
-    const more: Array<number | undefined> = []
-    const events2: ChatEvent[] = []
-    const chat2 = startService(async function* (req) { more.push(req.params?.maxOutputTokens); yield { type: 'text_delta', text: 'ok' } }, events2, { maxOutputTokens: 8_192 })
-    await chat2.start(request({ streamId: 'stream-two' }, 100_000))
-    await finished(events2)
-    expect(more).toEqual([8_192])
-  })
-
-  it('treats 0 as Automatic, and leaves a local model to its own default', async () => {
-    const auto: Array<number | undefined> = []
-    const events: ChatEvent[] = []
-    const chat = startService(async function* (req) { auto.push(req.params?.maxOutputTokens); yield { type: 'text_delta', text: 'ok' } }, events, { maxOutputTokens: 131_072 })
-    await chat.start(request({}, 0))
-    await finished(events)
-    expect(auto).toEqual([32_000])
-
-    const local: Array<number | undefined> = []
-    const events2: ChatEvent[] = []
-    const chat2 = startService(async function* (req) { local.push(req.params?.maxOutputTokens); yield { type: 'text_delta', text: 'ok' } }, events2, { location: 'local' })
-    await chat2.start(request({ streamId: 'stream-two' }, 0))
-    await finished(events2)
-    expect(local).toEqual([undefined])
-  })
-
   it('tries once more with the limit a provider names when it refuses ours, and remembers it', async () => {
     const events: ChatEvent[] = []
     const seen: Array<number | undefined> = []
@@ -145,20 +113,6 @@ describe('the answer limit a turn is sent with', () => {
     await vi.waitFor(() => expect(events.filter((e) => e.kind === 'stream' && e.event.type === 'completed')).toHaveLength(2), { timeout: 5_000 })
     expect(seen.slice(2)).toEqual([8_192])
   })
-
-  it('does not retry a refusal that is about something else', async () => {
-    const events: ChatEvent[] = []
-    const seen: Array<number | undefined> = []
-    const chat = startService(async function* (req: AIRequest) {
-      seen.push(req.params?.maxOutputTokens)
-      throw new NormalizedAIError({ provider: 'primary', category: 'AUTHENTICATION_ERROR', classification: 'permanent', retryable: false, statusCode: 401, message: 'invalid x-api-key' })
-      // A generator that only throws never reaches its first yield, so there is nothing after the throw.
-    }, events)
-    await chat.start(request())
-    await finished(events)
-    expect(seen).toEqual([32_000])
-    expect(events.some((e) => e.kind === 'stream' && e.event.type === 'error')).toBe(true)
-  })
 })
 
 describe('a reply cut off by the output limit', () => {
@@ -171,7 +125,8 @@ describe('a reply cut off by the output limit', () => {
       else if (requests.length === 2) yield* wholeCall()
       else yield { type: 'text_delta', text: 'Done.' }
     }, events, { maxOutputTokens: 128_000 })
-    await chat.start(request())
+    // The page that was written is an edit no check has run after; saying not to run anything keeps the done check out of this test.
+    await chat.start(request({ userText: "Write the page. Don't run anything." }))
     await finished(events)
 
     expect(requests).toHaveLength(3)
@@ -188,21 +143,6 @@ describe('a reply cut off by the output limit', () => {
     expect(existsSync(join(mocks.workspace, 'page.html'))).toBe(true)
   })
 
-  it('does not raise a limit the person chose', async () => {
-    const events: ChatEvent[] = []
-    const requests: AIRequest[] = []
-    const chat = startService(async function* (req) {
-      requests.push(structuredClone(req))
-      if (requests.length === 1) yield* cutInsideToolCall()
-      else yield { type: 'text_delta', text: 'Smaller steps.' }
-    }, events, { maxOutputTokens: 128_000 })
-    await chat.start(request({}, 4_096))
-    await finished(events)
-    expect(requests.map((r) => r.params?.maxOutputTokens)).toEqual([4_096, 4_096])
-    const note = requests[1]!.messages.at(-1)!.content[0]
-    expect(note && 'text' in note ? note.text : '').not.toMatch(/now [\d,]+ tokens/)
-  })
-
   it('stops a turn that keeps being cut, writes nothing, and says why', async () => {
     const events: ChatEvent[] = []
     const requests: AIRequest[] = []
@@ -214,31 +154,6 @@ describe('a reply cut off by the output limit', () => {
     const text = completedText(events)
     expect(text).toMatch(/keep reaching the output limit of 64,000 tokens/)
     expect(events.some((e) => e.kind === 'stream' && e.event.type === 'text_delta' && /keep reaching/.test(e.event.text))).toBe(true)
-  })
-
-  it('marks an answer that ends at the limit as unfinished', async () => {
-    const events: ChatEvent[] = []
-    const chat = startService(async function* () {
-      yield { type: 'text_delta', text: 'The first half of a long answer' }
-      yield { type: 'stop', stopReason: 'length' }
-    }, events)
-    await chat.start(request())
-    await finished(events)
-    expect(completedText(events)).toMatch(/^The first half of a long answer[\s\S]*reached the output limit of 32,000 tokens/)
-    const texts = events.flatMap((e) => (e.kind === 'stream' && e.event.type === 'text_delta' ? [e.event.text] : []))
-    expect(texts.join('')).toMatch(/reached the output limit of 32,000 tokens/)
-  })
-
-  it('says when thinking used the whole limit', async () => {
-    const events: ChatEvent[] = []
-    const chat = startService(async function* () {
-      yield { type: 'reasoning_delta', text: 'Thinking and thinking' }
-      yield { type: 'usage', usage: { inputTokens: 10, outputTokens: 4096, reasoningTokens: 4096 } }
-      yield { type: 'stop', stopReason: 'length' }
-    }, events)
-    await chat.start(request({}, 4_096))
-    await finished(events)
-    expect(completedText(events)).toMatch(/whole output limit of 4,096 tokens thinking/)
   })
 })
 

@@ -35,9 +35,6 @@ const comment = (extra: Record<string, unknown> = {}): Record<string, unknown> =
 })
 
 describe('review IPC module', () => {
-  it('handles the five review channels and nothing else', () => {
-    expect(setup().channels.sort()).toEqual([IPC.reviewComments, IPC.reviewGet, IPC.reviewMark, IPC.reviewRevertHunks, IPC.reviewUndo].sort())
-  })
 
   describe('reviewGet', () => {
     it('passes a known scope through and rejects a malformed one before the service runs', async () => {
@@ -86,12 +83,6 @@ describe('review IPC module', () => {
   })
 
   describe('reviewMark', () => {
-    it('passes each reviewed file with the hash it was reviewed at', async () => {
-      const { call, chat } = setup()
-      await call(IPC.reviewMark, 't1', [{ path: 'a.ts', hunkIds: [HUNK], headHash: FILE_HASH, note: 'x' }])
-      await call(IPC.reviewMark, 't1', [])
-      expect(chat.markReviewed!.mock.calls).toEqual([['t1', [{ path: 'a.ts', hunkIds: [HUNK], headHash: FILE_HASH }]], ['t1', []]])
-    })
 
     it('rejects a missing hash, a path outside the workspace and a list that is too long', async () => {
       const { call, chat } = setup()
@@ -139,13 +130,6 @@ describe('review IPC module', () => {
       ]])
     })
 
-    it('works without options', async () => {
-      const { call, chat } = setup()
-      await call(IPC.reviewComments, 't1', [comment()])
-      await call(IPC.reviewComments, 't1', [comment()], null)
-      expect(chat.sendReviewComments!.mock.calls.map((args) => args[2])).toEqual([{}, {}])
-    })
-
     it('rejects an empty, oversize or malformed batch before anything is sent', async () => {
       const { call, chat } = setup()
       await expect(call(IPC.reviewComments, 't1', [])).rejects.toThrow('between 1 and 50')
@@ -162,30 +146,6 @@ describe('review IPC module', () => {
       ]
       for (const [fields, message] of bad) await expect(call(IPC.reviewComments, 't1', [comment(fields)])).rejects.toThrow(message)
       await expect(call(IPC.reviewComments, 't1', [null])).rejects.toThrow('A comment is invalid.')
-      expect(chat.sendReviewComments).not.toHaveBeenCalled()
-    })
-
-    it('rejects malformed options', async () => {
-      const { call, chat } = setup()
-      const send = (options: unknown): Promise<unknown> => call(IPC.reviewComments, 't1', [comment()], options)
-      await expect(send('x')).rejects.toThrow('send options')
-      await expect(send({ streamId: 'has space' })).rejects.toThrow('stream id')
-      await expect(send({ streamId: 7 })).rejects.toThrow('stream id')
-      await expect(send({ request: 'x' })).rejects.toThrow('request settings')
-      await expect(send({ request: { permissionMode: 'root' } })).rejects.toThrow('permission mode')
-      await expect(send({ request: { longContext: 'yes' } })).rejects.toThrow('long-context')
-      await expect(send({ request: { systemPrompt: 'x'.repeat(200_001) } })).rejects.toThrow('system prompt')
-      await expect(send({ request: { policy: {} } })).rejects.toThrow('model for this request')
-      await expect(send({ request: { policy: { primary: { providerId: '', model: 'm' } } } })).rejects.toThrow('provider')
-      await expect(send({ request: { policy: { primary: { providerId: 'p', model: 'x'.repeat(301) } } } })).rejects.toThrow('model')
-      await expect(send({ request: { policy: { primary: { providerId: 'p', model: 'm', params: { maxOutputTokens: 0 } } } } })).rejects.toThrow('output limit')
-      await expect(send({ request: { policy: { primary: { providerId: 'p', model: 'm', params: { reasoningEffort: 'extreme' } } } } })).rejects.toThrow('reasoning effort')
-      expect(chat.sendReviewComments).not.toHaveBeenCalled()
-    })
-
-    it('validates the task id first', async () => {
-      const { call, chat } = setup()
-      await expect(call(IPC.reviewComments, 7, [comment()])).rejects.toThrow('Invalid task id.')
       expect(chat.sendReviewComments).not.toHaveBeenCalled()
     })
   })

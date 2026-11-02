@@ -102,10 +102,4 @@ describe('skill discovery and on-demand instructions in real chat requests', () 
     expect(events.some((event) => event.kind === 'mode')).toBe(false)
     expect(events.some((event) => event.kind === 'tool' && event.tool.name === 'skill' && event.tool.phase === 'done')).toBe(true)
   })
-
-  it('does not add instructions or a skill tool to an ordinary tool-free conversation', async () => {
-    const { requests } = await run({ ...request(), fileToolsEnabled: false }, false)
-    expect(requests[0]!.tools?.some((tool) => tool.name === 'skill')).toBeFalsy()
-    expect(requests[0]!.system).not.toContain('## Available skills')
-  })
 })

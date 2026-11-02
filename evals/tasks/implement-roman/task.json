@@ -1,0 +1,6 @@
+{
+  "title": "Implement two functions from their written spec",
+  "prompt": "src/roman.mjs has two functions that are not implemented yet. Implement toRoman and fromRoman exactly as their doc comments describe, and make sure the tests in test/ pass.",
+  "timeoutSec": 240,
+  "stub": { "command": "node --test" }
+}

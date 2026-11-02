@@ -1,0 +1,2 @@
+# Fixtures are compared byte for byte (and one of them is CRLF on purpose), so git must not touch line endings here.
+* -text

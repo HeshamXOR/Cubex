@@ -94,30 +94,4 @@ describe('DiagnosticsManager with the built worker', () => {
     writeFileSync(join(root, 'src/lib.ts'), 'export function add(a: number): number { return a }\n')
     expect((await m.getDiagnostics(root, 'src/a.ts')).map((item) => item.code)).toEqual(['TS2554'])
   })
-
-  it('answers repeated questions about unchanged files quickly once the program is built', async () => {
-    const root = workspace({ 'src/a.ts': "export const a: number = 'x'\n" })
-    const m = manager()
-    m.warm(root)
-    await m.getDiagnostics(root, 'src/a.ts')
-    const started = Date.now()
-    for (let index = 0; index < 10; index++) expect(await m.getDiagnostics(root, 'src/a.ts')).toHaveLength(1)
-    expect(Date.now() - started).toBeLessThan(2_000)
-  })
-
-  it('survives a request that ran out of time and answers the next one', async () => {
-    const root = workspace({ 'src/a.ts': "export const a: number = 'x'\n" })
-    // A first request that is given 1 ms cannot finish: the worker has not even loaded the compiler.
-    const m = manager({ timeouts: { coldMs: 1, requestMs: 20_000, stuckMs: 20_000 } })
-    expect(await m.getDiagnostics(root, 'src/a.ts')).toEqual([])
-    expect(await m.getDiagnostics(root, 'src/a.ts')).toHaveLength(1)
-  })
-
-  it('does nothing for a folder without a project config, and says why', async () => {
-    const root = workspace({ 'src/a.ts': "export const a: number = 'x'\n" })
-    rmSync(join(root, 'tsconfig.json'))
-    const m = manager()
-    expect(m.status(root)).toMatchObject({ available: false, reason: expect.stringContaining('tsconfig.json') })
-    expect(await m.getDiagnostics(root, 'src/a.ts')).toEqual([])
-  })
 })

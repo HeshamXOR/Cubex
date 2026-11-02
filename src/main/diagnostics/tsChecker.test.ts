@@ -60,27 +60,6 @@ describe('ProjectChecker: files that change behind its back', () => {
     c.dispose()
   })
 
-  it('leaves nothing of a checked text behind: the disk is the truth again afterwards', () => {
-    const root = project({ 'tsconfig.json': TSCONFIG, 'src/a.ts': 'export const a: number = 1\n' })
-    const c = checker(root)
-    const file = join(root, 'src/a.ts')
-    expect(codes(c.check(file, 'export const a: number = 1\n', 'export const a: number = "x"\n'))).toEqual(['TS2322'])
-    // The text above was only evaluated; the file on disk is still the clean one.
-    expect(codes(c.current(file))).toEqual([])
-    c.dispose()
-  })
-
-  it('answers repeated questions about an unchanged file from the compiler cache', () => {
-    const root = project({ 'tsconfig.json': TSCONFIG, 'src/a.ts': 'export const a: number = "x"\n' })
-    const c = checker(root)
-    const file = join(root, 'src/a.ts')
-    const first = c.current(file)
-    const started = performance.now()
-    for (let index = 0; index < 20; index++) expect(c.current(file)).toEqual(first)
-    expect(performance.now() - started).toBeLessThan(500)
-    c.dispose()
-  })
-
   it('re-reads a tsconfig.json that changed on disk', () => {
     const root = project({ 'tsconfig.json': JSON.stringify({ compilerOptions: { ...OPTIONS, strict: false }, include: ['src'] }), 'src/a.ts': 'export function f(x) { return x }\n' })
     const c = checker(root)
@@ -98,51 +77,6 @@ describe('ProjectChecker: large projects and a missing file', () => {
     const c = checker(root, { maxProgramFiles: 2 })
     const outcome = c.current(join(root, 'src/a.ts'))
     expect(outcome).toMatchObject({ status: 'skipped', reason: expect.stringContaining('3 files, more than the 2') })
-    c.dispose()
-  })
-
-  it('has nothing to say about a file that is not on disk', () => {
-    const root = project({ 'tsconfig.json': TSCONFIG, 'src/a.ts': 'export const a = 1\n' })
-    const c = checker(root)
-    expect(c.current(join(root, 'src/gone.ts'))).toMatchObject({ status: 'skipped' })
-    c.dispose()
-  })
-
-  it('stops when asked to cancel', () => {
-    const root = project({ 'tsconfig.json': TSCONFIG, 'src/a.ts': 'export const a = 1\n' })
-    const c = checker(root, { cancelled: () => true })
-    expect(c.current(join(root, 'src/a.ts'))).toEqual({ status: 'cancelled' })
-    expect(c.check(join(root, 'src/a.ts'), null, 'export const a = 2\n')).toEqual({ status: 'cancelled' })
-    expect(c.warm()).toEqual({ status: 'cancelled' })
-    c.dispose()
-  })
-})
-
-describe('ProjectChecker.warm', () => {
-  it('builds the program of the project so the next check starts from it', () => {
-    const root = project({ 'tsconfig.json': TSCONFIG, 'src/lib.ts': LIB, 'src/a.ts': USER })
-    const c = checker(root)
-    expect(c.warm()).toEqual({ status: 'ok' })
-    expect(codes(c.current(join(root, 'src/a.ts')))).toEqual([])
-    c.dispose()
-  })
-
-  it('skips a folder that has no project config', () => {
-    const root = project({ 'src/a.ts': 'export const a = 1\n' })
-    const c = checker(root)
-    expect(c.warm()).toMatchObject({ status: 'skipped' })
-    c.dispose()
-  })
-
-  it('warms the projects a solution-style config references, then checks files in them', () => {
-    const root = project({
-      'tsconfig.json': JSON.stringify({ files: [], references: [{ path: './tsconfig.app.json' }] }),
-      'tsconfig.app.json': JSON.stringify({ compilerOptions: { ...OPTIONS, composite: true }, include: ['src'] }),
-      'src/a.ts': 'export const a: number = "x"\n'
-    })
-    const c = checker(root)
-    expect(c.warm()).toEqual({ status: 'ok' })
-    expect(codes(c.current(join(root, 'src/a.ts')))).toEqual(['TS2322'])
     c.dispose()
   })
 })

@@ -4,6 +4,7 @@ import { normalizeMessageTranscriptJson } from '@shared/messageTranscript'
 import { cleanPeerIds } from '@shared/peers'
 import { normalizeStoredGoal, storableGoal, type Goal } from '@shared/goal'
 import type {
+  ContextUsageSnapshot,
   Conversation,
   ConversationComposer,
   ConversationSummary,
@@ -135,6 +136,10 @@ function migrate(d: Database.Database): void {
     // Each conversation keeps its own effort, long-context choice and answer cap next to its model.
     d.exec('ALTER TABLE conversations ADD COLUMN composerJson TEXT')
   }
+  if (!hasCol('contextJson')) {
+    // The meter's last snapshot, so a task that is opened again shows its context before the next request.
+    d.exec('ALTER TABLE conversations ADD COLUMN contextJson TEXT')
+  }
   const messageCols = d.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>
   if (!messageCols.some((column) => column.name === 'uiTranscriptJson')) {
     d.exec('ALTER TABLE messages ADD COLUMN uiTranscriptJson TEXT')
@@ -227,6 +232,7 @@ export const conversationRepo = {
       contextSummary: (c.contextSummary as string) ?? undefined,
       contextSummaryAt: (c.contextSummaryAt as number) ?? undefined,
       ...(parseComposer(c.composerJson) ? { composer: parseComposer(c.composerJson)! } : {}),
+      ...(parseContext(c.contextJson) ? { lastContext: parseContext(c.contextJson)! } : {}),
       totalUsage: c.totalUsageJson ? JSON.parse(c.totalUsageJson as string) : undefined,
       messages: msgs.map(toMessage)
     }
@@ -240,8 +246,8 @@ export const conversationRepo = {
 
   insertConversation(d: ReturnType<typeof initDb>, conv: Conversation): void {
     d.prepare(
-      `INSERT INTO conversations (id,title,createdAt,updatedAt,providerId,model,execution,presetId,composerJson,workspacePath,pinned,archived,totalUsageJson,contextStartMessageId,contextSummary,contextSummaryAt)
-       VALUES (@id,@title,@createdAt,@updatedAt,@providerId,@model,@execution,@presetId,@composerJson,@workspacePath,@pinned,@archived,@totalUsageJson,@contextStartMessageId,@contextSummary,@contextSummaryAt)`
+      `INSERT INTO conversations (id,title,createdAt,updatedAt,providerId,model,execution,presetId,composerJson,workspacePath,pinned,archived,totalUsageJson,contextStartMessageId,contextSummary,contextSummaryAt,contextJson)
+       VALUES (@id,@title,@createdAt,@updatedAt,@providerId,@model,@execution,@presetId,@composerJson,@workspacePath,@pinned,@archived,@totalUsageJson,@contextStartMessageId,@contextSummary,@contextSummaryAt,@contextJson)`
     ).run({
       id: conv.id,
       title: conv.title,
@@ -259,7 +265,8 @@ export const conversationRepo = {
       // A summary describes what precedes the boundary, so it is never stored without one.
       contextSummary: conv.contextStartMessageId ? conv.contextSummary ?? null : null,
       contextSummaryAt: conv.contextStartMessageId && conv.contextSummary ? conv.contextSummaryAt ?? null : null,
-      totalUsageJson: conv.totalUsage ? JSON.stringify(conv.totalUsage) : null
+      totalUsageJson: conv.totalUsage ? JSON.stringify(conv.totalUsage) : null,
+      contextJson: contextJson(conv.lastContext)
     })
     this.replaceMessages(conv.id, conv.messages)
   },
@@ -270,13 +277,16 @@ export const conversationRepo = {
     if (!existing) return
     // Choosing a model is not activity: it must not lift an old chat to the top of the sidebar.
     const activity = Object.keys(patch).some((key) => !SELECTION_KEYS.has(key))
-    const merged = { ...existing, ...patch, updatedAt: activity ? Date.now() : existing.updatedAt }
+    // A snapshot describes the context as it stood. Moving or clearing the boundary changes that context, so the
+    // snapshot goes with it unless the same patch brings a new one (compaction, /clear, restore full context).
+    const resetsContext = !('lastContext' in patch) && ('contextStartMessageId' in patch || 'contextSummary' in patch)
+    const merged = { ...existing, ...patch, ...(resetsContext ? { lastContext: undefined } : {}), updatedAt: activity ? Date.now() : existing.updatedAt }
     d.prepare(
       `UPDATE conversations SET title=@title, updatedAt=@updatedAt, providerId=@providerId,
         model=@model, execution=@execution, presetId=@presetId, composerJson=@composerJson, workspacePath=@workspacePath,
         pinned=@pinned, archived=@archived, totalUsageJson=@totalUsageJson,
         contextStartMessageId=@contextStartMessageId, contextSummary=@contextSummary,
-        contextSummaryAt=@contextSummaryAt WHERE id=@id`
+        contextSummaryAt=@contextSummaryAt, contextJson=@contextJson WHERE id=@id`
     ).run({
       id,
       title: merged.title,
@@ -293,7 +303,8 @@ export const conversationRepo = {
       // Clearing the boundary (restore full context, /clear) clears its summary too.
       contextSummary: merged.contextStartMessageId ? merged.contextSummary ?? null : null,
       contextSummaryAt: merged.contextStartMessageId && merged.contextSummary ? merged.contextSummaryAt ?? null : null,
-      totalUsageJson: merged.totalUsage ? JSON.stringify(merged.totalUsage) : null
+      totalUsageJson: merged.totalUsage ? JSON.stringify(merged.totalUsage) : null,
+      contextJson: contextJson(merged.lastContext)
     })
     if (patch.messages) this.replaceMessages(id, patch.messages)
   },
@@ -357,8 +368,11 @@ export const goalRepo = {
   }
 }
 
-/** The conversation fields that record what was chosen for it, not what happened in it. */
-const SELECTION_KEYS: ReadonlySet<string> = new Set(['providerId', 'model', 'presetId', 'composer', 'execution'])
+/**
+ * The conversation fields that record what was chosen for it, not what happened in it, and the meter's snapshot,
+ * which is bookkeeping about a turn that already counted as activity. None of them lifts a chat in the sidebar.
+ */
+const SELECTION_KEYS: ReadonlySet<string> = new Set(['providerId', 'model', 'presetId', 'composer', 'execution', 'lastContext'])
 
 const EFFORTS: readonly string[] = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 
@@ -384,6 +398,23 @@ function parseComposer(json: unknown): ConversationComposer | undefined {
   if (typeof json !== 'string' || !json) return undefined
   try {
     return cleanComposer(JSON.parse(json))
+  } catch {
+    return undefined
+  }
+}
+
+function contextJson(value: ContextUsageSnapshot | undefined): string | null {
+  return value ? JSON.stringify(value) : null
+}
+
+/** The stored snapshot, or undefined when it is missing or is not one (a damaged row must not break opening the task). */
+function parseContext(json: unknown): ContextUsageSnapshot | undefined {
+  if (typeof json !== 'string' || !json) return undefined
+  try {
+    const value = JSON.parse(json) as Partial<ContextUsageSnapshot> | null
+    const valid = !!value && typeof value === 'object' && Array.isArray(value.sections) &&
+      typeof value.estimatedTokens === 'number' && Number.isFinite(value.estimatedTokens) && typeof value.outputReserve === 'number'
+    return valid ? (value as ContextUsageSnapshot) : undefined
   } catch {
     return undefined
   }

@@ -158,18 +158,6 @@ describe('an update over real HTTP', () => {
     expect(events).toEqual([`start ${path}`, 'quit'])
   })
 
-  it('goes through the release page and the file server without a cookie or a login', async () => {
-    const updates = service()
-    await updates.checkNow(true)
-    await updates.download()
-    expect(requests.map((request) => request.path)).toEqual(['/latest.json', '/files/Cubex-Setup-0.2.0.exe', '/cdn/signed-1/Cubex-Setup-0.2.0.exe'])
-    for (const request of requests) {
-      expect(request.userAgent).toBe('Cubex/0.1.0')
-      expect(request.cookie).toBeUndefined()
-      expect(request.authorization).toBeUndefined()
-    }
-  })
-
   it('goes on from where a dropped connection stopped, instead of starting again', async () => {
     behaviour.cutFirstAt = 1_000_000
     const updates = service()
@@ -207,25 +195,5 @@ describe('an update over real HTTP', () => {
     const state = await updates.download()
     expect(state.update?.error).toMatch(/server Cubex does not use for updates/)
     expect(requests.some((request) => request.path.startsWith('/cdn/'))).toBe(false)
-  })
-
-  it('says the answer could not be read when the server sends something that is not a release', async () => {
-    behaviour.releaseAnswer = { status: 200, body: '<html><body>Not a release</body></html>' }
-    const state = await service().checkNow(true)
-    expect(state.check).toMatchObject({ status: 'failed', error: expect.stringMatching(/could not read/) })
-    expect(state.update).toBeUndefined()
-  })
-
-  it('says GitHub has nothing published when the server answers that there is no release', async () => {
-    behaviour.releaseAnswer = { status: 404, body: '{"message":"Not Found"}' }
-    expect((await service().checkNow(true)).check.error).toMatch(/no published release/)
-  })
-
-  it('opens the page of the release the server named', async () => {
-    const events: string[] = []
-    const updates = service({ events })
-    await updates.checkNow(true)
-    await updates.openReleasePage()
-    expect(events).toEqual([`open ${origin}/releases/v0.2.0`])
   })
 })

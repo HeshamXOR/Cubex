@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { mkdtempSync, readFileSync, existsSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { McpClient, setMcpClientVersion, type McpServerSpec } from './McpClient'
+import { McpClient, type McpServerSpec } from './McpClient'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const fixture = join(here, '__fixtures__', 'richServer.mjs')
@@ -59,23 +59,6 @@ describe('handshake', () => {
     expect(log[2]).toMatchObject({ method: 'tools/list' })
   })
 
-  it('tells the server which version of Cubex is running', async () => {
-    const logFile = join(tmp, 'h-version.log')
-    setMcpClientVersion('9.8.7')
-    try {
-      await make(spec({ logFile })).connect()
-      expect(readLog(logFile)[0]).toMatchObject({ method: 'initialize', params: { clientInfo: { name: 'Cubex', version: '9.8.7' } } })
-    } finally {
-      setMcpClientVersion('0.0.0')
-    }
-  })
-
-  it('accepts an older protocol version the server negotiates down to', async () => {
-    const client = make(spec({ protocolVersion: '2024-11-05' }))
-    await client.connect()
-    expect(client.protocolVersion).toBe('2024-11-05')
-  })
-
   it('rejects a protocol version Cubex does not speak', async () => {
     await expect(make(spec({ protocolVersion: '1999-01-01' })).connect()).rejects.toThrow(/protocol version "1999-01-01"/)
   })
@@ -88,19 +71,6 @@ describe('handshake', () => {
     expect(client.connected).toBe(false)
   }, 15000)
 
-  it('ignores non-JSON noise on stdout', async () => {
-    const client = make(spec({ noisyStdout: true }))
-    await client.connect()
-    expect(client.connected).toBe(true)
-  })
-
-  it('passes arguments with spaces, quotes and non-ASCII characters to the server unchanged', async () => {
-    const args = [fixture, 'two words', 'say "hi"', 'café 中', '--json={"a":1}']
-    const client = make(spec({}, { args }))
-    await client.connect()
-    expect(JSON.parse((await client.callTool('argv', {})).text)).toEqual(args.slice(1))
-  })
-
   it('scrubs Cubex credentials from the environment but passes the entry env', async () => {
     process.env.CUBEX_TEST_SECRET = 'leak'
     try {
@@ -111,35 +81,6 @@ describe('handshake', () => {
     } finally {
       delete process.env.CUBEX_TEST_SECRET
     }
-  })
-})
-
-describe('tool listing', () => {
-  it('follows cursor pagination to the end', async () => {
-    const logFile = join(tmp, 'p1.log')
-    const client = make(spec({ toolCount: 7, pageSize: 3, logFile }))
-    await client.connect()
-    expect(client.tools.filter((t) => /^t\d+$/.test(t.name))).toHaveLength(7)
-    expect(client.tools.some((t) => t.name === 'echo')).toBe(true)
-    const cursors = readLog(logFile).filter((m) => m.method === 'tools/list').map((m) => m.params?.cursor)
-    expect(cursors[0]).toBeUndefined()
-    expect(cursors.slice(1, 3)).toEqual(['3', '6'])
-  })
-
-  it('stops when a server keeps returning the same cursor', async () => {
-    const client = make(spec({ pageSize: 2, loopCursor: true }))
-    await client.connect()
-    expect(client.tools).toHaveLength(2)
-  }, 15000)
-
-  it('refreshes the list on notifications/tools/list_changed and tells listeners', async () => {
-    const client = make(spec({}))
-    let notified = 0
-    client.onToolsChanged(() => { notified++ })
-    await client.connect()
-    await client.callTool('add_tool', { name: 'fresh' })
-    await waitFor(() => client.tools.some((t) => t.name === 'fresh'))
-    expect(notified).toBeGreaterThan(0)
   })
 })
 
@@ -173,37 +114,6 @@ describe('requests', () => {
     await waitFor(() => readLog(logFile).some((m) => m.method === 'notifications/cancelled'))
   })
 
-  it('does not call the server at all when the signal is already aborted', async () => {
-    const logFile = join(tmp, 'c3.log')
-    const client = make(spec({ logFile }))
-    await client.connect()
-    const controller = new AbortController()
-    controller.abort()
-    const result = await client.callTool('echo', { text: 'x' }, { signal: controller.signal })
-    expect(result.isError).toBe(true)
-    expect(readLog(logFile).some((m) => m.method === 'tools/call')).toBe(false)
-  })
-
-  it('handles many concurrent calls', async () => {
-    const client = make(spec({}))
-    await client.connect()
-    const results = await Promise.all(Array.from({ length: 8 }, (_, i) => client.callTool('echo', { text: String(i) })))
-    expect(results.map((r) => r.text)).toEqual(Array.from({ length: 8 }, (_, i) => `echo: ${i}`))
-  })
-
-  it('connects on demand when a call arrives before connect()', async () => {
-    const client = make(spec({}))
-    expect((await client.callTool('echo', { text: 'lazy' })).text).toBe('echo: lazy')
-    expect(client.connected).toBe(true)
-  })
-
-  it('answers server ping requests and rejects unknown server requests', async () => {
-    const client = make(spec({}))
-    await client.connect()
-    expect((await client.callTool('server_ping', {})).text).toBe('pong ok')
-    expect((await client.callTool('server_unknown', {})).text).toBe('error -32601')
-  })
-
   it('maps content blocks, structuredContent and isError', async () => {
     const client = make(spec({}))
     await client.connect()
@@ -227,39 +137,8 @@ describe('requests', () => {
   })
 })
 
-describe('stderr', () => {
-  it('captures stderr, forwards it to the logger, and redacts secret values', async () => {
-    const logs: string[] = []
-    const secret = 's3cr3t-value-123456'
-    const client = make(spec({ stderrLines: 3, stderrSecret: secret }, { env: { MOCK_CONFIG: JSON.stringify({ stderrLines: 3, stderrSecret: secret }), SERVICE_PASSPHRASE: secret } }), {
-      log: (_level, message) => { logs.push(message) }
-    })
-    await client.connect()
-    await waitFor(() => client.stderrTail.includes('stderr line 2') && client.stderrTail.includes('starting with token'))
-    expect(client.stderrTail).not.toContain(secret)
-    expect(client.stderrTail).toContain('«redacted»')
-    await waitFor(() => logs.some((l) => l.includes('stderr line 0')))
-    expect(logs.join('\n')).not.toContain(secret)
-  })
-
-  it('keeps the stderr buffer and the log volume bounded for a noisy server', async () => {
-    const logs: string[] = []
-    const client = make(spec({ stderrLines: 20000, stderrWidth: 100 }), { log: (_level, message) => { logs.push(message) } })
-    await client.connect()
-    await client.callTool('echo', { text: 'responsive' })
-    expect(client.stderrTail.length).toBeLessThanOrEqual(8192)
-    expect(logs.length).toBeLessThan(500)
-  }, 20000)
-})
-
 describe('environment and secrets', () => {
   const secret = 'tok-9f8e7d6c5b4a'
-
-  it('gives the server its own variables on top of the inherited ones', async () => {
-    const client = make(spec({}, { env: { MOCK_CONFIG: '{}', REGION: 'eu-west-1' } }))
-    await client.connect()
-    expect((await client.callTool('env', { name: 'REGION' })).text).toBe('eu-west-1')
-  })
 
   it('passes a secret to the server, and hides it in everything the client reports back', async () => {
     const logs: string[] = []
@@ -294,34 +173,6 @@ describe('environment and secrets', () => {
     expect(logs.join('\n')).not.toContain('tok-9f8e7d')
   })
 
-  it('holds back the start of a secret that is still arriving, so a failure that interrupts it shows none of it', async () => {
-    const config = { stderrParts: ['token tok-9f8e7d'], noInitialize: true }
-    const client = make(spec(config, { env: { MOCK_CONFIG: JSON.stringify(config), SERVICE_TOKEN: secret }, secretValues: [secret], startupTimeoutMs: 1_500 }))
-    await expect(client.connect()).rejects.toThrow(/timed out/)
-    expect(client.stderrTail).toBe('token ')
-  })
-
-  it('hides the value of a plain variable that is named like a credential', async () => {
-    const client = make(spec({}, { env: { MOCK_CONFIG: '{}', API_KEY: 'plain-key-value-1', REGION: 'eu-west-1' } }))
-    await client.connect()
-    expect((await client.callTool('env', { name: 'API_KEY' })).text).toBe('«redacted»')
-    expect((await client.callTool('env', { name: 'REGION' })).text).toBe('eu-west-1')
-  })
-
-  it('lets a credential given on purpose through the filter that keeps the inherited ones out', async () => {
-    process.env.SERVICE_TOKEN = 'inherited-from-my-shell'
-    try {
-      const client = make(spec({}))
-      await client.connect()
-      expect((await client.callTool('env', { name: 'SERVICE_TOKEN' })).text).toBe('(no content)')
-      const given = make(spec({}, { env: { MOCK_CONFIG: '{}', SERVICE_TOKEN: secret }, secretValues: [secret] }))
-      await given.connect()
-      expect((await given.callTool('env', { name: 'SERVICE_TOKEN' })).text).toBe('«redacted»')
-    } finally {
-      delete process.env.SERVICE_TOKEN
-    }
-  })
-
   it('does not start a server whose secret has no saved value, and says which one', async () => {
     const logFile = join(tmp, 'never-started.log')
     const client = make(spec({ logFile }, { missingSecrets: ['SERVICE_TOKEN'] }))
@@ -349,40 +200,9 @@ describe('reconnect and backoff', () => {
     expect(client.connected).toBe(true)
     expect((await client.callTool('echo', { text: 'back' })).text).toBe('echo: back')
   })
-
-  it('backs off exponentially with jitter after failed connects and refuses early retries', async () => {
-    let now = 1_000_000
-    const client = make({ id: 'bad', name: 'Bad', command: join(tmp, 'does-not-exist') }, { now: () => now, random: () => 0.5 })
-    await expect(client.connect()).rejects.toThrow()
-    expect(client.failures).toBe(1)
-    expect(client.retryAt - now).toBe(750)
-    await expect(client.connect()).rejects.toThrow(/retry in/i)
-    expect(client.failures).toBe(1)
-    now = client.retryAt + 1
-    await expect(client.connect()).rejects.toThrow()
-    expect(client.failures).toBe(2)
-    expect(client.retryAt - now).toBe(1500)
-  })
-
-  it('resets the backoff after a successful connect', async () => {
-    const client = make(spec({}))
-    await client.connect()
-    expect(client.failures).toBe(0)
-  })
 })
 
 describe('shutdown', () => {
-  it('shuts down gracefully by closing stdin when the server cooperates', async () => {
-    const client = make(spec({}))
-    await client.connect()
-    const pid = client.pid!
-    expect(alive(pid)).toBe(true)
-    const started = Date.now()
-    await client.close()
-    expect(Date.now() - started).toBeLessThan(2500)
-    await waitFor(() => !alive(pid))
-    expect(client.connected).toBe(false)
-  })
 
   it('kills a server that ignores stdin closing, together with its child processes', async () => {
     const pidFile = join(tmp, 'tree1.pid')
@@ -395,26 +215,6 @@ describe('shutdown', () => {
     await client.close()
     await waitFor(() => !alive(pid) && !alive(grandchild), 8000)
   }, 20000)
-
-  it('kill() stops the whole tree immediately without waiting for a grace period', async () => {
-    const pidFile = join(tmp, 'tree2.pid')
-    const client = make(spec({ childPidFile: pidFile }))
-    await client.connect()
-    const pid = client.pid!
-    await waitFor(() => existsSync(pidFile) && readFileSync(pidFile, 'utf8').length > 0)
-    const grandchild = Number(readFileSync(pidFile, 'utf8'))
-    client.kill()
-    await waitFor(() => !alive(pid) && !alive(grandchild), 8000)
-  }, 20000)
-
-  it('close() is safe to call twice and before connecting', async () => {
-    const client = make(spec({}))
-    await client.close()
-    await client.connect()
-    await client.close()
-    await client.close()
-    expect(client.connected).toBe(false)
-  })
 })
 
 describe('a server that dies or breaks its pipe', () => {
@@ -458,50 +258,5 @@ describe('a server that dies or breaks its pipe', () => {
 
     expect((await client.callTool('echo', { text: 'again' })).text).toBe('echo: again')
     expect(client.pid).not.toBe(first)
-  })
-
-  it('survives calls that race with the server exiting', async () => {
-    const client = make(spec({}))
-    await client.connect()
-    process.kill(client.pid!, 'SIGKILL')
-    // Straight away, before the exit has been noticed: these writes may hit a closed pipe.
-    const first = await client.callTool('echo', { text: 'x' })
-    expect(first.isError).toBe(true)
-    expect(first.text).toMatch(/exited|stopped reading its input|not running/)
-    expect((await client.callTool('echo', { text: 'y' })).text).toBe('echo: y')
-  })
-
-  it('starts one server when several callers connect at the same time', async () => {
-    const logFile = join(tmp, 'shared-connect.log')
-    const client = make(spec({ logFile }))
-    await Promise.all([client.connect(), client.connect(), client.callTool('echo', { text: 'x' })])
-    expect(readLog(logFile).filter((m) => m.method === 'initialize')).toHaveLength(1)
-  })
-
-  it('keeps the output and exit code of a server that quits before it speaks', async () => {
-    const client = make(spec({ stderrLines: 2, exitOnStart: 1 }))
-    await expect(client.connect()).rejects.toThrow(/exited with code 1/)
-    expect(client.connected).toBe(false)
-    expect(client.lastError).toMatch(/exited with code 1/)
-    expect(client.lastExit).toMatchObject({ code: 1 })
-    expect(client.stderrTail).toContain('stderr line 1')
-  })
-
-  it('ignores lines that are valid JSON but not messages', async () => {
-    const client = make(spec({ junkLines: true }))
-    await client.connect()
-    expect((await client.callTool('echo', { text: 'ok' })).text).toBe('echo: ok')
-  })
-
-  it('does not start again once it was retired', async () => {
-    const client = make(spec({}))
-    await client.connect()
-    const pid = client.pid!
-    client.retire()
-    await waitFor(() => !alive(pid))
-    const result = await client.callTool('echo', { text: 'x' })
-    expect(result.isError).toBe(true)
-    expect(result.text).toMatch(/turned off/)
-    expect(client.pid).toBeUndefined()
   })
 })

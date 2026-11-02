@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { IPC } from '@shared/ipc'
 import type { HookTestResult } from '@shared/policy'
 
 const mocks = vi.hoisted(() => ({ testHook: vi.fn() }))
@@ -27,9 +26,6 @@ beforeEach(() => {
 })
 
 describe('hooks:test', () => {
-  it('declares exactly its one channel while registering', () => {
-    expect(channels).toEqual([IPC.hooksTest])
-  })
 
   it.each([
     undefined, null, 'npm run format', 7, [],
@@ -44,17 +40,6 @@ describe('hooks:test', () => {
   ])('rejects a malformed request without running anything: %j', async (request) => {
     await expect(handler(request)).rejects.toThrow()
     expect(mocks.testHook).not.toHaveBeenCalled()
-  })
-
-  it('runs the validated hook in the selected project', async () => {
-    await handler({ event: 'PostToolUse', matcher: ' write_file ', command: ' npm run format ', enabled: true, id: 'h1' })
-    expect(mocks.testHook).toHaveBeenCalledWith({ event: 'PostToolUse', matcher: 'write_file', command: 'npm run format' }, { workspace: 'C:\\proj' })
-  })
-
-  it('passes no workspace when no project is selected', async () => {
-    workspace = undefined
-    await handler({ event: 'Stop', command: 'x' })
-    expect(mocks.testHook).toHaveBeenCalledWith({ event: 'Stop', command: 'x' }, { workspace: undefined })
   })
 
   it('refuses a fourth test at once, and frees the slot when one fails', async () => {

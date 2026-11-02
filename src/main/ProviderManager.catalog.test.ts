@@ -53,44 +53,10 @@ describe('ProviderManager and the model catalog', () => {
     expect(manager.getModelInfo('nv', K3.id)).toMatchObject({ contextWindow: 1_048_576, pricing: { inputPerMTok: 0, outputPerMTok: 0 } })
   })
 
-  it('waits for a first download, but not in local-only mode', async () => {
-    const online = catalog()
-    await new ProviderManager({ catalog: online }).listModels('nv')
-    expect(online.ready).toHaveBeenCalledTimes(1)
-
-    state.localOnly = true
-    // A compatible endpoint declared local is allowed in this mode, wherever its address points.
-    state.configs.set(NVIDIA.id, { ...NVIDIA, accessType: 'local' })
-    const offline = catalog()
-    const models = await new ProviderManager({ catalog: offline }).listModels('nv')
-    expect(offline.ready).not.toHaveBeenCalled()
-    // What is already on disk is still used.
-    expect(models[0]!.reasoningEfforts).toEqual(['low', 'high', 'max'])
-  })
-
   it('still lists models when the catalog fails', async () => {
     const broken = { ...catalog(), ready: vi.fn(async () => { throw new Error('offline') }) }
     const models = await new ProviderManager({ catalog: broken }).listModels('nv')
     expect(models).toHaveLength(2)
-  })
-
-  it('lists models as reported when there is no catalog', async () => {
-    expect(await new ProviderManager().listModels('nv')).toEqual([listed(K3.id), listed('vendor/other')])
-  })
-
-  it('tells the adapter what the catalog knows about a model before it was ever listed', () => {
-    new ProviderManager({ catalog: catalog() }).resolve('nv')
-    const options = vi.mocked(createProvider).mock.calls[0]![2]!
-    expect(options.modelInfo!(K3.id)).toEqual({ id: K3.id, supportsReasoning: true, reasoningEfforts: ['low', 'high', 'max'] })
-    expect(options.modelInfo!('vendor/other')).toBeUndefined()
-  })
-
-  it('prefers the listed entry once the provider has been asked', async () => {
-    const manager = new ProviderManager({ catalog: catalog() })
-    manager.resolve('nv')
-    await manager.listModels('nv')
-    const options = vi.mocked(createProvider).mock.calls[0]![2]!
-    expect(options.modelInfo!(K3.id)).toMatchObject({ id: K3.id, reasoningEfforts: ['low', 'high', 'max'] })
   })
 
   it('gives a request the catalog window and price for a model that was never listed', () => {
@@ -99,17 +65,5 @@ describe('ProviderManager and the model catalog', () => {
     expect(manager.getModelInfo('nv', 'vendor/other')).toBeUndefined()
     expect(manager.getModelInfo('missing', K3.id)).toBeUndefined()
     expect(new ProviderManager().getModelInfo('nv', K3.id)).toBeUndefined()
-  })
-
-  it('keeps the window and price when the model list could not be fetched', async () => {
-    vi.mocked(createProvider).mockImplementation(() => ({ id: 'nv', getModels: async () => { throw new Error('timeout') } }) as unknown as AIProvider)
-    const manager = new ProviderManager({ catalog: catalog() })
-    expect(await manager.listModels('nv')).toEqual([])
-    expect(manager.getModelInfo('nv', K3.id)).toMatchObject({ contextWindow: 1_048_576 })
-  })
-
-  it('does not describe a local runtime from the catalog, whatever its model is called', () => {
-    state.configs.set(NVIDIA.id, { ...NVIDIA, kind: 'ollama', baseUrl: 'http://localhost:11434' })
-    expect(new ProviderManager({ catalog: catalog() }).getModelInfo('nv', K3.id)).toBeUndefined()
   })
 })

@@ -81,6 +81,11 @@ export interface Conversation {
   contextSummary?: string
   /** Epoch milliseconds when `contextSummary` was generated. */
   contextSummaryAt?: number
+  /**
+   * The context meter as the last finished turn left it, so opening the task shows it before the next request.
+   * Replaced when a turn ends; cleared when the context boundary moves or is cleared.
+   */
+  lastContext?: ContextUsageSnapshot
   messages: StoredMessage[]
   totalUsage?: Usage
 }

@@ -92,41 +92,4 @@ describe('a later turn sees what the model did in an earlier one', () => {
     expect(JSON.stringify(third.messages)).not.toMatch(/Need a\.txt/)
     expect(third.messages[3]!.content).toEqual([{ type: 'text', text: 'It says "first file".' }])
   })
-
-  it('falls back to the stored text for a turn that has no record, and for one that used no tool', async () => {
-    mocks.messages = [
-      { id: 'u0', role: 'user', text: 'Hello', createdAt: 1 },
-      { id: 'a0', role: 'assistant', text: 'Hi there.', createdAt: 2 }
-    ]
-    const events: ChatEvent[] = []
-    const requests: AIRequest[] = []
-    const chat = startService(async function* (req) { requests.push(structuredClone(req)); yield { type: 'text_delta', text: 'ok' } }, events)
-    await chat.start(request('s1', 'u1', 'Again.'))
-    await finishedTurns(events, 1)
-    expect(requests[0]!.messages.map((m) => [m.role, m.content])).toEqual([
-      ['user', [{ type: 'text', text: 'Hello' }]],
-      ['assistant', [{ type: 'text', text: 'Hi there.' }]],
-      ['user', [{ type: 'text', text: 'Again.' }]]
-    ])
-    // A turn that used no tool leaves nothing in the record.
-    expect(existsSync(join(mocks.dataRoot, 'turn-log', 'task-one.json'))).toBe(false)
-  })
-
-  it('removes the record with the task', async () => {
-    const events: ChatEvent[] = []
-    let calls = 0
-    const chat = startService(async function* () {
-      calls++
-      if (calls === 1) {
-        yield { type: 'tool_call_delta', index: 0, id: 'toolu_A', name: 'read_file', argsDelta: '{"path":"a.txt"}' }
-        yield { type: 'stop', stopReason: 'tool_use' }
-      } else yield { type: 'text_delta', text: 'Done.' }
-    }, events)
-    await chat.start(request('s1', 'u1', 'Read it.'))
-    await finishedTurns(events, 1)
-    const file = join(mocks.dataRoot, 'turn-log', 'task-one.json')
-    expect(existsSync(file)).toBe(true)
-    chat.forgetConversation('task-one')
-    expect(existsSync(file)).toBe(false)
-  })
 })

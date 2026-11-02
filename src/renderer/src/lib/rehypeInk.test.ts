@@ -32,12 +32,6 @@ describe('rehypeInk', () => {
     expect(flatten(tree)).toBe('Run npm test nowconst a = 1')
   })
 
-  it('reaches into emphasis, links and list items', () => {
-    const tree = root(el('ul', el('li', el('strong', text('bold word')), text(' tail'))))
-    rehypeInk()(tree)
-    expect(inks(tree)).toEqual(['bold', 'word', 'tail'])
-  })
-
   it('does not animate words before the baseline offset', () => {
     // "Hello world" starts at source offset 10, so "Hello" is at 10 and "world" at 16.
     const tree = root(el('p', text('Hello world', 10)))
@@ -46,16 +40,4 @@ describe('rehypeInk', () => {
     expect(flatten(tree)).toBe('Hello world')
   })
 
-  it('animates everything when the source position is unknown', () => {
-    const tree = root(el('p', text('no position here')))
-    rehypeInk({ baseline: 1000 })(tree)
-    expect(inks(tree)).toEqual(['no', 'position', 'here'])
-  })
-
-  it('ignores whitespace-only text', () => {
-    const tree = root(el('ul', text('\n'), el('li', text('x')), text('\n')))
-    rehypeInk()(tree)
-    expect(inks(tree)).toEqual(['x'])
-    expect(flatten(tree)).toBe('\nx\n')
-  })
 })

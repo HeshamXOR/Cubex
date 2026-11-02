@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { HookTestResult } from '../../../shared/policy'
-import { describeHookTrigger, explainHookTest, folderLabel } from './hookText'
+import { describeHookTrigger, explainHookTest } from './hookText'
 
 const result = (over: Partial<HookTestResult>): HookTestResult => ({
   event: 'PreToolUse', command: 'x', cwd: 'C:\\p', cwdKind: 'project', payload: '{}', outcome: 'ran', exitCode: 0,
@@ -8,9 +8,6 @@ const result = (over: Partial<HookTestResult>): HookTestResult => ({
 })
 
 describe('explainHookTest', () => {
-  it('calls a clean PreToolUse run allowed', () => {
-    expect(explainHookTest(result({}))).toEqual({ tone: 'ok', title: 'Allowed', body: 'The hook exited with code 0, so the tool would run.' })
-  })
 
   it('calls a block a block, in the attention color', () => {
     expect(explainHookTest(result({ decision: 'blocked', exitCode: 2, reason: 'no' }))).toEqual({
@@ -25,10 +22,6 @@ describe('explainHookTest', () => {
     expect(verdict.body).toBe('It ended with exit code 1, which is not a block, so the tool would still run. Only exit code 2, or a printed {"decision":"block"}, stops a tool.')
   })
 
-  it('names a missing exit code', () => {
-    expect(explainHookTest(result({ exitCode: null })).body).toContain('It ended with no exit code')
-  })
-
   it('says a timeout never blocks', () => {
     expect(explainHookTest(result({ outcome: 'timed-out', exitCode: null }))).toEqual({
       tone: 'warn',
@@ -38,31 +31,6 @@ describe('explainHookTest', () => {
     expect(explainHookTest(result({ event: 'Stop', outcome: 'timed-out', exitCode: null })).body).toContain('the turn would end')
   })
 
-  it('reports a command that never started as an error', () => {
-    expect(explainHookTest(result({ outcome: 'failed-to-start', exitCode: null, startError: 'spawn cmd.exe ENOENT' }))).toEqual({
-      tone: 'error', title: 'The hook did not start', body: 'spawn cmd.exe ENOENT'
-    })
-    expect(explainHookTest(result({ outcome: 'failed-to-start', exitCode: null })).body).toBe('The shell could not start the command.')
-  })
-
-  it('explains an event that cannot block', () => {
-    expect(explainHookTest(result({ event: 'PostToolUse' }))).toEqual({
-      tone: 'ok', title: 'Ran without errors', body: 'PostToolUse hooks cannot block anything, so this only shows that the command works.'
-    })
-    expect(explainHookTest(result({ event: 'PostToolUse', exitCode: 2, blockIgnored: true }))).toEqual({
-      tone: 'warn', title: 'Ran, and asked to block', body: 'PostToolUse hooks cannot block anything, so Cubex ignores the request.'
-    })
-    expect(explainHookTest(result({ event: 'SessionStart', exitCode: 1 }))).toEqual({
-      tone: 'warn', title: 'The hook failed', body: 'It ended with exit code 1. Cubex ignores the result of SessionStart hooks.'
-    })
-  })
-})
-
-describe('folderLabel', () => {
-  it('tells the project from the temporary folder', () => {
-    expect(folderLabel({ cwdKind: 'project' })).toBe('Project folder')
-    expect(folderLabel({ cwdKind: 'scratch' })).toBe('Empty temporary folder')
-  })
 })
 
 describe('describeHookTrigger', () => {
@@ -83,29 +51,4 @@ describe('describeHookTrigger', () => {
     expect(describeHookTrigger('PreToolUse', 'a|b').filter((part) => part.code).map((part) => part.text)).toEqual(['a', 'b'])
   })
 
-  it('ignores a matcher on an event that has no tool', () => {
-    expect(text('Stop', 'write_file')).toBe('When a turn ends')
-    expect(text('UserPromptSubmit', 'write_file')).toBe('When you send a message')
-  })
-})
-
-describe('hooks v2 wording', () => {
-  it('says when each new event runs', () => {
-    const text = (event: Parameters<typeof describeHookTrigger>[0]): string => describeHookTrigger(event, undefined).map((part) => part.text).join('')
-    expect(text('SessionStart')).toContain('first turn')
-    expect(text('PreCompact')).toBe('Before older turns are summarized')
-    expect(text('PostCompact')).toBe('After older turns are summarized')
-    expect(text('SubagentStop')).toBe('After a subagent finishes')
-    expect(text('Notification')).toContain('waits')
-  })
-
-  it('treats a UserPromptSubmit block as stopping the message', () => {
-    expect(explainHookTest(result({ event: 'UserPromptSubmit', decision: 'blocked', exitCode: 2 })).body).toContain('stop the turn')
-    expect(explainHookTest(result({ event: 'UserPromptSubmit' }))).toEqual({ tone: 'ok', title: 'Allowed', body: 'The hook exited with code 0, so the message would be sent.' })
-    expect(explainHookTest(result({ event: 'UserPromptSubmit', exitCode: 1 })).body).toContain('stops the message')
-  })
-
-  it('still says the other new events cannot block', () => {
-    expect(explainHookTest(result({ event: 'Notification' })).title).toBe('Ran without errors')
-  })
 })

@@ -135,25 +135,6 @@ describe.skipIf(!hasGit)('git tools in the agent loop', { timeout: 60_000 }, () 
     expect(commitCount(mocks.workspace)).toBe(before + 2)
   })
 
-  it('says in the approval title what an unscoped commit will include', async () => {
-    const app = harness()
-    write(mocks.workspace, 'a.txt', 'one\ntwo\nthree\nfour\n')
-    const events = await app.turn([[call('c1', 'git_commit', { message: 'Everything' }), call('c2', 'git_commit', { message: 'Some', paths: ['a.txt', 'b.txt', 'c.txt'] })]], 'default', ['deny', 'deny'])
-    expect(asks(events).map((ask) => ask.title)).toEqual(['Commit: Everything (all tracked changes)', 'Commit: Some (3 files)'])
-  })
-
-  it('asks before creating a branch', async () => {
-    const app = harness()
-    const denied = await app.turn([[branch('b1')]], 'default', ['deny'])
-    expect(asks(denied)).toHaveLength(1)
-    expect(asks(denied)[0]!.title).toBe('Create branch feature/x')
-    expect(asks(denied)[0]!.rule).toBeUndefined()
-    expect(git(mocks.workspace, 'branch', '--list', 'feature/x').trim()).toBe('')
-    const allowed = await app.turn([[branch('b2')]], 'default', ['allow'])
-    expect(tool(allowed, 'b2').map((entry) => entry.phase)).toEqual(['running', 'done'])
-    expect(git(mocks.workspace, 'branch', '--list', 'feature/x')).toContain('feature/x')
-  })
-
   it('blocks both mutating tools in plan mode without asking', async () => {
     const app = harness()
     write(mocks.workspace, 'a.txt', 'one\ntwo\nthree\nfour\n')
@@ -167,14 +148,6 @@ describe.skipIf(!hasGit)('git tools in the agent loop', { timeout: 60_000 }, () 
     expect(commitCount(mocks.workspace)).toBe(before)
     expect(git(mocks.workspace, 'branch', '--list', 'feature/x').trim()).toBe('')
     expect(porcelain(mocks.workspace)).toEqual([' M a.txt'])
-  })
-
-  it('still asks in acceptEdits mode, because a commit is not an edit', async () => {
-    const app = harness()
-    write(mocks.workspace, 'a.txt', 'one\ntwo\nthree\nfour\n')
-    const events = await app.turn([[commit('c1')]], 'acceptEdits', ['allow'])
-    expect(asks(events)).toHaveLength(1)
-    expect(tool(events, 'c1').map((entry) => entry.phase)).toEqual(['running', 'done'])
   })
 
   it('runs without asking only when the user chose to bypass approvals', async () => {

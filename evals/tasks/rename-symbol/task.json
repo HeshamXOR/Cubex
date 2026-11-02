@@ -1,0 +1,6 @@
+{
+  "title": "Rename a function across source, tests and docs",
+  "prompt": "Rename the function calcTotal to computeOrderTotal everywhere in this project: the code that defines and calls it, the tests and the README. Leave calcTotalWithTax alone, that is a different function, and do not change any behavior.",
+  "timeoutSec": 240,
+  "stub": { "command": "node --test" }
+}

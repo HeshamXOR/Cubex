@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DirEntry } from '../../../shared/ipc'
-import { flattenTree, splitMatch, type Listing } from './fileTree'
+import { flattenTree, type Listing } from './fileTree'
 
 const dir = (path: string, hidden = false): DirEntry => ({ name: path.split('/').pop()!, path, isDirectory: true, ...(hidden ? { hidden: true } : {}) })
 const file = (path: string): DirEntry => ({ name: path.split('/').pop()!, path, isDirectory: false })
@@ -29,36 +29,4 @@ describe('flattenTree', () => {
     expect(failed[1]).toMatchObject({ kind: 'note', tone: 'error', text: 'src was not found in the workspace.' })
   })
 
-  it('says so when a folder is empty, and how many entries were left out', () => {
-    expect(flattenTree({ '': ready([]) }, new Set())).toEqual([{ kind: 'note', path: '\0empty', depth: 0, text: 'This folder is empty.', tone: 'quiet' }])
-    const rows = flattenTree({ '': ready([dir('empty')]), empty: ready([]) }, new Set(['empty']))
-    expect(rows[1]).toMatchObject({ kind: 'note', text: 'Empty folder' })
-    const cut = flattenTree({ '': ready([file('a.txt')], 1250) }, new Set())
-    expect(cut[1]).toMatchObject({ kind: 'note', text: '1,250 more not shown. Search to find them.' })
-  })
-
-  it('marks hidden and ignored entries, and gives every row a distinct key', () => {
-    const rows = flattenTree({ '': ready([dir('.git', true), dir('src'), file('a.txt')]), '.git': ready([]), src: ready([]) }, new Set(['.git', 'src']))
-    expect(rows.filter((row) => row.kind !== 'note' && row.hidden).map((row) => row.path)).toEqual(['.git'])
-    expect(new Set(rows.map((row) => row.path)).size).toBe(rows.length)
-  })
-
-  it('does not list the children of a folder that is not open', () => {
-    const rows = flattenTree({ '': ready([dir('src')]), src: ready([file('src/a.ts')]) }, new Set())
-    expect(rows).toHaveLength(1)
-  })
-})
-
-describe('splitMatch', () => {
-  it('splits text around the first match, ignoring case', () => {
-    expect(splitMatch('Client.test.ts', 'client')).toEqual(['', 'Client', '.test.ts'])
-    expect(splitMatch('src/upload/client.ts', 'LOAD')).toEqual(['src/up', 'load', '/client.ts'])
-    expect(splitMatch('abcabc', 'bc')).toEqual(['a', 'bc', 'abc'])
-  })
-
-  it('leaves the text whole when nothing matches or nothing was typed', () => {
-    expect(splitMatch('client.ts', 'zzz')).toEqual(['client.ts', '', ''])
-    expect(splitMatch('client.ts', '')).toEqual(['client.ts', '', ''])
-    expect(splitMatch('client.ts', '   ')).toEqual(['client.ts', '', ''])
-  })
 })

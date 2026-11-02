@@ -1,0 +1,6 @@
+{
+  "title": "Fix one bug and leave vendored and generated files alone",
+  "prompt": "parseAmount in src/parse.mjs gets the sign wrong: \"-12.50\" and the accounting style \"(12.50)\" both come back as 12.5, and they should be -12.5. Fix it. Change only what the fix needs.",
+  "timeoutSec": 240,
+  "stub": { "command": "node --test" }
+}

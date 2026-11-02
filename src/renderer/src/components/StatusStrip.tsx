@@ -1,8 +1,10 @@
 import { Cpu, Gauge, GitBranch, ShieldQuestion } from 'lucide-react'
 import { effortOptionsFor, normalizeEffortFor } from '@core/providers'
+import { effectiveContextWindow } from '@shared/longContext'
 import { useStore } from '../state/store'
 import { AnimatedMark } from '../theme/AnimatedMark'
 import { compactTokens } from '../lib/format'
+import { snapshotIsForOtherModel } from '../lib/contextSnapshot'
 import { useGitStatus } from '../lib/useGitStatus'
 import { useSessionStates } from '../lib/useSessionStates'
 import { UsageButton } from './UsageButton'
@@ -21,6 +23,7 @@ export function StatusStrip(): JSX.Element {
   const activeModel = useStore((s) => s.activeModel)
   const effort = useStore((s) => s.effort)
   const usage = useStore((s) => s.contextUsage)
+  const longContext = useStore((s) => s.longContext)
   const git = useGitStatus(conversationId)
   const states = useSessionStates()
 
@@ -31,7 +34,11 @@ export function StatusStrip(): JSX.Element {
   const selected = kind ? normalizeEffortFor(kind, effort, effortModel) : undefined
   const effortLabel = options.find((option) => option.value === selected)?.label
 
-  const windowSize = usage?.contextWindow ?? info?.contextWindow
+  // A request's own window while there is one; before the first request, the window it would get. A snapshot kept
+  // for another model (the task was opened after a model change) does not set the window.
+  const selectedWindow = effectiveContextWindow(info, longContext)
+  const windowSize = snapshotIsForOtherModel(usage, { providerId: activeProviderId, model: activeModel }, selectedWindow)
+    ? selectedWindow : usage?.contextWindow ?? selectedWindow
   const finite = (value: number | undefined): number | undefined => (value !== undefined && Number.isFinite(value) ? value : undefined)
   const used = Math.max(0, finite(usage?.contextTokens) ?? finite(usage?.estimatedTokens) ?? 0)
   const known = windowSize !== undefined && Number.isFinite(windowSize) && windowSize > 0

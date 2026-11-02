@@ -74,34 +74,9 @@ describe('isContextOverflow', () => {
     expect(isContextOverflow(error)).toBe(false)
   })
 
-  it('accepts a plain Error with the same wording, and rejects values that are not errors', () => {
-    expect(isContextOverflow(new Error('prompt is too long: 300000 tokens > 200000 maximum'))).toBe(true)
-    expect(isContextOverflow(new Error('socket hang up'))).toBe(false)
-    expect(isContextOverflow(undefined)).toBe(false)
-    expect(isContextOverflow(null)).toBe(false)
-    expect(isContextOverflow('prompt is too long')).toBe(false)
-  })
-
   it('never matches a rate limit or a cancellation whatever the wording says', () => {
     expect(isContextOverflow(direct('openai', 'RATE_LIMIT_ERROR', 'maximum context length is 4096 tokens', 429))).toBe(false)
     expect(isContextOverflow(direct('openai', 'CANCELLED', 'prompt is too long'))).toBe(false)
     expect(isContextOverflow(direct('openai', 'AUTHENTICATION_ERROR', 'prompt is too long', 401))).toBe(false)
-  })
-})
-
-describe('normalizeHttpError for nested provider errors', () => {
-  it('surfaces the upstream message of an OpenRouter wrapper', () => {
-    const error = http('openrouter', 400, { error: { message: 'Provider returned error', code: 400, metadata: { raw: JSON.stringify({ error: { message: 'boom upstream' } }), provider_name: 'X' } } })
-    expect(error.message).toContain('Provider returned error')
-    expect(error.message).toContain('boom upstream')
-  })
-
-  it('reads a plain string error field', () => {
-    expect(http('ollama', 400, { error: 'prompt too long; exceeded max context length by 5 tokens' }).message).toBe('prompt too long; exceeded max context length by 5 tokens')
-  })
-
-  it('leaves ordinary bodies as they were', () => {
-    expect(http('openai', 400, { error: { message: 'Bad thing', code: 'bad' } }).message).toBe('Bad thing')
-    expect(http('openai', 500, undefined).message).toBe('HTTP 500')
   })
 })

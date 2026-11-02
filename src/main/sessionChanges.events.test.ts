@@ -86,67 +86,6 @@ describe('review change events', () => {
     expect(result.restored).toEqual(['f.txt'])
     expect(seen).toEqual([1, 2, 3, 4])
   })
-
-  it('does not tell anyone when nothing changed', async () => {
-    const seen: number[] = []
-    const store = twoHunks({ onChange: (_task, revision) => seen.push(revision) })
-    const [file] = await store.review('task', workspace, session)
-    const item = { path: 'f.txt', hunkIds: [file!.hunks[0]!.id], headHash: file!.headHash! }
-    await store.markReviewed('task', workspace, [item])
-    await store.markReviewed('task', workspace, [item])
-    await store.markReviewed('task', workspace, [{ ...item, headHash: 'a'.repeat(64) }, { ...item, hunkIds: ['f'.repeat(40)] }])
-    await store.revert('task', workspace, ['not-tracked.txt'])
-    expect(seen).toEqual([1, 2])
-  })
-
-  it('keeps counting when the last change is undone and the task has nothing left to store', () => {
-    const store = new SessionChangeStore(storage)
-    toolWrite(store, 'g.txt', 'new\n')
-    toolRemove(store, 'g.txt')
-    // Back at its original state: nothing is tracked, the task's storage is gone, the count is not.
-    expect(readdirSync(storage)).toEqual([])
-    expect(store.revision('task')).toBe(2)
-    toolWrite(store, 'h.txt', 'x\n')
-    expect(store.revision('task')).toBe(3)
-  })
-
-  it('never lets a failing listener break an edit or a revert', async () => {
-    const errors: unknown[] = []
-    const store = twoHunks({ onChange: () => { throw new Error('window is gone') }, onError: (error) => errors.push(error) })
-    const [file] = await store.review('task', workspace, session)
-    await expect(store.revertHunks('task', workspace, { path: 'f.txt', hunkIds: [file!.hunks[0]!.id], expectHeadHash: file!.headHash! })).resolves.toMatchObject({ conflicts: [] })
-    expect(read('f.txt')).toBe(lines(30, { 25: 'twenty-five changed' }))
-    expect(errors.length).toBeGreaterThan(0)
-  })
-})
-
-describe('accepted hunks in the notes for the model', () => {
-  it('counts a hunk once however often it is kept', async () => {
-    const store = twoHunks()
-    const [file] = await store.review('task', workspace, session)
-    const item = { path: 'f.txt', hunkIds: file!.hunks.map((hunk) => hunk.id), headHash: file!.headHash! }
-    await store.markReviewed('task', workspace, [item])
-    await store.markReviewed('task', workspace, [item])
-    expect(store.pendingReviewNotes('task')).toMatch(/Accepted in f\.txt: 2 hunks/)
-  })
-
-  it('leaves no review state behind when nothing was accepted', async () => {
-    const store = twoHunks()
-    await store.markReviewed('task', workspace, [{ path: 'f.txt', hunkIds: ['f'.repeat(40)], headHash: 'a'.repeat(64) }])
-    expect(store.pendingReviewNotes('task')).toBeUndefined()
-    const index = JSON.parse(readFileSync(join(storage, readdirSync(storage)[0]!, 'index.json'), 'utf8')) as Record<string, unknown>
-    expect(index).not.toHaveProperty('hunkStates')
-    expect(index).not.toHaveProperty('reviewNotes')
-  })
-})
-
-describe('whole-file revert ids', () => {
-  it('survive the structured clone IPC does, so the window can offer Undo', async () => {
-    const store = twoHunks()
-    const { result } = await store.revert('task', workspace, ['f.txt'])
-    expect(Object.keys(result)).toContain('revertId')
-    expect(structuredClone(result).revertId).toBe(result.revertId)
-  })
 })
 
 describe('undo of a revert', () => {

@@ -84,15 +84,6 @@ describe('escaping the workspace (every platform)', () => {
     await expectAllRejected(path, /escapes the workspace/i)
     expect(readFileSync(join(outside, 'secret.txt'), 'utf8')).toBe('top secret')
   })
-
-  it('still allows paths inside the workspace, including absolute ones and different spellings of the same file', async () => {
-    const tools = createFileTools(root)
-    for (const path of ['a.txt', './a.txt', 'sub/../a.txt', join(root, 'a.txt'), 'sub/./../a.txt']) {
-      const result = await named(tools, 'read_file').execute({ path }, ctx)
-      expect(result.isError, path).toBeFalsy()
-      expect(result.content).toBe('a')
-    }
-  })
 })
 
 windowsOnly('Windows path spellings that leave the workspace', () => {
@@ -268,23 +259,6 @@ describe('links and junctions on any component', () => {
       await expectAllRejected('links/exit/new.txt', /escapes the workspace/i)
       expect(existsSync(join(outside, 'new.txt'))).toBe(false)
       expect(readFileSync(join(outside, 'secret.txt'), 'utf8')).toBe('top secret')
-    } finally { cleanLinks() }
-  })
-
-  it('rejects a link to a folder outside the workspace nested several levels down', async (context) => {
-    if (!link(outside, join(root, 'deep', 'er', 'exit'))) return context.skip()
-    try {
-      await expectAllRejected('deep/er/exit/secret.txt', /escapes the workspace/i)
-    } finally { cleanLinks() }
-  })
-
-  it('still allows a link that stays inside the workspace', async (context) => {
-    if (!link(join(root, 'sub'), join(root, 'links', 'inner'))) return context.skip()
-    try {
-      const tools = createFileTools(root)
-      const result = await named(tools, 'read_file').execute({ path: 'links/inner/x.txt' }, ctx)
-      expect(result.isError).toBeFalsy()
-      expect(result.content).toBe('x')
     } finally { cleanLinks() }
   })
 

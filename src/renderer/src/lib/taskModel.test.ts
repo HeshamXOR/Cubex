@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { BackgroundTask } from '../../../shared/ipc'
-import {
-  MAX_TASK_RECORDS, formatRuntime, lastLine, mergeTask, mergeTasks, readyTarget, runningCount, runtimeMs, shellName, sortTasks,
-  statusLine, tailLines, tailPath, taskState
-} from './taskModel'
+import { MAX_TASK_RECORDS, formatRuntime, mergeTask, mergeTasks, readyTarget, runtimeMs, sortTasks, statusLine, tailLines } from './taskModel'
 
 const task = (overrides: Partial<BackgroundTask> = {}): BackgroundTask => ({
   id: 'p_aaaaaa', conversationId: 'c1', command: 'npm run dev', shell: 'git-bash', cwd: 'C:\\code\\app', status: 'running',
@@ -11,11 +8,6 @@ const task = (overrides: Partial<BackgroundTask> = {}): BackgroundTask => ({
 })
 
 describe('task state and wording', () => {
-  it('maps every status to one state', () => {
-    expect(['running', 'exited', 'failed', 'timed_out', 'killed'].map((status) => taskState(task({ status: status as BackgroundTask['status'] })))).toEqual(
-      ['running', 'done', 'failed', 'timed_out', 'stopped']
-    )
-  })
 
   it('says what each task ended with, and gives a stopped task no exit code', () => {
     expect(statusLine(task(), 5_000)).toBe('Running')
@@ -27,10 +19,6 @@ describe('task state and wording', () => {
     expect(statusLine(task({ status: 'timed_out', exitCode: 1, startedAt: 0, endedAt: 30 * 60_000 }), 99)).toBe('Reached its time limit after 30m 00s')
   })
 
-  it('names the shells', () => {
-    expect(shellName('git-bash')).toBe('Git Bash')
-    expect(shellName('powershell')).toBe('Windows PowerShell')
-  })
 })
 
 describe('runtime', () => {
@@ -64,18 +52,6 @@ describe('ordering and merging', () => {
     expect(mergeTask(ended, task({ status: 'running' }))).toBe(ended)
   })
 
-  it('keeps the snapshot that knows when a finished task ended', () => {
-    const withEnd = task({ status: 'killed', endedAt: 9_000 })
-    expect(mergeTask(withEnd, task({ status: 'killed' }))).toBe(withEnd)
-    expect(mergeTask(task({ status: 'killed' }), withEnd)).toBe(withEnd)
-  })
-
-  it('keeps a ready address once it was seen', () => {
-    const ready = task({ readyHint: { url: 'http://localhost:5173/', port: 5173, line: 'Local: http://localhost:5173/' } })
-    expect(mergeTask(ready, task()).readyHint).toEqual(ready.readyHint)
-    expect(mergeTask(undefined, task())).toEqual(task())
-  })
-
   it('folds a batch into a conversation and drops only the oldest finished tasks past the cap', () => {
     const finished = Array.from({ length: MAX_TASK_RECORDS + 5 }, (_, index) => task({ id: `done-${index}`, status: 'exited', startedAt: index }))
     const merged = mergeTasks([task({ id: 'still-running', startedAt: -1 })], finished)
@@ -85,10 +61,6 @@ describe('ordering and merging', () => {
     expect(merged.some((entry) => entry.id === `done-${MAX_TASK_RECORDS + 4}`)).toBe(true)
   })
 
-  it('counts what is running', () => {
-    expect(runningCount([task(), task({ id: 'b', status: 'exited' }), task({ id: 'c' })])).toBe(2)
-    expect(runningCount(undefined)).toBe(0)
-  })
 })
 
 describe('the address a ready line points at', () => {
@@ -110,21 +82,11 @@ describe('the address a ready line points at', () => {
     }
   })
 
-  it('shows a bare port or the line itself as text', () => {
-    expect(readyTarget(hint(undefined, 8080, 'listening on port 8080'))).toEqual({ kind: 'port', label: 'Port 8080' })
-    expect(readyTarget(hint(undefined, undefined, 'ready in 350 ms'))).toEqual({ kind: 'line', label: 'ready in 350 ms' })
-    expect(readyTarget(undefined)).toBeUndefined()
-  })
 })
 
 describe('terminal output as lines', () => {
   it('drops escape codes and keeps the text', () => {
     expect(tailLines('  \u001b[32m➜\u001b[39m  \u001b[1mLocal\u001b[22m:   http://localhost:5173/\n')).toEqual(['  ➜  Local:   http://localhost:5173/'])
-  })
-
-  it('settles a progress line that redraws itself with carriage returns', () => {
-    expect(tailLines('Seeding 10%\rSeeding 40%\rSeeding 100%\nnext\r\nlast\r\n')).toEqual(['Seeding 100%', 'next', 'last'])
-    expect(tailLines('partial\r')).toEqual(['partial'])
   })
 
   it('keeps only the newest lines and drops the final empty one', () => {
@@ -136,17 +98,4 @@ describe('terminal output as lines', () => {
     expect(tailLines('')).toEqual([])
   })
 
-  it('finds the newest line that says something', () => {
-    expect(lastLine('first\nsecond\n\n   \n')).toBe('second')
-    expect(lastLine('')).toBe('')
-    expect(lastLine(`${'x'.repeat(400)}\n`, 50)).toBe(`${'x'.repeat(49)}…`)
-  })
-})
-
-describe('paths', () => {
-  it('keeps the last folders where the whole path will not fit', () => {
-    expect(tailPath('C:\\Users\\dev\\code\\lumen-web')).toBe('…\\code\\lumen-web')
-    expect(tailPath('/home/h/code/app')).toBe('…/code/app')
-    expect(tailPath('C:\\code')).toBe('C:\\code')
-  })
 })

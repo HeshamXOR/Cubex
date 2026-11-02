@@ -1,0 +1,6 @@
+{
+  "title": "Fix a coupon bug that a failing test exposes (TypeScript)",
+  "prompt": "npm test is failing in this project. Find out why and fix the code. Do not change the existing tests.",
+  "timeoutSec": 240,
+  "stub": { "command": "node --test" }
+}

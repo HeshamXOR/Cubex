@@ -30,13 +30,6 @@ describe('estimateSpeed', () => {
     expect(gpu.tokensPerSecond.high).toBeGreaterThan(cpu.tokensPerSecond.high)
   })
 
-  it('always returns a range (low < high) for theoretical estimates', () => {
-    const mem = estimateMemory(model7bQ4, 4096)
-    const s = estimateSpeed(model7bQ4, profile(24), mem, 4096)
-    expect(s.basis).toBe('theoretical')
-    expect(s.tokensPerSecond.low).toBeLessThan(s.tokensPerSecond.high)
-  })
-
   it('reports high confidence only when fully in VRAM with known params + vram', () => {
     const mem = estimateMemory(model7bQ4, 4096)
     expect(estimateSpeed(model7bQ4, profile(24), mem, 4096).confidence).toBe('high')

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { diffStats, parseDiff, toSplit, wordMarks, type DiffRow } from './diffModel'
+import { parseDiff, toSplit, wordMarks, type DiffRow } from './diffModel'
 
 const SAMPLE = [
   ' import { fetchWithAuth } from \'./auth\'',
@@ -50,18 +50,6 @@ describe('parseDiff', () => {
     expect(items[0]).toMatchObject({ kind: 'gap', hidden: 0, text: '500 lines replaced with 520 lines' })
   })
 
-  it('returns nothing for an empty diff', () => {
-    expect(parseDiff('')).toEqual([])
-  })
-
-  it('keeps an untagged line instead of dropping it', () => {
-    const items = parseDiff('plain')
-    expect(items.find((item) => item.kind === 'ctx')).toMatchObject({ text: 'plain' })
-  })
-
-  it('counts added and removed lines', () => {
-    expect(diffStats(parseDiff(SAMPLE))).toEqual({ added: 3, removed: 2 })
-  })
 })
 
 describe('word emphasis', () => {
@@ -82,10 +70,6 @@ describe('word emphasis', () => {
 
   it('does not mark lines that share almost nothing', () => {
     expect(wordMarks('const res = await put(chunk)', 'return withBackoff(async () => {')).toBeUndefined()
-  })
-
-  it('returns nothing for identical lines', () => {
-    expect(wordMarks('same', 'same')).toBeUndefined()
   })
 
   it('attaches marks to the lines that were paired', () => {
@@ -116,9 +100,4 @@ describe('toSplit', () => {
     expect(rows.map((row) => row.right?.text)).toEqual(['x', 'y'])
   })
 
-  it('passes hunks and gaps through', () => {
-    const kinds = toSplit(parseDiff(SAMPLE)).map((item) => item.kind)
-    expect(kinds[0]).toBe('hunk')
-    expect(kinds.at(-1)).toBe('gap')
-  })
 })

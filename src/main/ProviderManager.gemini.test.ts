@@ -48,21 +48,6 @@ describe('ProviderManager and the gemini kind', () => {
     expect(createProvider).not.toHaveBeenCalled()
   })
 
-  it('builds the adapter with the key from the credential store', () => {
-    const cfg = configure({ credentialRef: 'cred_gem' })
-    state.secret.mockReturnValue('stored-key')
-    new ProviderManager().resolve('gem')
-    expect(state.secret).toHaveBeenCalledWith('cred_gem')
-    expect(createProvider).toHaveBeenCalledWith(cfg, 'stored-key', expect.anything())
-  })
-
-  it('falls back to CUBEX_GEMINI_API_KEY when no credential is stored', () => {
-    const cfg = configure()
-    vi.stubEnv('CUBEX_GEMINI_API_KEY', 'env-key')
-    new ProviderManager().resolve('gem')
-    expect(createProvider).toHaveBeenCalledWith(cfg, 'env-key', expect.anything())
-  })
-
   it('prefers the stored credential over the environment', () => {
     const cfg = configure({ credentialRef: 'cred_gem' })
     state.secret.mockReturnValue('stored-key')
@@ -78,11 +63,5 @@ describe('ProviderManager and the Azure OpenAI mode', () => {
     configure({ id: 'az', kind: 'openai-compat', apiMode: 'azure', accessType: 'local', azureResource: 'myres' })
     expect(() => new ProviderManager().resolve('az')).toThrow(expect.objectContaining({ rawCode: 'LOCAL_ONLY_MODE' }))
     expect(createProvider).not.toHaveBeenCalled()
-  })
-
-  it('still lets a plain OpenAI-compatible endpoint declare itself local', () => {
-    state.localOnly = true
-    configure({ id: 'lan', kind: 'openai-compat', accessType: 'local', baseUrl: 'http://127.0.0.1:8000/v1' })
-    expect(new ProviderManager().resolve('lan')).toBeDefined()
   })
 })

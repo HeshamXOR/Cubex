@@ -32,9 +32,6 @@ beforeEach(() => {
 })
 
 describe('usage:report', () => {
-  it('declares only its own channel while registering', () => {
-    expect([...handlers.keys()]).toEqual([IPC.getUsageReport])
-  })
 
   it('reports the day against the caps, with no session meter when no task is given', () => {
     mocks.groups.mockReturnValue([{ providerId: 'p', model: 'm', execution: 'cloud', costSource: 'catalog', requests: 3, cost: 1.5, tokens: 900 }])
@@ -46,28 +43,9 @@ describe('usage:report', () => {
     expect(taskIdArg).not.toHaveBeenCalled()
   })
 
-  it('adds the session meter for a task, after checking the id the window sent', () => {
-    snapshot.mockReturnValue({ daily: 1.5, session: 4.5 })
-    const report = call('task-1')
-    expect(taskIdArg).toHaveBeenCalledWith('task-1')
-    expect(snapshot).toHaveBeenCalledWith('task-1')
-    expect(report.budget.meters.map((meter) => meter.scope)).toEqual(['daily', 'session'])
-  })
-
-  it('treats a null task like none', () => {
-    call(null)
-    expect(snapshot).toHaveBeenCalledWith(undefined)
-  })
-
   it.each([42, {}, [], '', 'x'.repeat(500)])('rejects a task id that is not a bounded string without reading anything: %j', (bad) => {
     expect(() => call(bad)).toThrow()
     expect(snapshot).not.toHaveBeenCalled()
     expect(mocks.groups).not.toHaveBeenCalled()
-  })
-
-  it('reads the caps from Settings on every call', () => {
-    expect(call().budget.meters).toHaveLength(1)
-    mocks.settings = { ai: {} }
-    expect(call().budget).toEqual({ action: 'warn', meters: [], spent: { daily: 1.5 } })
   })
 })

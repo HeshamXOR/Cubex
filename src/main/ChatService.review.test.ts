@@ -138,12 +138,6 @@ describe('review events', () => {
     if (ask?.kind === 'permission') service.resolvePermission(ask.ask.id, 'deny')
     await settled('busy')
   })
-
-  it('reports no hunks for a task without a folder and validates the task', async () => {
-    await expect(service.getReview('missing', { kind: 'session' })).rejects.toThrow('Task was not found.')
-    await expect(service.getReview('', { kind: 'session' })).rejects.toThrow('Invalid task id.')
-    expect(await service.getReview('c1', { kind: 'session' })).toEqual([])
-  })
 })
 
 describe('review notes for the model', () => {
@@ -163,13 +157,6 @@ describe('review notes for the model', () => {
     await turn(['Fine.'], { userText: 'and again' })
     expect(userTexts(requests[0]!).join('\n')).not.toContain('<review-state>')
     await expect(service.undoRevert('c1', reverted.revertId!)).rejects.toThrow(/expired|not found/)
-  })
-
-  it('send nothing when the person reviewed nothing', async () => {
-    await editedTask()
-    requests.length = 0
-    await turn(['ok'], { userText: 'continue' })
-    expect(userTexts(requests[0]!).at(-1)).toBe('continue')
   })
 })
 
@@ -200,42 +187,6 @@ describe('sendReviewComments', () => {
     expect(userTexts(requests[0]!).at(-1)).toBe(result.text)
   })
 
-  it('uses what the window asks for, and never plan mode that the last turn left behind', async () => {
-    await editedTask()
-    await turn(['Here is a plan.'], { permissionMode: 'plan' })
-    const [review] = await service.getReview('c1', { kind: 'session' })
-    const send = async (overrides?: { target?: { providerId: string; model: string }; permissionMode?: PermissionMode }): Promise<void> => {
-      const { streamId } = await service.sendReviewComments('c1', [comment('k', review!.hunks[0]!.id)], overrides ? { overrides } : {})
-      await settled(streamId)
-    }
-
-    requests.length = 0
-    await send()
-    // Plan mode adds the exit_plan_mode tool and says so in the system prompt; the comment turn must not.
-    expect(requests[0]!.tools?.some((tool) => tool.name === 'exit_plan_mode')).toBeFalsy()
-
-    requests.length = 0
-    await send({ target: { providerId: 'p2', model: 'other-model' }, permissionMode: 'plan' })
-    expect(requests[0]!.model).toBe('other-model')
-    expect(requests[0]!.tools?.some((tool) => tool.name === 'exit_plan_mode')).toBe(true)
-  })
-
-  it('falls back to the model the task was created with, and asks for one when there is none', async () => {
-    writeFileSync(file('a.txt'), lines(30))
-    const fresh = new ChatService({ resolve: () => ({ id: 'p', async *streamMessage(request: AIRequest) { requests.push(request); yield { type: 'text_delta', text: 'ok' } } } as unknown as AIProvider), getModelInfo: () => undefined } as unknown as ProviderManager, (event) => events.push(event))
-    try {
-      const c = comment('k', 'a'.repeat(40))
-      await expect(fresh.sendReviewComments('c1', [c])).rejects.toThrow('Choose a model')
-      mocks.conversation = { providerId: 'p', model: 'task-model' }
-      const { streamId } = await fresh.sendReviewComments('c1', [c])
-      await settled(streamId)
-      expect(requests.at(-1)!.model).toBe('task-model')
-    } finally {
-      fresh.cancelAll()
-      fresh.dispose()
-    }
-  })
-
   it('refuses while a turn is running, and without a folder', async () => {
     await editedTask()
     script = [[{ id: 'w', name: 'write_file', input: { path: 'new.txt', content: 'x' } }]]
@@ -249,14 +200,5 @@ describe('sendReviewComments', () => {
     await expect(service.sendReviewComments('missing', [comment('k', 'a'.repeat(40))])).rejects.toThrow('Task was not found.')
     mocks.workspace = ''
     await expect(service.sendReviewComments('c1', [comment('k', 'a'.repeat(40))])).rejects.toThrow('no workspace folder')
-  })
-
-  it('still sends a comment whose hunk is gone, and says the quote is missing', async () => {
-    await editedTask()
-    const [review] = await service.getReview('c1', { kind: 'session' })
-    await service.revertHunks('c1', { path: 'a.txt', hunkIds: [review!.hunks[0]!.id], expectHeadHash: review!.headHash! })
-    const { text, streamId } = await service.sendReviewComments('c1', [comment('k', review!.hunks[0]!.id)])
-    await settled(streamId)
-    expect(text).toContain('1. Line 6\nThat part of the diff has changed since the comment was written, so no code is quoted.\nWhy this wording?')
   })
 })

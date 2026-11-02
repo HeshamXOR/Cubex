@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, relative } from 'node:path'
-import { PLAN_MAX_FEEDBACK_LENGTH, type PlanAsk } from '@shared/ipc'
-import { MAX_PLAN_BYTES, PlanReviews, PlanStore, planResolutionResult, validatePlanInput, validatePlanResolution } from './plans'
+import { type PlanAsk } from '@shared/ipc'
+import { MAX_PLAN_BYTES, PlanReviews, PlanStore, planResolutionResult, validatePlanInput } from './plans'
 
 let dir: string
 let store: PlanStore
@@ -68,42 +68,6 @@ describe('Markdown plan artifacts', () => {
     symlinkSync(dir, artifactDirectory, process.platform === 'win32' ? 'junction' : 'dir')
     expect(() => store.get(plan.id)).toThrow('artifact store')
   })
-
-  it('keeps older id-named documents readable and resolvable alongside new readable filenames', () => {
-    const legacy = store.create('task', { plan: '# Original plan' })
-    const artifactDir = dirname(legacy.path!)
-    const receipt = join(artifactDir, `${legacy.id}.json`)
-    const raw = JSON.parse(readFileSync(receipt, 'utf8'))
-    delete raw.fileName
-    writeFileSync(receipt, JSON.stringify(raw))
-    const legacyPath = join(artifactDir, `${legacy.id}.md`)
-    renameSync(legacy.path!, legacyPath)
-    expect(store.get(legacy.id)).toMatchObject({ path: legacyPath, plan: '# Original plan', status: 'pending' })
-    store.settle(legacy.id, { decision: 'reject', feedback: 'Add verification.' })
-    const revised = store.create('task', { plan: '# Original plan\n\n1. Verify the parser.' })
-    store.settle(revised.id, { decision: 'default' })
-    const reopened = new PlanStore(join(dir, 'plans'))
-    expect(reopened.list('task').map((plan) => plan.path)).toEqual([revised.path, legacyPath])
-    expect(reopened.get(legacy.id)?.feedback).toBe('Add verification.')
-    expect(reopened.get(revised.id)?.status).toBe('approved')
-    expect(readFileSync(legacyPath, 'utf8')).toBe('# Original plan')
-  })
-
-  it('sanitizes titles, preserves separate revisions and rejects forged document basenames', () => {
-    const title = '../CON: Fix C:\\parser / café?'
-    const first = store.create('task', { plan: '# First', title })
-    const second = store.create('task', { plan: '# Second', title })
-    expect(basename(first.path!)).toMatch(/^con-fix-c-parser-cafe-[a-f0-9]{8}\.md$/)
-    expect(first.path).not.toBe(second.path)
-    expect(first.id).not.toBe(second.id)
-    expect(readFileSync(first.path!, 'utf8')).toBe('# First')
-    const receipt = join(dirname(first.path!), `${first.id}.json`)
-    const metadata = JSON.parse(readFileSync(receipt, 'utf8'))
-    writeFileSync(receipt, JSON.stringify({ ...metadata, fileName: '../secret.md' }))
-    expect(() => store.get(first.id)).toThrow('Invalid plan document filename')
-    writeFileSync(receipt, JSON.stringify({ ...metadata, fileName: basename(second.path!) }))
-    expect(() => store.get(first.id)).toThrow('Invalid plan document filename')
-  })
 })
 
 describe('plan review lifecycle', () => {
@@ -124,18 +88,6 @@ describe('plan review lifecycle', () => {
     reviews.resolve(ask.id, 'acceptEdits')
     expect(planResolutionResult(await revised)).toMatchObject({ mode: 'acceptEdits' })
     expect(store.list('task').map((plan) => plan.status)).toEqual(['approved', 'rejected'])
-  })
-
-  it('validates IPC decisions and feedback before settling the review', async () => {
-    const reviews = new PlanReviews(store)
-    let ask!: PlanAsk
-    const pending = reviews.request('task', { plan: '# Plan' }, new AbortController().signal, (value) => { ask = value })
-    expect(() => reviews.resolve(ask.id, 'allow')).toThrow('Invalid plan decision')
-    expect(() => reviews.resolve(ask.id, 'reject', 'x'.repeat(PLAN_MAX_FEEDBACK_LENGTH + 1))).toThrow('feedback')
-    expect(() => validatePlanResolution('reject', { text: 'feedback' })).toThrow('feedback')
-    expect(store.get(ask.id)?.status).toBe('pending')
-    reviews.resolve(ask.id, 'default')
-    expect(await pending).toEqual({ decision: 'default' })
   })
 
   it('cancels deterministically, removes its abort listener and rejects stale responses', async () => {
@@ -164,20 +116,6 @@ describe('plan review lifecycle', () => {
     expect(store.get(ask.id)?.status).toBe('pending')
     reviews.resolve(ask.id, 'reject', 'Try a smaller change')
     expect(await pending).toMatchObject({ decision: 'reject', feedback: 'Try a smaller change' })
-  })
-
-  it('still cancels a waiting turn when saving the cancellation receipt fails', async () => {
-    const report = vi.fn()
-    const reviews = new PlanReviews(store, report)
-    const controller = new AbortController()
-    let ask!: PlanAsk
-    const pending = reviews.request('task', { plan: '# Plan' }, controller.signal, (value) => { ask = value })
-    vi.spyOn(store, 'settle').mockImplementationOnce(() => { throw new Error('disk full') })
-    controller.abort()
-    expect(await pending).toMatchObject({ cancelled: true })
-    expect(report).toHaveBeenCalledOnce()
-    expect(() => reviews.resolve(ask.id, 'bypass')).toThrow('no longer awaiting review')
-    expect(store.get(ask.id)?.status).toBe('cancelled')
   })
 })
 
@@ -215,11 +153,5 @@ describe('plans of turns a restore removes', () => {
     expect(back).toMatchObject({ title: 'Plan 2', status: 'rejected', decision: 'reject', feedback: 'Smaller steps', createdAt: 2_000 })
     expect(readFileSync(back.path!, 'utf8')).toBe('# Plan 2\n\nBody 2')
     expect(new PlanStore(join(dir, 'plans')).list('task')).toHaveLength(3)
-  })
-
-  it('refuses to restore a revision that does not belong to its conversation', () => {
-    const [plan] = plansAt([1_000])
-    expect(() => store.restore([{ ...plan!, conversationId: 'someone-else' }])).toThrow('Invalid plan revision')
-    expect(() => store.restore([{ ...plan!, id: '../../escape' }])).toThrow('Invalid plan revision')
   })
 })

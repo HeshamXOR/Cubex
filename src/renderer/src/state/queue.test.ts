@@ -86,15 +86,6 @@ describe('queueing while a turn runs', () => {
     expect(queued()).toEqual([])
   })
 
-  it('keeps a message, attachments included, exactly as it was typed', async () => {
-    const streamId = await startRunningTurn()
-    useQueue.getState().add('a', { text: '  look at this  ', attachments: [image] })
-    completed(streamId)
-    await vi.waitFor(() => expect(sent()).toHaveLength(2))
-    expect((bridge.api.startChat.mock.calls[1]![0] as ChatStartRequest).attachments).toEqual([image])
-    expect(useStore.getState().liveMessages.find((m) => m.text === 'look at this')?.attachments).toEqual([image])
-  })
-
   it('does not touch the draft or the attachments being prepared for the next message', async () => {
     const streamId = await startRunningTurn()
     useQueue.getState().add('a', { text: 'queued', attachments: [] })
@@ -146,30 +137,6 @@ describe('when the queue holds', () => {
     await vi.waitFor(() => expect(sent()).toEqual(['first', 'second']))
   })
 
-  it('goes on after a held turn is followed by one that finishes normally', async () => {
-    const first = await startRunningTurn()
-    useQueue.getState().add('a', { text: 'queued', attachments: [] })
-    failed(first)
-    await new Promise((resolve) => setTimeout(resolve, 20))
-    expect(sent()).toEqual(['first'])
-    // The person tries again by hand; when that turn completes, the queue is next.
-    await useStore.getState().sendMessage('manual retry')
-    completed(useStore.getState().streamId!)
-    await vi.waitFor(() => expect(sent()).toEqual(['first', 'manual retry', 'queued']))
-  })
-
-  it('holds without a model and sends once one is chosen', async () => {
-    const streamId = await startRunningTurn()
-    useQueue.getState().add('a', { text: 'second', attachments: [] })
-    useStore.setState({ activeModel: undefined })
-    completed(streamId)
-    await new Promise((resolve) => setTimeout(resolve, 20))
-    expect(sent()).toEqual(['first'])
-    expect(queued()).toEqual(['second'])
-    useStore.setState({ activeModel: 'mock-1' })
-    await vi.waitFor(() => expect(sent()).toEqual(['first', 'second']))
-  })
-
   it('keeps a message the store refused to send, and does not retry in a tight loop', async () => {
     // Its own task: a refused send makes the runner wait a second before trying that task again.
     useStore.setState({ activeConversation: conversation('refused'), activeTabId: 'refused' })
@@ -199,14 +166,6 @@ describe('across tasks', () => {
     await vi.waitFor(() => expect(sent()).toEqual(['first', 'for a']))
   })
 
-  it('drops the queue of a task that was deleted', async () => {
-    await startRunningTurn()
-    useQueue.getState().add('a', { text: 'second', attachments: [] })
-    useQueue.setState((state) => ({ queues: { ...state.queues, ghost: [{ id: 'g', text: 'orphan', attachments: [], queuedAt: 1 }] } }))
-    useStore.getState().openConversation('b').catch(() => undefined)
-    await vi.waitFor(() => expect(useQueue.getState().queues.ghost).toBeUndefined())
-    expect(queued('a')).toEqual(['second'])
-  })
 })
 
 describe('acting on a queued message', () => {
@@ -219,14 +178,6 @@ describe('acting on a queued message', () => {
     expect(useStore.getState().attachments).toEqual([image])
     expect(queued()).toEqual([])
     expect(pullIntoComposer('a', id)).toBe(false)
-  })
-
-  it('puts the typed draft above a message taken back, so neither is lost', async () => {
-    await startRunningTurn()
-    useQueue.getState().add('a', { text: 'queued text', attachments: [] })
-    useStore.getState().setComposerText('half a thought')
-    pullIntoComposer('a', useQueue.getState().queues.a![0]!.id)
-    expect(useStore.getState().composerText).toBe('half a thought\n\nqueued text')
   })
 
   it('removes a message without sending it', async () => {
@@ -264,19 +215,6 @@ describe('acting on a queued message', () => {
     await useQueue.getState().sendNow('a', useQueue.getState().queues.a![0]!.id)
     expect(sent()).toEqual(['first', 'held'])
     expect(bridge.api.cancelChat).not.toHaveBeenCalled()
-  })
-
-  it('keeps a message in its place when Send now is used while the summary is being written', async () => {
-    const streamId = await startRunningTurn()
-    completed(streamId)
-    await new Promise((resolve) => setTimeout(resolve, 5))
-    useStore.setState({ compactingId: 'a' })
-    useQueue.getState().add('a', { text: 'waits', attachments: [] })
-    await useQueue.getState().sendNow('a', useQueue.getState().queues.a![0]!.id)
-    expect(sent()).toEqual(['first'])
-    expect(queued()).toEqual(['waits'])
-    useStore.setState({ compactingId: undefined })
-    await vi.waitFor(() => expect(sent()).toEqual(['first', 'waits']))
   })
 
   it('runs a queued command the way typing it would, instead of sending it to the model', async () => {

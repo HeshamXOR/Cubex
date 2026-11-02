@@ -1,0 +1,7 @@
+{
+  "title": "Implement a Python function from its docstring",
+  "prompt": "intervals.py contains merge_intervals, which is not implemented. Implement it as its docstring specifies. Run the tests in test_intervals.py to check your work.",
+  "timeoutSec": 240,
+  "requires": ["python"],
+  "stub": { "command": "python -m unittest" }
+}

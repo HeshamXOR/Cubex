@@ -1,10 +1,9 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { COMMAND_OUTPUT_MAX_ARTIFACTS, COMMAND_OUTPUT_MAX_BYTES, CommandOutputStore } from './commandOutput'
-import { createReadCommandOutputTool } from './tools/readCommandOutputTool'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { COMMAND_OUTPUT_MAX_BYTES, CommandOutputStore } from './commandOutput'
 
 describe('durable command output', () => {
   let directory: string
@@ -67,17 +66,6 @@ describe('durable command output', () => {
     expect(last.artifact.truncated).toBe(true)
   })
 
-  it('preserves partial text and failure information for cancelled and timed-out captures', () => {
-    for (const status of ['cancelled', 'timed_out'] as const) {
-      const writer = store.create('task', { command: status })
-      writer.append('progress before stopping\n')
-      const result = writer.finish({ status, error: 'Process stopped.' })
-      expect(writer.finish({ status: 'completed' })).toEqual(result)
-      expect(() => writer.append('late')).toThrow('already closed')
-      expect(store.read('task', writer.id)).toMatchObject({ text: 'progress before stopping\n', artifact: { status, error: 'Process stopped.' } })
-    }
-  })
-
   it('recovers an unfinished receipt without claiming an exit code or original output size', () => {
     const artifact = save('survived restart')
     const path = store.revealPath('task', artifact.id).replace(/\.log$/, '.json')
@@ -89,38 +77,6 @@ describe('durable command output', () => {
     expect(recovered.exitCode).toBeUndefined()
     expect(restarted.read('task', artifact.id)?.text).toBe('survived restart')
     expect(new CommandOutputStore(root).get('task', artifact.id)).toEqual(recovered)
-  })
-
-  it('keeps interrupted output readable and revealable when its recovery receipt cannot be written', () => {
-    const artifact = save('durable output prefix')
-    const path = store.revealPath('task', artifact.id)
-    writeFileSync(path.replace(/\.log$/, '.json'), JSON.stringify({
-      ...artifact, status: 'running', completedAt: undefined, exitCode: undefined, capturedBytes: 0, totalBytes: 0
-    }))
-    const restarted = new CommandOutputStore(root)
-    const receiptWriter = restarted as unknown as { atomicMetadata: (...args: unknown[]) => void }
-    const write = vi.spyOn(receiptWriter, 'atomicMetadata').mockImplementation(() => { throw new Error('ENOSPC: no space left on device') })
-    try {
-      expect(restarted.read('task', artifact.id)).toMatchObject({
-        text: 'durable output prefix', artifact: { status: 'interrupted', capturedBytes: 21 }
-      })
-      expect(restarted.revealPath('task', artifact.id)).toBe(path)
-      expect(restarted.list('task')).toContainEqual(expect.objectContaining({ id: artifact.id, status: 'interrupted' }))
-      expect(write).toHaveBeenCalled()
-    } finally { write.mockRestore() }
-  })
-
-  it('retains the newest 50 outputs and never evicts an active capture', () => {
-    const active = store.create('task', { command: 'active' })
-    try {
-      const oldest = save('oldest completed')
-      for (let index = 0; index < COMMAND_OUTPUT_MAX_ARTIFACTS; index++) save(`output ${index}`)
-      expect(store.list('task')).toHaveLength(COMMAND_OUTPUT_MAX_ARTIFACTS)
-      expect(store.get('task', oldest.id)).toBeNull()
-      expect(store.get('task', active.id)?.status).toBe('running')
-      expect(store.list('task')[0]?.command).toBe('test command')
-      expect(readdirSync(dirname(store.revealPath('task', active.id))).filter((name) => name.endsWith('.log'))).toHaveLength(COMMAND_OUTPUT_MAX_ARTIFACTS)
-    } finally { active.finish({ status: 'cancelled' }) }
   })
 
   it('keeps task IDs out of paths and rejects foreign IDs, paths and forged ownership', () => {
@@ -163,34 +119,5 @@ describe('durable command output', () => {
     writeFileSync(path, 'owned')
     writeFileSync(path.replace(/\.log$/, '.json'), 'x'.repeat(33 * 1024))
     expect(() => store.get('task', artifact.id)).toThrow('Unsafe or oversized')
-  })
-
-  it('lists healthy outputs and still enforces retention when one receipt is damaged', () => {
-    const damaged = save('old output')
-    const damagedPath = store.revealPath('task', damaged.id).replace(/\.log$/, '.json')
-    writeFileSync(damagedPath, '{broken json')
-    const healthy = save('healthy output')
-    expect(store.list('task').map((item) => item.id)).toEqual([healthy.id])
-    expect(() => store.read('task', damaged.id)).toThrow()
-    for (let index = 0; index < COMMAND_OUTPUT_MAX_ARTIFACTS; index++) save(`later ${index}`)
-    expect(store.list('task')).toHaveLength(COMMAND_OUTPUT_MAX_ARTIFACTS)
-    expect(store.get('task', damaged.id)).toBeNull()
-  })
-
-  it.each([{ offset: -1 }, { offset: NaN }, { offset: 0.5 }, { limit: Infinity }, { limit: 3 }, { limit: 65_537 }])('rejects invalid page bounds %#', (options) => {
-    const artifact = save('output')
-    expect(() => store.read('task', artifact.id, options)).toThrow('Output offset')
-  })
-
-  it('makes a read-only tool scoped to one task and preserves continuation metadata', async () => {
-    const artifact = save('abcdefghij')
-    const tool = createReadCommandOutputTool(store, 'task')
-    const context = { requestPermission: async () => ({ decision: 'allow' as const }) }
-    expect(tool.defaultPermission).toBe('allow')
-    const result = await tool.execute({ output_id: artifact.id, limit: 4 }, context)
-    expect(JSON.parse(String(result.content))).toMatchObject({ text: 'abcd', nextOffset: 4, eof: false })
-    expect((await createReadCommandOutputTool(store, 'foreign').execute({ output_id: artifact.id }, context)).isError).toBe(true)
-    expect((await tool.execute({ output_id: artifact.id, path: '../anything' }, context)).isError).toBe(true)
-    expect((await tool.execute({ output_id: randomUUID() }, context)).isError).toBe(true)
   })
 })

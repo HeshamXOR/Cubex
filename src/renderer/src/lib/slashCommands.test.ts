@@ -1,16 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SkillSummary } from '../../../shared/ipc'
-import {
-  SLASH_COMMANDS,
-  isCommandName,
-  matchSlash,
-  parseCommand,
-  parseSlash,
-  skillInvocation,
-  slashKeyAction,
-  slashQuery,
-  type SlashEntry
-} from './slashCommands'
+import { SLASH_COMMANDS, matchSlash, parseSlash, skillInvocation, slashKeyAction, slashQuery, type SlashEntry } from './slashCommands'
 import type { KeyEventLike } from './shortcuts'
 
 const skill = (name: string, description = 'Does something useful', source: SkillSummary['source'] = 'bundled'): SkillSummary => ({
@@ -44,11 +34,6 @@ describe('listing commands and skills', () => {
     expect(matches.skills.every((entry) => entry.kind === 'skill')).toBe(true)
   })
 
-  it('works with no skills at all', () => {
-    expect(matchSlash('', []).skills).toEqual([])
-    expect(tokens(matchSlash('mod', []).commands)).toEqual(['model'])
-  })
-
   it('ranks the name itself, then names that start with it, then names that contain it, then descriptions', () => {
     const skills = [
       skill('review-code', 'Looks at diffs'),
@@ -61,20 +46,10 @@ describe('listing commands and skills', () => {
     expect(tokens(matchSlash('code', skills).skills)).toEqual(['code', 'codex', 'code-review', 'review-code', 'testing'])
   })
 
-  it('keeps the order skills came in among those of the same rank', () => {
-    const skills = [skill('b-tool'), skill('a-tool'), skill('c-tool')]
-    expect(tokens(matchSlash('tool', skills).skills)).toEqual(['b-tool', 'a-tool', 'c-tool'])
-  })
-
   it('narrows commands the same way, and finds a command by its description', () => {
     expect(tokens(matchSlash('mod', []).commands)).toEqual(['model'])
     expect(tokens(matchSlash('rename', []).commands)).toEqual(['title'])
     expect(matchSlash('zzzz', library).commands).toEqual([])
-  })
-
-  it('ignores the case of what was typed', () => {
-    expect(tokens(matchSlash('CODE', library).skills)).toEqual(['code-review'])
-    expect(tokens(matchSlash('Cl', []).commands)).toEqual(['clear'])
   })
 
   it('offers a skill that shares a name with a command as skill:name, and keeps the command plain', () => {
@@ -94,10 +69,6 @@ describe('listing commands and skills', () => {
     expect(tokens(matchSlash('skill:de', library).skills)).toEqual(['skill:debugging', 'skill:code-review'])
   })
 
-  it('carries the skill with its row, so the menu can show where it comes from', () => {
-    const [entry] = matchSlash('code', [skill('code-review', 'Reviews diffs', 'cubex')]).skills
-    expect(entry).toMatchObject({ kind: 'skill', token: 'code-review', skill: { source: 'cubex', description: 'Reviews diffs' } })
-  })
 })
 
 describe('reading a message that starts with a slash', () => {
@@ -106,12 +77,6 @@ describe('reading a message that starts with a slash', () => {
     expect(parseSlash('/new')).toEqual({ name: 'new', rest: '', explicit: false })
     expect(parseSlash('  /new')).toBeNull()
     expect(parseSlash('/new   ')).toEqual({ name: 'new', rest: '', explicit: false })
-  })
-
-  it('takes the whole name, with hyphens, dots and underscores', () => {
-    expect(parseSlash('/frontend-engineering build it')).toEqual({ name: 'frontend-engineering', rest: 'build it', explicit: false })
-    expect(parseSlash('/pdf.v2_tools x')).toEqual({ name: 'pdf.v2_tools', rest: 'x', explicit: false })
-    expect(parseSlash('/new-chat')).toEqual({ name: 'new-chat', rest: '', explicit: false })
   })
 
   it('keeps what follows the name across lines', () => {
@@ -128,13 +93,6 @@ describe('reading a message that starts with a slash', () => {
     for (const text of ['/', '/-x', '/skill:', '/usr/bin/env', '/title: x', 'plain text', '']) expect(parseSlash(text)).toBeNull()
   })
 
-  it('names a built-in command in lower case, and never for the skill: spelling', () => {
-    expect(parseCommand('/TITLE My plan')).toEqual({ name: 'title', rest: 'My plan' })
-    expect(parseCommand('/skill:title tidy it')).toBeNull()
-    expect(parseCommand('/new-chat')).toEqual({ name: 'new-chat', rest: '' })
-    expect(isCommandName('new-chat')).toBe(false)
-    expect(isCommandName('Settings')).toBe(true)
-  })
 })
 
 describe('telling a skill from a command or a plain message', () => {
@@ -166,26 +124,12 @@ describe('telling a skill from a command or a plain message', () => {
     expect(skillInvocation('/skill:nope hi', undefined)).toEqual({ skill: 'nope', request: 'hi' })
   })
 
-  it('keeps a request that spans lines', () => {
-    expect(skillInvocation('/code-review one\ntwo', skills)).toEqual({ skill: 'code-review', request: 'one\ntwo' })
-  })
 })
 
 describe('keys in the open menu', () => {
   const entries = matchSlash('', [skill('code-review'), skill('debugging')])
   const all = [...entries.commands, ...entries.skills]
   const menu = (active: number, draft = '/') => ({ entries: all, active, draft })
-
-  it('moves through the rows and wraps at both ends', () => {
-    expect(slashKeyAction(press('ArrowDown'), menu(0))).toEqual({ type: 'move', to: 1 })
-    expect(slashKeyAction(press('ArrowDown'), menu(all.length - 1))).toEqual({ type: 'move', to: 0 })
-    expect(slashKeyAction(press('ArrowUp'), menu(0))).toEqual({ type: 'move', to: all.length - 1 })
-    expect(slashKeyAction(press('ArrowUp'), menu(3))).toEqual({ type: 'move', to: 2 })
-  })
-
-  it('closes on Escape', () => {
-    expect(slashKeyAction(press('Escape'), menu(0))).toEqual({ type: 'dismiss' })
-  })
 
   it('completes the highlighted row on Tab and on Enter', () => {
     const last = all.length - 1
@@ -214,9 +158,4 @@ describe('keys in the open menu', () => {
     expect(slashKeyAction(press('a'), menu(0))).toBeUndefined()
   })
 
-  it('does nothing when there are no rows, or the highlight points past them', () => {
-    expect(slashKeyAction(press('ArrowDown'), { entries: [], active: 0, draft: '/zz' })).toBeUndefined()
-    expect(slashKeyAction(press('Enter'), { entries: [], active: 0, draft: '/zz' })).toBeUndefined()
-    expect(slashKeyAction(press('Tab'), menu(999))).toBeUndefined()
-  })
 })

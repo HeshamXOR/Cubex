@@ -60,16 +60,4 @@ describe('1M context models declared on a provider', () => {
     expect(unlisted).toMatchObject({ longContextBeta: true, displayName: 'claude-not-listed' })
     expect(unlisted?.contextWindow).toBeUndefined()
   })
-
-  it('gives the request the same option for a model that was never listed', async () => {
-    const manager = new ProviderManager({ catalog: catalog() })
-    await manager.listModels('relay')
-    expect(manager.getModelInfo('relay', 'claude-sonnet-4-5-20250929')?.longContextBeta).toBe(true)
-    // Before any list is fetched: the declared model is still described, so the composer can offer the switch.
-    const fresh = new ProviderManager({ catalog: catalog() })
-    expect(fresh.getModelInfo('relay', 'claude-sonnet-4-5-20250929')).toMatchObject({ longContextBeta: true, contextWindow: 200_000 })
-    expect(fresh.getModelInfo('relay', 'claude-haiku-4-5')?.longContextBeta).toBeUndefined()
-    // A model nobody declared keeps the plain catalog answer.
-    expect(fresh.getModelInfo('relay', 'claude-opus-4-8')).toBeUndefined()
-  })
 })

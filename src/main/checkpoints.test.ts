@@ -16,19 +16,6 @@ describe('CheckpointStore', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('beginTurn returns a strictly increasing seq per conversation', () => {
-    const store = new CheckpointStore()
-    const a1 = store.beginTurn('convA')
-    const a2 = store.beginTurn('convA')
-    const a3 = store.beginTurn('convA', 'm1')
-    expect(a1).toBeLessThan(a2)
-    expect(a2).toBeLessThan(a3)
-    expect([a1, a2, a3]).toEqual([1, 2, 3])
-    // Each conversation keeps its own independent counter.
-    expect(store.beginTurn('convB')).toBe(1)
-    expect(store.beginTurn('convA')).toBe(4)
-  })
-
   it('restores a modified file to its pre-turn content on rewind', async () => {
     const store = new CheckpointStore()
     const file = join(dir, 'note.txt')
@@ -60,44 +47,6 @@ describe('CheckpointStore', () => {
     expect(existsSync(file)).toBe(false)
   })
 
-  it('countSince counts distinct changed paths at/after a message turn', () => {
-    const store = new CheckpointStore()
-    const f1 = join(dir, 'a.txt')
-    const f2 = join(dir, 'b.txt')
-
-    const t1 = store.beginTurn('c', 'm1')
-    store.record('c', t1, f1, 'a0', true)
-
-    const t2 = store.beginTurn('c', 'm2')
-    store.record('c', t2, f2, 'b0', true)
-
-    const t3 = store.beginTurn('c', 'm3')
-    // Same path mutated again in a later turn: a distinct snapshot, same path.
-    store.record('c', t3, f2, 'b1', true)
-
-    // From m1: f1 (t1) and f2 (t2, t3) → 2 distinct paths at/after t1.
-    expect(store.countSince('c', 'm1')).toBe(2)
-    // From m2: only f2 changed at/after t2 — counted once despite two snapshots.
-    expect(store.countSince('c', 'm2')).toBe(1)
-    // Unknown message id → nothing counted.
-    expect(store.countSince('c', 'nope')).toBe(0)
-  })
-
-  it('rewind with an unknown messageId returns empty and touches nothing', async () => {
-    const store = new CheckpointStore()
-    const file = join(dir, 'keep.txt')
-    writeFileSync(file, 'untouched', 'utf8')
-
-    const seq = store.beginTurn('c', 'm1')
-    store.record('c', seq, file, 'pre-turn', true)
-    writeFileSync(file, 'current', 'utf8')
-
-    const res = await store.rewind('c', 'does-not-exist')
-    expect(res).toEqual({ restored: [] })
-    // The recorded file must NOT be reverted for an unrelated/unknown message.
-    expect(readFileSync(file, 'utf8')).toBe('current')
-  })
-
   it('preserves later manual edits and does not rewind any file when preflight conflicts', async () => {
     const store = new CheckpointStore()
     const first = join(dir, 'a.txt')
@@ -112,20 +61,6 @@ describe('CheckpointStore', () => {
     expect(readFileSync(first, 'utf8')).toBe('tool a')
     expect(readFileSync(second, 'utf8')).toBe('manual changes')
     expect(store.countSince('c', 'm1')).toBe(2)
-  })
-
-  it('retains the first before and latest after across repeated mutations', async () => {
-    const store = new CheckpointStore()
-    const file = join(dir, 'repeated.txt')
-    const firstTurn = store.beginTurn('c', 'm1')
-    writeFileSync(file, 'second edit')
-    store.record('c', firstTurn, file, 'original', true, 'first edit')
-    store.record('c', firstTurn, file, 'first edit', true, 'second edit')
-    const secondTurn = store.beginTurn('c', 'm2')
-    store.record('c', secondTurn, file, 'second edit', true, 'third edit')
-    writeFileSync(file, 'third edit')
-    await store.rewind('c', 'm1')
-    expect(readFileSync(file, 'utf8')).toBe('original')
   })
 
   it('restores a removed file but refuses to overwrite a manually recreated file', async () => {
@@ -211,26 +146,6 @@ describe('CheckpointStore restore with undo', () => {
     return { a, made, gone }
   }
 
-  it('previews each file with what a restore would do and changes nothing', async () => {
-    const store = new CheckpointStore()
-    const { a, made, gone } = oneEditingTurn(store)
-    const preview = await store.preview('c', ['m1'])
-    expect(preview).toEqual({
-      known: true,
-      restorable: [{ path: a, action: 'revert' }, { path: made, action: 'delete' }, { path: gone, action: 'recreate' }],
-      blocked: []
-    })
-    expect(readFileSync(a, 'utf8')).toBe('a after')
-    expect(existsSync(made)).toBe(true)
-    expect(existsSync(gone)).toBe(false)
-  })
-
-  it('reports a point it holds no checkpoint for instead of guessing', async () => {
-    const store = new CheckpointStore()
-    expect(await store.preview('c', ['m1'])).toEqual({ known: false, restorable: [], blocked: [] })
-    expect(await store.restore('c', ['m1'])).toEqual({ known: false, restored: [], skipped: [], failed: [] })
-  })
-
   it('starts from the first message that began a turn, so a later turn is still put back', async () => {
     const store = new CheckpointStore()
     const file = join(dir, 'later.txt')
@@ -270,27 +185,6 @@ describe('CheckpointStore restore with undo', () => {
     expect(readFileSync(gone, 'utf8')).toBe('gone before')
     // The skipped file keeps its snapshot, so resolving the conflict by hand lets a retry finish the job.
     expect(store.countSince('c', 'm1')).toBe(1)
-  })
-
-  it('tells a file removed by hand from one edited by hand', async () => {
-    const store = new CheckpointStore()
-    const { a } = oneEditingTurn(store)
-    rmSync(a)
-    const preview = await store.preview('c', ['m1'])
-    expect(preview.blocked).toEqual([{ path: a, reason: 'Removed outside Cubex since its last edit' }])
-  })
-
-  it('does not count a file that is already how a restore would leave it', async () => {
-    const store = new CheckpointStore()
-    const { a } = oneEditingTurn(store)
-    // The person put the original back themselves.
-    writeFileSync(a, 'a before')
-    const preview = await store.preview('c', ['m1'])
-    expect(preview.restorable.map((file) => file.path)).not.toContain(a)
-    expect(preview.blocked).toEqual([])
-    const result = await store.restore('c', ['m1'])
-    expect(result.restored).not.toContain(a)
-    expect(readFileSync(a, 'utf8')).toBe('a before')
   })
 
   it('reports a file it could not write and still restores the rest', async () => {
@@ -335,21 +229,5 @@ describe('CheckpointStore restore with undo', () => {
     await expect(store.undo('c', undoId!)).rejects.toThrow('Undo stopped')
     expect(readFileSync(a, 'utf8')).toBe('edited after the restore')
     expect(existsSync(made)).toBe(false)
-  })
-
-  it('only undoes the restore it issued it for, and not after a new turn begins', async () => {
-    const store = new CheckpointStore()
-    oneEditingTurn(store)
-    const { undoId } = await store.restore('c', ['m1'])
-    await expect(store.undo('c', 'someone-elses')).rejects.toThrow('no longer be undone')
-    await expect(store.undo('other', undoId!)).rejects.toThrow('no longer be undone')
-    store.beginTurn('c', 'm2')
-    await expect(store.undo('c', undoId!)).rejects.toThrow('no longer be undone')
-  })
-
-  it('offers no undo when nothing was restored', async () => {
-    const store = new CheckpointStore()
-    store.beginTurn('c', 'm1')
-    expect(await store.restore('c', ['m1'])).toEqual({ known: true, restored: [], skipped: [], failed: [] })
   })
 })

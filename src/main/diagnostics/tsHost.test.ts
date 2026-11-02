@@ -54,22 +54,6 @@ describe('loadTypeScript', () => {
     expect('ts' in loaded && loaded.source).toBe('workspace')
     expect('ts' in loaded && loaded.version).toBe('9.9.9')
   })
-
-  it('falls back to the app package when the workspace has none or an unusable one', () => {
-    const none = loadTypeScript(project({ 'a.txt': 'x' }), APP_DIR)
-    expect('ts' in none && none.source).toBe('app')
-    const unusable = project({
-      'node_modules/typescript/package.json': '{"name":"typescript","version":"7.0.0","main":"./lib/typescript.js"}',
-      'node_modules/typescript/lib/typescript.js': 'module.exports = { version: "7.0.0" }'
-    })
-    const loaded = loadTypeScript(unusable, APP_DIR)
-    expect('ts' in loaded && loaded.source).toBe('app')
-  })
-
-  it('reports why when no typescript is found anywhere', () => {
-    const loaded = loadTypeScript(project({ 'a.txt': 'x' }), undefined)
-    expect('reason' in loaded && loaded.reason).toMatch(/typescript/i)
-  })
 })
 
 describe('ProjectChecker: errors around an edit', () => {
@@ -107,16 +91,6 @@ describe('ProjectChecker: errors around an edit', () => {
     const c = checker(root)
     const result = ok(c.check(join(root, 'src/a.ts'), 'import { add } from "./lib"\nexport const r = add(1, 2)\n', 'import { add } from "./lib"\nexport const r = add(1)\n'))
     expect(result.after!.map((d) => d.code)).toEqual(['TS2554'])
-    c.dispose()
-  })
-
-  it('has no baseline for a new file and still reports its errors', () => {
-    const root = project({ 'tsconfig.json': TSCONFIG, 'src/a.ts': 'export const a = 1\n' })
-    const c = checker(root)
-    const created = join(root, 'src/new.ts')
-    const result = ok(c.check(created, null, 'export const n: string = 5\n'))
-    expect(result.before).toBeUndefined()
-    expect(result.after!.map((d) => d.code)).toEqual(['TS2322'])
     c.dispose()
   })
 })

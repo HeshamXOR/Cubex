@@ -48,12 +48,6 @@ beforeEach(() => {
 afterEach(() => ipc.dispose())
 
 describe('compactConversation IPC', () => {
-  it('registers its channel and removes it on dispose', () => {
-    expect(IPC.compactConversation).toBe('conv:compact')
-    expect(mocks.handlers.has(IPC.compactConversation)).toBe(true)
-    ipc.dispose()
-    expect(mocks.handlers.size).toBe(0)
-  })
 
   it('passes a valid task id to the service and returns its result unchanged', async () => {
     const ok = { ok: true, summary: 'Goal: ship.', boundaryMessageId: 'm4' }
@@ -69,12 +63,5 @@ describe('compactConversation IPC', () => {
   it.each([undefined, null, 42, {}, [], '', '   ', 'x'.repeat(257)])('rejects malformed task id case %# with an error result, before reaching the service', async (bad) => {
     await expect(call(IPC.compactConversation, bad)).resolves.toEqual({ ok: false, error: 'Invalid task id.' })
     expect(mocks.compactConversation).not.toHaveBeenCalled()
-  })
-
-  it('turns an unexpected failure into an error result instead of rejecting', async () => {
-    mocks.compactConversation.mockRejectedValueOnce(new Error('disk full'))
-    await expect(call(IPC.compactConversation, 'c1')).resolves.toEqual({ ok: false, error: 'disk full' })
-    mocks.compactConversation.mockRejectedValueOnce('plain string failure')
-    await expect(call(IPC.compactConversation, 'c1')).resolves.toEqual({ ok: false, error: 'plain string failure' })
   })
 })

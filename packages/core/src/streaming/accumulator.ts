@@ -7,6 +7,7 @@ import type {
   ToolCall,
   Usage
 } from '../types'
+import { toolInputFromArguments } from './toolArguments'
 
 interface ToolCallDraft {
   id?: string
@@ -118,13 +119,10 @@ export class StreamAccumulator {
 
   private finalizeDraft(d: ToolCallDraft): ToolCall | undefined {
     if (!d.name) return undefined
-    let input: unknown = {}
-    try {
-      input = d.args ? JSON.parse(d.args) : {}
-    } catch {
-      input = { _raw: d.args }
-    }
-    return { id: d.id ?? nanoid(), name: d.name, input: input as ToolCall['input'] }
+    // Slightly malformed arguments are read (see toolArguments); the rest stay `_raw`, which the loop reports to the model.
+    // A missing closing brace is only supplied when the reply finished, never after a cut-off.
+    const complete = this.stopReason === 'stop' || this.stopReason === 'tool_use'
+    return { id: d.id ?? nanoid(), name: d.name, input: toolInputFromArguments(d.args, { complete }) }
   }
 
   finalize(): AIResponse {

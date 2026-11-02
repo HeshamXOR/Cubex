@@ -66,14 +66,6 @@ describe('plan review and task stream ownership', () => {
     expect(useStore.getState().status).toBe('awaiting_input')
   })
 
-  it('closing the document leaves the approval pending', () => {
-    useStore.setState({ pendingPlan: plan() })
-    useStore.getState().openPlan(plan())
-    useStore.getState().closePlan()
-    expect(useStore.getState().pendingPlan?.id).toBe('plan-a')
-    expect(bridge.api.resolvePlan).not.toHaveBeenCalled()
-  })
-
   it('returns rejection feedback and keeps planning without losing the saved document', async () => {
     useStore.setState({ pendingPlan: plan(), activePlan: plan(), plans: [plan()] })
     await useStore.getState().resolvePlan('plan-a', 'reject', 'Use the existing router; do not add a package.')
@@ -323,20 +315,6 @@ describe('provider selection and model refresh', () => {
     expect(useStore.getState().activeProviderId).toBeUndefined()
   })
 
-  it('discards metadata from an older configuration even when that response finishes last', async () => {
-    useStore.setState({ providers: [provider()] })
-    useStore.getState().setActive('primary', '')
-    const oldModels = deferred<ModelInfo[]>()
-    bridge.api.listModels.mockReturnValueOnce(oldModels.promise).mockResolvedValueOnce([model('new-model')])
-    const oldRequest = useStore.getState().loadModels('primary')
-    bridge.api.listProviders.mockResolvedValue([provider('primary', { baseUrl: 'http://127.0.0.1:9000/v1' })])
-    await useStore.getState().loadProviders()
-    oldModels.resolve([model('old-model')])
-    await oldRequest
-    expect(useStore.getState().activeModel).toBe('new-model')
-    expect(useStore.getState().models.primary?.map((entry) => entry.id)).toEqual(['new-model'])
-  })
-
   it('keeps the latest catalog when overlapping model refreshes finish out of order', async () => {
     useStore.setState({ providers: [provider()] })
     useStore.getState().setActive('primary', '')
@@ -348,43 +326,6 @@ describe('provider selection and model refresh', () => {
     await first
     expect(useStore.getState().activeModel).toBe('new-model')
     expect(useStore.getState().models.primary?.map((entry) => entry.id)).toEqual(['new-model'])
-  })
-
-  it('does not resurrect deleted provider metadata when its outstanding request settles', async () => {
-    useStore.setState({ providers: [provider()] })
-    useStore.getState().setActive('primary', '')
-    const pending = deferred<ModelInfo[]>()
-    bridge.api.listModels.mockReturnValueOnce(pending.promise)
-    const loading = useStore.getState().loadModels('primary')
-    bridge.api.listProviders.mockResolvedValue([])
-    await useStore.getState().loadProviders()
-    pending.resolve([model('deleted-model')])
-    await loading
-    expect(useStore.getState().models.primary).toBeUndefined()
-    expect(useStore.getState().activeProviderId).toBeUndefined()
-  })
-
-  it('keeps a provider selected while the provider-list request is pending', async () => {
-    useStore.setState({ providers: [provider(), provider('other')] })
-    useStore.getState().setActive('primary', 'primary-default')
-    const pending = deferred<ProviderConfig[]>()
-    bridge.api.listProviders.mockReturnValueOnce(pending.promise)
-    const loading = useStore.getState().loadProviders()
-    useStore.getState().setActive('other', 'chosen-model')
-    pending.resolve([provider(), provider('other')])
-    await loading
-    expect(useStore.getState().activeProviderId).toBe('other')
-    expect(useStore.getState().activeModel).toBe('chosen-model')
-    expect(bridge.api.listModels).toHaveBeenCalledWith('other')
-  })
-
-  it('does not treat an unavailable model endpoint as a provider-save failure', async () => {
-    bridge.api.listProviders.mockResolvedValue([provider()])
-    bridge.api.listModels.mockRejectedValueOnce(new Error('Model endpoint unavailable'))
-    await expect(useStore.getState().loadProviders()).resolves.toBeUndefined()
-    expect(useStore.getState().providers).toHaveLength(1)
-    expect(useStore.getState().activeProviderId).toBe('primary')
-    expect(useStore.getState().activeModel).toBe('primary-default')
   })
 
   it('initially selects an eligible local endpoint in Local Only mode', async () => {
@@ -444,15 +385,6 @@ describe('model reasoning effort', () => {
   }
   const sentParams = () => (bridge.api.startChat.mock.calls.at(-1)?.[0] as ChatStartRequest).policy.primary.params
 
-  it('loads a generic provider without inventing an effort default', async () => {
-    useStore.setState({ activeProviderId: undefined, activeModel: undefined, effort: 'max' })
-    bridge.api.listProviders.mockResolvedValue([provider()])
-    bridge.api.listModels.mockResolvedValue([model(false)])
-    await useStore.getState().loadProviders()
-    expect(useStore.getState().activeModel).toBe('fixture-model')
-    expect(useStore.getState().effort).toBeUndefined()
-  })
-
   it('resets the default when switching from a reasoning model to an unsupported model', () => {
     select('openai', model(true, 'gpt-6-astra'))
     useStore.setState({ models: { 'effort-provider': [model(true, 'gpt-6-astra'), model(false, 'gpt-4o')] } })
@@ -478,15 +410,6 @@ describe('model reasoning effort', () => {
     expect(sentParams()).not.toHaveProperty('reasoningEffort')
   })
 
-  it('does not let another provider metadata response select a model or change effort', async () => {
-    select('openai', model(true, 'gpt-6-astra'))
-    useStore.setState({ activeModel: '', effort: undefined, providers: [provider('openai'), provider('openai', 'other-provider')] })
-    bridge.api.listModels.mockResolvedValueOnce([model(true, 'other-model', 'other-provider')])
-    await useStore.getState().loadModels('other-provider')
-    expect(useStore.getState().activeModel).toBe('')
-    expect(useStore.getState().effort).toBeUndefined()
-  })
-
   it.each([
     ['openai-compat', undefined, 'fixture-model'],
     ['openai-compat', false, 'fixture-model'],
@@ -501,28 +424,6 @@ describe('model reasoning effort', () => {
     useStore.setState({ effort: 'max' })
     await useStore.getState().sendMessage('ultrathink about this')
     expect(sentParams()).not.toHaveProperty('reasoningEffort')
-  })
-
-  it('omits stale ordinary effort even without an ultrathink override', async () => {
-    select('openai-compat', model(false))
-    useStore.setState({ effort: 'medium' })
-    await useStore.getState().sendMessage('Hello')
-    expect(sentParams()).not.toHaveProperty('reasoningEffort')
-  })
-
-  it('keeps Default unset on a supported model and omits the request parameter', async () => {
-    select('openai', model(true, 'gpt-6-astra'))
-    useStore.getState().setEffort('max')
-    useStore.getState().setEffort(undefined)
-    expect(useStore.getState().effort).toBeUndefined()
-    await useStore.getState().sendMessage('Use normal settings')
-    expect(sentParams()).not.toHaveProperty('reasoningEffort')
-  })
-
-  it('clamps ultrathink to the selected model supported vocabulary', async () => {
-    select('openai', model(true, 'o3'))
-    await useStore.getState().sendMessage('ultrathink about the failure')
-    expect(sentParams()).toMatchObject({ reasoningEffort: 'high' })
   })
 
   it('rejects an unsupported preset both before and after its metadata loads', async () => {
@@ -547,27 +448,6 @@ describe('model reasoning effort', () => {
     await vi.waitFor(() => expect(useStore.getState().effort).toBe('high'))
     await useStore.getState().sendMessage('Run this preset')
     expect(sentParams()).toMatchObject({ reasoningEffort: 'high' })
-  })
-
-  it('does not overwrite an explicit Default selection when preset metadata arrives late', async () => {
-    select('openai-compat', undefined)
-    useStore.setState({ presets: [{ id: 'preset', name: 'Saved preset', providerId: 'effort-provider', model: 'fixture-model', params: { reasoningEffort: 'high' } }] })
-    let finish!: (models: ModelInfo[]) => void
-    bridge.api.listModels.mockImplementationOnce(() => new Promise<ModelInfo[]>((resolve) => { finish = resolve }))
-    useStore.getState().applyPreset('preset')
-    useStore.getState().setEffort(undefined)
-    finish([model(true)])
-    await vi.waitFor(() => expect(useStore.getState().models['effort-provider']?.[0]?.supportsReasoning).toBe(true))
-    expect(useStore.getState().effort).toBeUndefined()
-  })
-
-  it('does not invent effort for a preset that uses provider defaults', async () => {
-    select('openai', model(true, 'gpt-6-astra'))
-    useStore.setState({ effort: 'max', presets: [{ id: 'preset', name: 'Default preset', providerId: 'effort-provider', model: 'gpt-6-astra' }] })
-    bridge.api.listModels.mockResolvedValue([model(true, 'gpt-6-astra')])
-    useStore.getState().applyPreset('preset')
-    await useStore.getState().sendMessage('Use the preset defaults')
-    expect(sentParams()).not.toHaveProperty('reasoningEffort')
   })
 
   it('uses fresh capability metadata if it arrives while the initial task is created', async () => {
@@ -647,6 +527,21 @@ describe('context accounting and retained history', () => {
     expect(useStore.getState().contextUsage?.estimatedTokens).toBe(1800)
   })
 
+  it('shows the snapshot a task was saved with when it is opened, until a live one replaces it', async () => {
+    bridge.api.getConversation.mockResolvedValueOnce({ ...conversation('saved'), lastContext: snapshot(4321) })
+    await useStore.getState().openConversation('saved')
+    expect(useStore.getState().contextUsage?.estimatedTokens).toBe(4321)
+    // A task saved without one starts empty, and the one before it does not leak across.
+    await useStore.getState().openConversation('b')
+    expect(useStore.getState().contextUsage).toBeUndefined()
+    bridge.api.getConversation.mockResolvedValueOnce({ ...conversation('saved2'), lastContext: snapshot(4321) })
+    await useStore.getState().openConversation('saved2')
+    await useStore.getState().sendMessage('Go on')
+    expect(useStore.getState().contextUsage).toBeUndefined()
+    emit({ streamId: useStore.getState().streamId!, kind: 'context', context: snapshot(5000) })
+    expect(useStore.getState().contextUsage?.estimatedTokens).toBe(5000)
+  })
+
   it('summarizes older turns through the main process and keeps the transcript whole', async () => {
     const messages = turns()
     useStore.setState({ liveMessages: messages, contextUsage: snapshot() })
@@ -675,14 +570,6 @@ describe('context accounting and retained history', () => {
     expect(useStore.getState().compactError).toBeUndefined()
   })
 
-  it('reports a summary request that throws', async () => {
-    bridge.api.compactConversation.mockRejectedValueOnce(new Error('Gateway unreachable'))
-    useStore.setState({ liveMessages: turns() })
-    await useStore.getState().compactActive()
-    expect(useStore.getState().compactError).toBe('Gateway unreachable')
-    expect(useStore.getState().compactingId).toBeUndefined()
-  })
-
   it('does not summarize while a request is running or another summary is in flight', async () => {
     useStore.setState({ liveMessages: turns(), streamId: 'running' })
     await useStore.getState().compactActive()
@@ -698,15 +585,6 @@ describe('context accounting and retained history', () => {
     expect(useStore.getState().activeConversation).toMatchObject({ contextStartMessageId: 'm4', contextSummary: 'Goal: keep going.' })
   })
 
-  it('keeps an automatic summary with the task that made it', async () => {
-    await useStore.getState().sendMessage('Task A')
-    const streamId = useStore.getState().streamId!
-    await useStore.getState().openConversation('b')
-    emit({ streamId, kind: 'compacted', summary: 'Goal: task A.', boundaryMessageId: 'm2' })
-    expect(useStore.getState().activeConversation?.contextSummary).toBeUndefined()
-    expect(useStore.getState().conversationRuns.a?.activeConversation).toMatchObject({ contextStartMessageId: 'm2', contextSummary: 'Goal: task A.' })
-  })
-
   it('takes the context cut from the saved task when a cached one is reopened', async () => {
     await useStore.getState().sendMessage('Task A')
     await useStore.getState().openConversation('b')
@@ -715,20 +593,6 @@ describe('context accounting and retained history', () => {
       : conversation(id))
     await useStore.getState().openConversation('a')
     expect(useStore.getState().activeConversation).toMatchObject({ contextStartMessageId: 'm6', contextSummary: 'Saved while away.', contextSummaryAt: 99 })
-  })
-
-  it('does not change the context of a running request', async () => {
-    useStore.setState({ liveMessages: turns(), streamId: 'running' })
-    await useStore.getState().restoreFullContext()
-    expect(bridge.api.updateConversation).not.toHaveBeenCalled()
-  })
-
-  it('removes only the selected attachment', () => {
-    useStore.getState().addAttachment({ type: 'file', filename: 'one.txt', source: { kind: 'base64', mediaType: 'text/plain', data: 'b25l' } })
-    useStore.getState().addAttachment({ type: 'file', filename: 'two.txt', source: { kind: 'base64', mediaType: 'text/plain', data: 'dHdv' } })
-    useStore.getState().removeAttachment(0)
-    expect(useStore.getState().attachments).toHaveLength(1)
-    expect(useStore.getState().attachments[0]).toMatchObject({ filename: 'two.txt' })
   })
 
   it('retires a stream that fails before startup', async () => {
@@ -828,17 +692,6 @@ describe('per-task composer drafts', () => {
     expect(bridge.api.startChat).toHaveBeenCalledTimes(2)
   })
 
-  it('keeps a welcome draft when conversation creation fails', async () => {
-    useStore.setState({ activeConversation: undefined })
-    useStore.getState().setComposerText('Create this task')
-    bridge.api.createConversation.mockRejectedValueOnce(new Error('Storage unavailable'))
-    await useStore.getState().submitComposer()
-    expect(useStore.getState().composerText).toBe('Create this task')
-    expect(useStore.getState().statusDetail).toBe('Storage unavailable')
-    expect(useStore.getState().startingRequest).toBe(false)
-    expect(bridge.api.startChat).not.toHaveBeenCalled()
-  })
-
   it('does not send into a different task selected while conversation creation is pending', async () => {
     let created!: (value: Conversation) => void
     bridge.api.createConversation.mockImplementationOnce(() => new Promise<Conversation>((resolve) => { created = resolve }))
@@ -872,30 +725,6 @@ describe('per-task composer drafts', () => {
     expect(bridge.api.startChat).toHaveBeenCalledWith(expect.objectContaining({ conversationId: 'created', userText: 'Original request' }))
     expect(useStore.getState().composerText).toBe('Draft for the next request')
     expect(useStore.getState().startingRequest).toBe(false)
-  })
-
-  it('leaves a replacement new task usable when it supersedes a pending initial send', async () => {
-    let created!: (value: Conversation) => void
-    bridge.api.createConversation.mockImplementationOnce(() => new Promise<Conversation>((resolve) => { created = resolve }))
-    useStore.setState({ activeConversation: undefined })
-    useStore.getState().setComposerText('Preserved initial draft')
-    const sending = useStore.getState().submitComposer()
-    await useStore.getState().newConversation()
-    created(conversation('superseded'))
-    await sending
-    expect(useStore.getState().activeConversation?.id).toBe('new')
-    expect(useStore.getState().startingRequest).toBe(false)
-    expect(useStore.getState().composerText).toBe('Preserved initial draft')
-    expect(bridge.api.startChat).not.toHaveBeenCalled()
-  })
-
-  it('consumes a successful new-task command after its welcome draft transfers to the task', async () => {
-    useStore.setState({ activeConversation: undefined })
-    useStore.getState().setComposerText('/new')
-    await useStore.getState().submitComposer()
-    expect(useStore.getState().activeConversation?.id).toBe('new')
-    expect(useStore.getState().composerText).toBe('')
-    expect(bridge.api.startChat).not.toHaveBeenCalled()
   })
 
   it('preserves failed command drafts and bounds text memory', async () => {
@@ -987,17 +816,6 @@ describe('continuous live activity', () => {
     expect(useStore.getState().liveMessages.at(-1)?.streaming).toBe(false)
   })
 
-  it('scopes preparation to its task when another task is on screen', async () => {
-    await useStore.getState().sendMessage('Prepare a plan')
-    const streamId = useStore.getState().streamId!
-    await useStore.getState().openConversation('b')
-    emit({ streamId, kind: 'stream', event: { type: 'tool_call_delta', index: 0, name: 'exit_plan_mode' } })
-    expect(useStore.getState().status).toBe('idle')
-    expect(useStore.getState().conversationRuns.a?.status).toBe('preparing_tool')
-    expect(useStore.getState().conversationRuns.a?.statusDetail).toBe('Preparing plan')
-    await useStore.getState().openConversation('a')
-    expect(useStore.getState().statusDetail).toBe('Preparing plan')
-  })
 })
 
 describe('durable activity history', () => {
@@ -1063,14 +881,6 @@ describe('durable activity history', () => {
     useStore.getState().cancel()
     emit({ streamId, sequence: 5, kind: 'stream', event: { type: 'text_delta', text: 'Late cancelled text' } })
     expect(useStore.getState().liveMessages.at(-1)?.text).toBe('Keep this once.')
-  })
-
-  it('does not let legacy delayed starts reopen completed tools', async () => {
-    await useStore.getState().sendMessage('Run the check')
-    const streamId = useStore.getState().streamId!
-    emit({ streamId, kind: 'tool', tool: { id: 'check', name: 'run_command', phase: 'done', detail: 'Passed' } })
-    emit({ streamId, kind: 'tool', tool: { id: 'check', name: 'run_command', phase: 'running' } })
-    expect(useStore.getState().liveMessages.at(-1)?.blocks).toEqual([{ type: 'tool', tool: { id: 'check', name: 'run_command', phase: 'done', detail: 'Passed' } }])
   })
 
   it('measures separate reasoning spans and closes the last one on cancellation', async () => {

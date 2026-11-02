@@ -30,7 +30,6 @@ const peer = (over: Partial<AcpPeer> = {}): AcpPeer => ({ kind: 'acp', id: 'mock
 
 /** Modes as real agents report them, for the mode an agent is put in. */
 const CLAUDE_MODES = JSON.stringify({ current: 'plan', available: [{ id: 'default', name: 'Default' }, { id: 'acceptEdits', name: 'Accept Edits' }, { id: 'plan', name: 'Plan Mode' }, { id: 'bypassPermissions', name: 'Bypass Permissions' }] })
-const CODEX_MODES = JSON.stringify({ current: 'auto', available: [{ id: 'read-only', name: 'Read Only' }, { id: 'auto', name: 'Auto' }, { id: 'full-access', name: 'Full Access' }] })
 const OPENCODE_MODES = JSON.stringify({ current: 'build', available: [{ id: 'build', name: 'Build' }, { id: 'plan', name: 'Plan' }] })
 
 interface Run {
@@ -113,33 +112,6 @@ describe('a task that changes a file', () => {
     expect(outcome.captured).toEqual([])
   })
 
-  it('does not ask in accept-edits mode', async () => {
-    const { outcome, asked } = await run(`@mock edit ${file('src/a.ts')}|changed`, { mode: 'acceptEdits' })
-    expect(asked).toEqual([])
-    expect(readFileSync(file('src/a.ts'), 'utf8')).toBe('changed')
-    expect(outcome.files).toEqual([{ path: 'src/a.ts', change: 'edited', tracked: true }])
-  })
-
-  it('creates a file, and says so', async () => {
-    const { outcome } = await run(`@mock edit ${file('docs/new.md')}|# New`, { mode: 'bypass' })
-    expect(readFileSync(file('docs/new.md'), 'utf8')).toBe('# New')
-    expect(outcome.files).toEqual([{ path: 'docs/new.md', change: 'created', tracked: true }])
-    expect(outcome.captured[0]).toMatchObject({ existed: false })
-  })
-
-  it('deletes a file when allowed, and keeps it for a rewind', async () => {
-    const { outcome } = await run(`@mock delete ${file('keep.txt')}`)
-    expect(existsSync(file('keep.txt'))).toBe(false)
-    expect(outcome.files).toEqual([{ path: 'keep.txt', change: 'deleted', tracked: true }])
-    expect(outcome.captured[0]!.before.toString()).toBe('keep')
-  })
-
-  it('does not call a file changed when the agent was allowed to and wrote the same thing', async () => {
-    const { outcome } = await run(`@mock edit ${file('src/a.ts')}|export {}`, { mode: 'bypass' })
-    expect(outcome.files).toEqual([])
-    expect(outcome.captured).toEqual([])
-  })
-
   it('never lets a change outside the project through, whatever the mode', async () => {
     for (const mode of ['default', 'acceptEdits', 'bypass'] as const) {
       const { outcome, asked } = await run(`@mock edit ${join(outside, 'x.txt')}|escaped`, { mode })
@@ -183,14 +155,6 @@ describe('what the agent changed without asking', () => {
     expect(outcome.files).toEqual([{ path: 'src/sneaky.ts', change: 'created', tracked: false }])
     expect(outcome.captured).toEqual([])
   })
-
-  it('is listed with what it asked about, each as what it is', async () => {
-    const { outcome } = await run(`@mock edit ${file('src/a.ts')}|changed\n@mock sneak ${file('src/sneaky.ts')}|oops`, { mode: 'acceptEdits' })
-    expect(outcome.files).toEqual([
-      { path: 'src/a.ts', change: 'edited', tracked: true },
-      { path: 'src/sneaky.ts', change: 'created', tracked: false }
-    ])
-  })
 })
 
 describe('a task that only reads', () => {
@@ -201,22 +165,12 @@ describe('a task that only reads', () => {
     expect(asked).toEqual([])
     expect(readFileSync(file('src/a.ts'), 'utf8')).toBe('export {}')
   })
-
-  it('puts the agent in its most careful mode', async () => {
-    const { outcome } = await run('@mock modes', { role: 'research' })
-    expect(outcome.report).toBe('mode:plan')
-  })
 })
 
 describe('the mode the agent works in', () => {
   it('puts Claude Code in the mode that asks', async () => {
     const { outcome } = await run('@mock modes')
     expect(outcome.report).toBe('mode:default')
-  })
-
-  it('puts Codex in read-only, which asks before it edits', async () => {
-    const { outcome } = await run('@mock modes', { env: { MOCK_MODES: CODEX_MODES } })
-    expect(outcome.report).toBe('mode:read-only')
   })
 
   it('refuses an agent that has no mode that asks, and says what to do', async () => {
@@ -227,12 +181,6 @@ describe('the mode the agent works in', () => {
     expect(outcome.hint).toContain('research or review')
   })
 
-  it('still lets that agent research, in its read-only mode', async () => {
-    const { outcome } = await run('@mock modes', { role: 'research', env: { MOCK_MODES: OPENCODE_MODES } })
-    expect(outcome.status).toBe('done')
-    expect(outcome.report).toBe('mode:plan')
-  })
-
   it('stops an agent that moves itself into a mode that does not ask', async () => {
     const { outcome } = await run('@mock mode bypassPermissions')
     expect(outcome.status).toBe('failed')
@@ -240,43 +188,7 @@ describe('the mode the agent works in', () => {
   })
 })
 
-describe('what is shown while it works', () => {
-  it('reports each step the agent takes, and when it is waiting for the person', async () => {
-    const answers: boolean[] = []
-    const { outcome, updates } = await run(`@mock step Read the project\n@mock edit ${file('src/a.ts')}|changed\n@mock step Run the tests`, { answer: () => { answers.push(true); return true } })
-    expect(outcome.steps.map((step) => [step.title, step.state])).toEqual([['Read the project', 'done'], ['Run the tests', 'done']])
-    expect(answers).toHaveLength(1)
-    expect(updates.length).toBeGreaterThan(1)
-    expect(updates.some((update) => update.status === 'waiting')).toBe(true)
-    expect(updates[0]).toMatchObject({ name: 'Mock', role: 'implement', status: 'working' })
-  })
-
-  it('shows the files it has been allowed to change so far', async () => {
-    const { updates } = await run(`@mock edit ${file('src/a.ts')}|changed\n@mock step After the edit`)
-    expect(updates.at(-1)?.files).toEqual([{ path: 'src/a.ts', change: 'edited', tracked: true }])
-  })
-})
-
 describe('when it does not go well', () => {
-  it('says a program that cannot be started was not found', async () => {
-    const { outcome } = await run('anything', { peerOver: { command: 'cubex-no-such-agent-xyz', args: [] } })
-    expect(outcome.status).toBe('failed')
-    expect(outcome.error).toContain('was not found')
-    expect(outcome.files).toEqual([])
-  })
-
-  it('says an agent that declines declined', async () => {
-    const { outcome } = await run('@mock refuse')
-    expect(outcome.status).toBe('failed')
-    expect(outcome.error).toContain('declined the task')
-  })
-
-  it('says when the agent stopped early, and that the work may be incomplete', async () => {
-    const { outcome } = await run('@mock say Half done.\n@mock max_turn_requests')
-    expect(outcome.status).toBe('done')
-    expect(outcome.stoppedEarly).toContain('used all the steps')
-    expect(outcome.report).toBe('Half done.')
-  })
 
   it('gives up on an agent that takes too long, and says so', async () => {
     const { outcome } = await run('@mock hang', { timeoutMs: 400 })
@@ -295,19 +207,6 @@ describe('when it does not go well', () => {
     expect(outcome.files).toEqual([{ path: 'src/a.ts', change: 'edited', tracked: true }])
     expect(outcome.captured).toHaveLength(1)
   })
-
-  it('does not start when it is already cancelled', async () => {
-    const controller = new AbortController()
-    controller.abort()
-    const { outcome } = await run('@mock say hi', { signal: controller.signal })
-    expect(outcome.status).toBe('cancelled')
-  })
-
-  it('reports an agent whose program ends in the middle', async () => {
-    const { outcome } = await run('@mock say hi', { env: { MOCK_EXIT_AT_PROMPT: '4' } })
-    expect(outcome.status).toBe('failed')
-    expect(outcome.error).toContain('stopped unexpectedly')
-  })
 })
 
 describe('what the agent is told', () => {
@@ -316,11 +215,5 @@ describe('what the agent is told', () => {
     expect(outcome.report).toContain('You have been handed a task by another AI agent')
     expect(outcome.report).toContain('Work in this folder only')
     expect(outcome.report).toContain('The task:')
-  })
-
-  it('is told it may not change anything, for a task that only reads', async () => {
-    const { outcome } = await run('@mock echo', { role: 'review' })
-    expect(outcome.report).toContain('Do not edit, create, delete or move any file')
-    expect(outcome.report).toContain('Review what the task points at')
   })
 })

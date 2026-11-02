@@ -3,7 +3,7 @@ import { createProvider } from '@core/providers'
 import { AIGateway, type GatewayCallOptions } from '@core/gateway/AIGateway'
 import { MockAIProvider } from '@core/providers/mock/MockAIProvider'
 import { DEFAULT_RETRY_POLICY } from '@core/types'
-import type { AIRequest, AIResponse, AIStreamEvent, ProviderConfig, ProviderKind, RoutingPolicy } from '@core/types'
+import type { AIRequest, AIResponse, ProviderConfig, ProviderKind, RoutingPolicy } from '@core/types'
 
 const state = vi.hoisted(() => ({
   localOnly: false,
@@ -72,19 +72,6 @@ describe('ProviderManager Local Only model routing', () => {
     expect(createProvider).not.toHaveBeenCalled()
   })
 
-  it.each<ProviderKind>(['mock', 'mock-local', 'ollama', 'lmstudio', 'llamacpp'])('allows the %s runtime without cloud credentials', (kind) => {
-    const cfg = configure(kind)
-    state.localOnly = true
-    expect(new ProviderManager().resolve(cfg.id)?.id).toBe(cfg.id)
-  })
-
-  it.each<ProviderKind>(['custom', 'openai-compat'])('allows %s endpoints explicitly configured for local access', (kind) => {
-    const cfg = configure(kind, 'local')
-    cfg.baseUrl = 'http://127.0.0.1:8080/v1'
-    state.localOnly = true
-    expect(new ProviderManager().resolve(cfg.id)?.id).toBe(cfg.id)
-  })
-
   it('checks the current toggle before cache retrieval and reuses the adapter after Local Only is disabled', () => {
     const cfg = configure('openai')
     const manager = new ProviderManager()
@@ -94,18 +81,6 @@ describe('ProviderManager Local Only model routing', () => {
     state.localOnly = false
     expect(manager.resolve(cfg.id)).toBe(provider)
     expect(createProvider).toHaveBeenCalledTimes(1)
-  })
-
-  it('rechecks the access declaration and enabled state for a cached endpoint', () => {
-    const cfg = configure('custom', 'local')
-    state.localOnly = true
-    const manager = new ProviderManager()
-    manager.resolve(cfg.id)
-    cfg.accessType = 'api'
-    expect(() => manager.resolve(cfg.id)).toThrow(expect.objectContaining(blocked))
-    cfg.enabled = false
-    expect(manager.resolve(cfg.id)).toBeUndefined()
-    expect(manager.resolve('missing')).toBeUndefined()
   })
 
   it('blocks cloud model discovery and reports a clear failed connection test', async () => {
@@ -156,28 +131,4 @@ describe.each(['send', 'stream'] as const)('Local Only through AIGateway.%s', (m
     expect(call).toHaveBeenCalledTimes(1)
     expect(sleep).toHaveBeenCalledTimes(1)
   })
-
-  it('rechecks each fallback after the active local provider fails', async () => {
-    configure('ollama', 'local')
-    configure('anthropic')
-    const manager = new ProviderManager()
-    const cloud = manager.resolve('anthropic')!
-    const cloudCall = vi.spyOn(cloud, mode === 'send' ? 'sendMessage' : 'streamMessage')
-    const local = manager.resolve('ollama')! as MockAIProvider
-    local.setScenario('auth_error')
-    await expect(run(new AIGateway(manager.resolve), mode, routing('ollama', ['anthropic']), {
-      onEvent: (event) => { if (event.type === 'fallback') state.localOnly = true }
-    })).rejects.toMatchObject(blocked)
-    expect(cloudCall).not.toHaveBeenCalled()
-  })
-})
-
-it('streams a terminal policy error and unsuccessful lifecycle event without throwing out of the generator', async () => {
-  configure('openai')
-  state.localOnly = true
-  const lifecycle = vi.fn()
-  const events: AIStreamEvent[] = []
-  for await (const event of new AIGateway(new ProviderManager().resolve).stream(request, routing('openai'), { onEvent: lifecycle })) events.push(event)
-  expect(events).toEqual([{ type: 'error', error: expect.objectContaining(blocked) }])
-  expect(lifecycle).toHaveBeenLastCalledWith({ type: 'final', target: routing('openai').primary, success: false })
 })

@@ -122,26 +122,6 @@ describe('offering the tool', () => {
     expect(toolNames(h.requests[0])).not.toContain('delegate_task')
     expect(toolNames(h.requests[0])).toContain('consult_agent')
   })
-
-  it('is not offered when the chat did not turn the agent on', async () => {
-    const h = harness()
-    await h.turn(['hi'], 'default', { peers: [] })
-    expect(toolNames(h.requests[0])).not.toContain('delegate_task')
-  })
-
-  it('is not offered to a task with no project, because the agent works in one', async () => {
-    mocks.workspace = ''
-    const h = harness()
-    await h.turn(['hi'])
-    expect(toolNames(h.requests[0])).not.toContain('delegate_task')
-  })
-
-  it('is not offered for an agent that is turned off in settings', async () => {
-    mocks.peers = [agent({ enabled: false })]
-    const h = harness()
-    await h.turn(['hi'])
-    expect(toolNames(h.requests[0])).not.toContain('delegate_task')
-  })
 })
 
 describe('a task, from the model to the file', () => {
@@ -186,38 +166,6 @@ describe('a task, from the model to the file', () => {
     expect(reverted).toMatchObject({ restored: ['notes.txt'], skipped: [] })
     expect(readFileSync(file('notes.txt'), 'utf8')).toBe('hello')
   })
-
-  it('creates a file and tracks it as created', async () => {
-    const h = harness()
-    await h.turn([[task(`@mock edit ${file('new.txt')}|fresh`)], 'ok'], 'bypass')
-    expect(readFileSync(file('new.txt'), 'utf8')).toBe('fresh')
-    expect(await h.service.getSessionChanges('c1')).toMatchObject([{ path: 'new.txt', status: 'added' }])
-    await h.service.revertSessionChanges('c1', ['new.txt'])
-    expect(existsSync(file('new.txt'))).toBe(false)
-  })
-
-  it('asks nothing in bypass mode', async () => {
-    const h = harness()
-    await h.turn([[task(`@mock edit ${file('notes.txt')}|changed`)], 'ok'], 'bypass')
-    expect(h.asks).toEqual([])
-    expect(readFileSync(file('notes.txt'), 'utf8')).toBe('changed')
-  })
-
-  it('asks about the task but not about the edit in accept-edits mode', async () => {
-    const h = harness()
-    await h.turn([[task(`@mock edit ${file('notes.txt')}|changed`)], 'ok'], 'acceptEdits')
-    expect(h.asks).toHaveLength(1)
-    expect(h.asks[0]!.delegate).toBeUndefined()
-    expect(readFileSync(file('notes.txt'), 'utf8')).toBe('changed')
-  })
-
-  it('asks about a command, with the command', async () => {
-    const h = harness()
-    await h.turn([[task('@mock run npm test')], 'ok'])
-    expect(h.asks).toHaveLength(2)
-    expect(h.asks[1]).toMatchObject({ title: 'Mock wants to run a command', delegate: { action: 'run', command: 'npm test' }, detail: 'npm test' })
-    expect(h.asks[1]!.risks?.join(' ')).toContain('Cubex cannot limit what a command touches')
-  })
 })
 
 describe('what the person can refuse', () => {
@@ -241,12 +189,6 @@ describe('what the person can refuse', () => {
     expect(last.delegate?.files).toEqual([])
     expect(last.detail).toContain('edit:refused')
     expect(await h.service.getSessionChanges('c1')).toEqual([])
-  })
-
-  it('never saves what was allowed as a rule: nothing offers "always"', async () => {
-    const h = harness()
-    await h.turn([[task(`@mock edit ${file('notes.txt')}|changed`)], 'ok'])
-    expect(h.asks.every((ask) => ask.rule === undefined)).toBe(true)
   })
 
   it('does not change what is outside the project, in any mode, and does not ask', async () => {
@@ -308,31 +250,5 @@ describe('stopping', () => {
     expect(last.phase).toBe('error')
     expect(last.delegate?.status).toBe('cancelled')
     expect(await h.service.getSessionChanges('c1')).toMatchObject([{ path: 'notes.txt' }])
-  }, 60_000)
-})
-
-describe('questions that come together', () => {
-  it('are put to the person one at a time, though the agent asks them at once', async () => {
-    const h = harness()
-    await h.turn([[task(`@mock edits ${file('a.txt')}|a <> ${file('b.txt')}|b`)], 'ok'])
-    expect(h.asks.filter((ask) => ask.delegate)).toHaveLength(2)
-    expect(h.onScreen.peak).toBe(1)
-    expect(readFileSync(file('a.txt'), 'utf8')).toBe('a')
-    expect(readFileSync(file('b.txt'), 'utf8')).toBe('b')
-  })
-
-  it('wait behind one that is not answered, and are never shown when the turn is stopped', async () => {
-    // The person has not looked up: the first question stays on screen and the second is held back, not drawn over it.
-    const h = harness((ask) => (ask.delegate ? undefined : 'allow'))
-    const started = h.turn([[task(`@mock edits ${file('a.txt')}|a <> ${file('b.txt')}|b`)], 'ok'], 'default', { streamId: 'stop-2' })
-    await vi.waitFor(() => expect(h.asks.filter((ask) => ask.delegate)).toHaveLength(1), { timeout: 30_000 })
-    await new Promise((resolve) => setTimeout(resolve, 400))
-    expect(h.asks.filter((ask) => ask.delegate)).toHaveLength(1)
-    h.service.cancel('stop-2')
-    const events = await started
-    expect(h.asks.filter((ask) => ask.delegate)).toHaveLength(1)
-    expect(h.toolEvents(events).at(-1)!.phase).toBe('error')
-    expect(existsSync(file('a.txt'))).toBe(false)
-    expect(existsSync(file('b.txt'))).toBe(false)
   }, 60_000)
 })

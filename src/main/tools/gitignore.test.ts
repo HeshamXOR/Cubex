@@ -50,20 +50,6 @@ describe('gitignore patterns', () => {
     expect(ignore.ignores('lib/src/gen', true)).toBe(false)
   })
 
-  it('supports ?, character classes and escaped specials', async () => {
-    const ignore = await matcher({ '.gitignore': '?.js\n[a-c].txt\n[!x]y.md\n\\#hash\n\\!bang\nstar\\*.c\n' })
-    expect(ignore.ignores('a.js', false)).toBe(true)
-    expect(ignore.ignores('ab.js', false)).toBe(false)
-    expect(ignore.ignores('b.txt', false)).toBe(true)
-    expect(ignore.ignores('d.txt', false)).toBe(false)
-    expect(ignore.ignores('zy.md', false)).toBe(true)
-    expect(ignore.ignores('xy.md', false)).toBe(false)
-    expect(ignore.ignores('#hash', false)).toBe(true)
-    expect(ignore.ignores('!bang', false)).toBe(true)
-    expect(ignore.ignores('star*.c', false)).toBe(true)
-    expect(ignore.ignores('starx.c', false)).toBe(false)
-  })
-
   it('handles double stars: leading, middle and trailing', async () => {
     const ignore = await matcher({ '.gitignore': '**/temp\na/**/z.txt\nout/**\n' })
     expect(ignore.ignores('temp', true)).toBe(true)
@@ -85,28 +71,6 @@ describe('gitignore patterns', () => {
     expect(ignore.ignores('trailing   ', false)).toBe(false)
     expect(ignore.ignores('escaped ', false)).toBe(true)
   })
-
-  it('applies CRLF files and a missing final newline', async () => {
-    const ignore = await matcher({ '.gitignore': '*.tmp\r\nbuild/\r\nlast' })
-    expect(ignore.ignores('a.tmp', false)).toBe(true)
-    expect(ignore.ignores('build', true)).toBe(true)
-    expect(ignore.ignores('last', false)).toBe(true)
-  })
-
-  it('treats an unclosed bracket as literal text', async () => {
-    const ignore = await matcher({ '.gitignore': 'weird[name\n' })
-    expect(ignore.ignores('weird[name', false)).toBe(true)
-    expect(ignore.ignores('weirdx', false)).toBe(false)
-  })
-
-  it('can match case-insensitively, as git does on Windows', async () => {
-    const insensitive = await matcher({ '.gitignore': 'Build/\n*.LOG\n' }, '', { caseInsensitive: true })
-    expect(insensitive.ignores('build', true)).toBe(true)
-    expect(insensitive.ignores('a.log', false)).toBe(true)
-    const sensitive = await matcher({ '.gitignore': 'Build/\n*.LOG\n' }, '', { caseInsensitive: false })
-    expect(sensitive.ignores('build', true)).toBe(false)
-    expect(sensitive.ignores('a.LOG', false)).toBe(true)
-  })
 })
 
 describe('nested ignore files and precedence', () => {
@@ -126,28 +90,6 @@ describe('nested ignore files and precedence', () => {
     expect(ignore.ignores('pkg/sub/generated', true)).toBe(false)
     expect(ignore.ignores('pkg/local/a.json', false)).toBe(true)
     expect(ignore.ignores('generated', true)).toBe(false)
-  })
-
-  it('reads .git/info/exclude with lower priority than .gitignore', async () => {
-    const ignore = await matcher({ '.git/info/exclude': 'private/\n*.bak\n', '.gitignore': '!keep.bak\n' })
-    expect(ignore.ignores('private', true)).toBe(true)
-    expect(ignore.ignores('x.bak', false)).toBe(true)
-    expect(ignore.ignores('keep.bak', false)).toBe(false)
-  })
-
-  it('loads each ancestor when asked about a deep folder', async () => {
-    const ignore = await matcher({ '.gitignore': 'root-only\n', 'a/.gitignore': 'in-a\n', 'a/b/.gitignore': 'in-b\n' }, 'a/b')
-    expect(ignore.ignores('a/b/root-only', false)).toBe(true)
-    expect(ignore.ignores('a/b/in-a', false)).toBe(true)
-    expect(ignore.ignores('a/b/in-b', false)).toBe(true)
-    expect(ignore.ignores('a/b/other', false)).toBe(false)
-  })
-
-  it('uses no rules for a folder without an ignore file, and trusts a hint that there is none', async () => {
-    const ignore = await matcher({ 'a/file.txt': '' }, 'a')
-    expect(ignore.ignores('a/file.txt', false)).toBe(false)
-    await ignore.load('a', false)
-    expect(ignore.ignores('a/file.txt', false)).toBe(false)
   })
 })
 

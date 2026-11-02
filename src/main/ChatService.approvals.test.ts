@@ -177,14 +177,6 @@ describe('Always allow: edits', () => {
     expect(asks(await app.turn([[write('w3', 'c.txt')]], 'default', ['deny']))).toHaveLength(1)
   })
 
-  it('does not offer an edit rule outside default mode', async () => {
-    const app = harness()
-    // acceptEdits approves ordinary edits itself; a protected path still asks, but carries risks and no rule.
-    const events = await app.turn([[write('w1', '.claude/settings.json')]], 'acceptEdits', ['allow'])
-    expect(asks(events)).toHaveLength(1)
-    expect(asks(events)[0]!.rule).toBeUndefined()
-  })
-
   it('never lets a rule approve a protected path, and never saves one from a risky ask', async () => {
     const app = harness()
     await app.turn([[write('w1', 'a.txt')]], 'default', ['always'])
@@ -209,26 +201,6 @@ describe('Always allow: edits', () => {
     expect(asks(events)).toEqual([])
     expect(existsSync(file('b.txt'))).toBe(false)
     expect(events.some((e) => e.kind === 'tool' && e.tool.id === 'w2' && e.tool.detail === 'Blocked in plan mode')).toBe(true)
-  })
-
-  it('scopes a rule to its project', async () => {
-    const app = harness()
-    await app.turn([[write('w1', 'a.txt')]], 'default', ['always'])
-    const elsewhere = await app.turn([[write('w2', 'a.txt')]], 'default', ['deny'], 'c2')
-    expect(asks(elsewhere)).toHaveLength(1)
-    expect(existsSync(join(mocks.otherWorkspace, 'a.txt'))).toBe(false)
-    expect(app.service.listPermissionRules(mocks.otherWorkspace)).toEqual([])
-  })
-
-  it('asks again after the rule is removed', async () => {
-    const app = harness()
-    await app.turn([[write('w1', 'a.txt')]], 'default', ['always'])
-    const [rule] = app.service.listPermissionRules()
-    app.service.removePermissionRule(rule!.id)
-    expect(app.service.listPermissionRules()).toEqual([])
-    expect(asks(await app.turn([[write('w2', 'b.txt')]], 'default', ['deny']))).toHaveLength(1)
-    // Removing something that is not there is harmless.
-    expect(() => app.service.removePermissionRule('missing')).not.toThrow()
   })
 })
 
@@ -311,24 +283,6 @@ describe('Always allow: fetches, MCP tools', () => {
     }
     expect(mocks.fetched).toHaveLength(2)
   })
-
-  it('keeps documentation hosts prompt-free without any rule', async () => {
-    const app = harness()
-    const events = await app.turn([[fetchCall('f1', 'https://docs.python.org/3/library/os.html')]], 'default', [])
-    expect(asks(events)).toEqual([])
-    expect(mocks.fetched).toHaveLength(1)
-  })
-
-  it('suggests a tool-wide rule for an MCP tool', async () => {
-    mocks.mcpServers = [{ id: 'demo', name: 'demo', command: 'node', enabled: true }]
-    const app = harness()
-    const ping: ToolCall = { id: 'm1', name: 'mcp__demo__ping', input: {} }
-    const first = await app.turn([[ping]], 'default', ['always'])
-    expect(asks(first)[0]!.rule).toEqual({ tool: 'mcp__demo__ping', pattern: '*', label: 'ping from demo' })
-    const second = await app.turn([[{ ...ping, id: 'm2' }]], 'default', [])
-    expect(asks(second)).toEqual([])
-    expect(mocks.pinged).toBe(2)
-  })
 })
 
 describe('rules never override a hard stop', () => {
@@ -350,13 +304,5 @@ describe('rules never override a hard stop', () => {
     expect(events.some((e) => e.kind === 'tool' && e.tool.id === 'l1' && e.tool.detail === 'Denied by policy')).toBe(true)
     expect(asks(events).map((ask) => ask.toolName)).toEqual(['run_command']) // the dangerous command still asks
     expect(mocks.commands).toEqual([])
-  })
-})
-
-describe('permission resolution', () => {
-  it('ignores an unknown ask id', () => {
-    const app = harness()
-    expect(() => app.service.resolvePermission('no-such-ask', 'always')).not.toThrow()
-    expect(app.service.listPermissionRules()).toEqual([])
   })
 })

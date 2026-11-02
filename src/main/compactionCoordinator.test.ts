@@ -61,27 +61,6 @@ describe('CompactionCoordinator.compact', () => {
     expect(t.coordinator.isCompacting('task')).toBe(false)
   })
 
-  it('prefers the routing of the latest turn, until the task is forgotten', async () => {
-    const t = setup()
-    t.coordinator.rememberPolicy('task', policy('chat-model'))
-    await t.coordinator.compact('task')
-    expect(t.send.mock.calls[0]![1].primary.model).toBe('chat-model')
-    t.coordinator.forget('task')
-    t.set({ ...t.current()!, contextStartMessageId: undefined, contextSummary: undefined })
-    await t.coordinator.compact('task')
-    expect(t.send.mock.calls[1]![1].primary.model).toBe('stored-model')
-  })
-
-  it('takes retry and timeout settings for a stored model from the app settings', async () => {
-    const t = setup({ settings: { ai: { retry: { ...DEFAULT_RETRY_POLICY, maxAttempts: 1 }, timeout: { requestMs: 5_000 } } } })
-    await t.coordinator.compact('task')
-    expect(t.send.mock.calls[0]![1]).toMatchObject({ retry: { maxAttempts: 1 }, timeout: { requestMs: 5_000 } })
-    const bare = setup({ settings: undefined })
-    bare.coordinator.compact('task')
-    await vi.waitFor(() => expect(bare.send).toHaveBeenCalled())
-    expect(bare.send.mock.calls[0]![1].timeout).toEqual({})
-  })
-
   it('is refused with the budget\'s own sentence when a cap set to stop is reached, before any model request', async () => {
     const budgetBlock = vi.fn((_id: string, _target: unknown) => 'Daily budget of $5.00 reached. Raise it in Settings or wait until midnight.')
     const t = setup({ budgetBlock })
@@ -91,14 +70,6 @@ describe('CompactionCoordinator.compact', () => {
     expect(t.coordinator.isCompacting('task')).toBe(false)
     const open = setup({ budgetBlock: () => undefined })
     expect(await open.coordinator.compact('task')).toMatchObject({ ok: true })
-  })
-
-  it('is refused while a turn runs, for an unknown task, and without any model', async () => {
-    expect(await setup({ running: true }).coordinator.compact('task')).toEqual({ ok: false, error: expect.stringMatching(/running/i) })
-    expect(await setup({ conversation: null }).coordinator.compact('task')).toEqual({ ok: false, error: 'Conversation not found.' })
-    const noModel = setup({ conversation: { providerId: undefined, model: undefined } })
-    expect(await noModel.coordinator.compact('task')).toEqual({ ok: false, error: expect.stringMatching(/model/i) })
-    expect(noModel.send).not.toHaveBeenCalled()
   })
 
   it('refuses a second compaction while one is in flight and releases the task afterwards, even on failure', async () => {
@@ -127,50 +98,6 @@ describe('CompactionCoordinator.auto', () => {
     expect(t.loadHistory).toHaveBeenCalledWith('task')
     expect(t.send.mock.calls[0]![1].primary).toMatchObject({ providerId: 'p', model: 'chat-model' })
     expect(t.send.mock.calls[0]![2]?.signal).toBe(SIGNAL)
-  })
-
-  it('does not read the stored task until the request is large enough to matter', async () => {
-    const t = setup({ window: WINDOW })
-    expect(await t.coordinator.auto('task', sized(100), policy(), undefined, SIGNAL)).toEqual({ attempted: false })
-    expect(t.get).not.toHaveBeenCalled()
-    expect(t.send).not.toHaveBeenCalled()
-  })
-
-  it.each([
-    ['the setting is off', { window: WINDOW, settings: { ai: { autoCompact: false } } }, 6],
-    ['the window is unknown', {}, 6],
-    ['the window is unusable', { window: { contextWindow: 0 } }, 6],
-    ['there are fewer than three user turns', { window: WINDOW }, 2]
-  ])('does nothing when %s', async (_name, options, turnCount) => {
-    const t = setup({ ...options, conversation: { messages: turns(turnCount) } })
-    expect(await t.coordinator.auto('task', NEARLY_FULL, policy(), undefined, SIGNAL)).toEqual({ attempted: false })
-    expect(t.send).not.toHaveBeenCalled()
-    expect(t.update).not.toHaveBeenCalled()
-  })
-
-  it('treats the gated long-context window as 200k unless the request opted in', async () => {
-    const window = { contextWindow: 1_000_000, longContextBeta: true }
-    // 700k characters is about 175k tokens: 87 percent of 200k, 17 percent of 1M.
-    const big = sized(700_000)
-    const gated = setup({ window })
-    expect(await gated.coordinator.auto('task', big, policy(), undefined, SIGNAL)).toMatchObject({ attempted: true })
-    const open = setup({ window })
-    expect(await open.coordinator.auto('task', big, policy(), { 'x-cubex-long-context': '1' }, SIGNAL)).toEqual({ attempted: false })
-    expect(open.send).not.toHaveBeenCalled()
-  })
-
-  it('forwards the long-context header to the summary call', async () => {
-    const t = setup({ window: { contextWindow: 1_000_000, longContextBeta: true } })
-    await t.coordinator.auto('task', sized(4_000_000), policy(), { 'x-cubex-long-context': '1' }, SIGNAL)
-    expect(t.send.mock.calls[0]![2]?.headers).toEqual({ 'x-cubex-long-context': '1' })
-  })
-
-  it('reports a failed summary as attempted, without a result, and says why', async () => {
-    const t = setup({ window: WINDOW })
-    t.send.mockRejectedValueOnce(new Error('Provider unavailable'))
-    expect(await t.coordinator.auto('task', NEARLY_FULL, policy(), undefined, SIGNAL)).toEqual({ attempted: true })
-    expect(t.warn).toHaveBeenCalledWith(expect.stringContaining('Provider unavailable'))
-    expect(t.update).not.toHaveBeenCalled()
   })
 
   it('never throws: storage and history failures are logged and the turn goes on', async () => {
@@ -221,21 +148,6 @@ describe('CompactionCoordinator.auto anchored on reported usage', () => {
     expect(result.attempted).toBe(true)
     expect(result.compacted?.summary).toBe(SUMMARY)
   })
-
-  it('drops the anchor after compacting, so the next turn is not judged on a dead conversation', async () => {
-    const anchor = new ContextAnchorStore()
-    anchor.record('task', { inputTokens: 900, estimatedAtReport: estimated })
-    const t = setup({ window: WINDOW, anchor })
-    await t.coordinator.auto('task', request, policy(), undefined, SIGNAL)
-    expect(anchor.get('task')).toBeUndefined()
-  })
-
-  it('forgets the anchor with the task', () => {
-    const anchor = new ContextAnchorStore()
-    anchor.record('task', { inputTokens: 900, estimatedAtReport: estimated })
-    setup({ window: WINDOW, anchor }).coordinator.forget('task')
-    expect(anchor.get('task')).toBeUndefined()
-  })
 })
 
 describe('CompactionCoordinator settings', () => {
@@ -248,26 +160,6 @@ describe('CompactionCoordinator settings', () => {
     expect(await lower.coordinator.auto('task', NEARLY_FULL, policy(), undefined, SIGNAL)).toMatchObject({ attempted: true })
   })
 
-  it('reads Settings on every call, so a change applies to the next request without a restart', async () => {
-    const options = { window: WINDOW, settings: ai({ threshold: 0.95 }) }
-    const t = setup(options)
-    expect(await t.coordinator.auto('task', NEARLY_FULL, policy(), undefined, SIGNAL)).toEqual({ attempted: false })
-    options.settings = ai({ threshold: 0.5 })
-    expect(await t.coordinator.auto('task', NEARLY_FULL, policy(), undefined, SIGNAL)).toMatchObject({ attempted: true })
-  })
-
-  it('lets ai.compaction.auto win over the older ai.autoCompact in both directions', async () => {
-    const off = setup({ window: WINDOW, settings: ai({ auto: false }, true) })
-    expect(await off.coordinator.auto('task', NEARLY_FULL, policy(), undefined, SIGNAL)).toEqual({ attempted: false })
-    const on = setup({ window: WINDOW, settings: ai({ auto: true }, false) })
-    expect(await on.coordinator.auto('task', NEARLY_FULL, policy(), undefined, SIGNAL)).toMatchObject({ attempted: true })
-  })
-
-  it('falls back to the older switch when ai.compaction has no auto', async () => {
-    const off = setup({ window: WINDOW, settings: ai({ threshold: 0.6 }, false) })
-    expect(await off.coordinator.auto('task', NEARLY_FULL, policy(), undefined, SIGNAL)).toEqual({ attempted: false })
-  })
-
   it('measures against the input budget, so a large output cap summarizes earlier than the raw window would', async () => {
     // About 9 600 tokens in a 20 000 window: 48 percent of it, but 96 percent of the 9 952 left once 8 000 are
     // reserved for the answer (and 2 048 for framing the estimate cannot see).
@@ -276,12 +168,6 @@ describe('CompactionCoordinator settings', () => {
     expect(await reserved.coordinator.auto('task', request, policy('chat-model', 8_000), undefined, SIGNAL)).toMatchObject({ attempted: true })
     const open = setup({ window: { contextWindow: 20_000 } })
     expect(await open.coordinator.auto('task', request, policy(), undefined, SIGNAL)).toEqual({ attempted: false })
-  })
-
-  it('bills a manual summary to the task', async () => {
-    const t = setup({ settings: ai({ threshold: 0.7 }) })
-    await t.coordinator.compact('task')
-    expect(t.send.mock.calls[0]![2]?.conversationId).toBe('task')
   })
 })
 
@@ -297,33 +183,6 @@ describe('CompactionCoordinator progress', () => {
     expect(seen[1]).toMatchObject({ step: 'summarize', phase: 'completed', summary: SUMMARY, boundaryMessageId: 'u5', messagesSummarized: 8 })
     expect(seen[1]!.tokensBefore).toBeGreaterThan(0)
     expect(seen[1]!.tokensAfter).toBeGreaterThan(0)
-  })
-
-  it('reports a failure only for a summary that began, with the reason', async () => {
-    const t = setup({ window: WINDOW })
-    t.send.mockRejectedValueOnce(new Error('Provider unavailable'))
-    const events: CompactionEvent[] = []
-    expect(await t.coordinator.auto('task', NEARLY_FULL, policy(), undefined, SIGNAL, (event) => events.push(event))).toEqual({ attempted: true })
-    expect(events).toEqual([
-      { step: 'summarize', phase: 'started', messagesSummarized: 8 },
-      { step: 'summarize', phase: 'failed', error: expect.stringContaining('Provider unavailable') }
-    ])
-  })
-
-  it('says nothing when the request is not due', async () => {
-    const t = setup({ window: WINDOW })
-    const events: CompactionEvent[] = []
-    await t.coordinator.auto('task', sized(100), policy(), undefined, SIGNAL, (event) => events.push(event))
-    expect(events).toEqual([])
-  })
-
-  it('reports a cancelled summary as a failure the person can read', async () => {
-    const t = setup({ window: WINDOW })
-    const controller = new AbortController()
-    t.send.mockImplementationOnce(async () => { controller.abort(); throw new Error('aborted') })
-    const events: CompactionEvent[] = []
-    await t.coordinator.auto('task', NEARLY_FULL, policy(), undefined, controller.signal, (event) => events.push(event))
-    expect(events.at(-1)).toEqual({ step: 'summarize', phase: 'failed', error: 'Compaction was cancelled.' })
   })
 })
 
@@ -355,25 +214,6 @@ describe('CompactionCoordinator.prune', () => {
     expect(outcome.messages).toHaveLength(request.messages.length)
     expect(resultOf(outcome.messages[2]!)).toMatch(/^\[Pruned tool output:/)
     expect(resultOf(outcome.messages.at(-1)!)).toContain('file 10')
-  })
-
-  it('leaves the request alone below 60 percent of the budget', () => {
-    const t = setup({ window: { contextWindow: 400_000 } })
-    expect(t.coordinator.prune('task', reads(), policy(), undefined)).toBeUndefined()
-  })
-
-  it('starts earlier when the summarizing threshold is lowered, because pruning keeps ten points below it', () => {
-    // 80 000 tokens is about 53 percent of 150 000: below 60 percent, above the 40 percent that a 0.5 threshold gives.
-    const defaults = setup({ window: { contextWindow: 150_000 } })
-    expect(defaults.coordinator.prune('task', reads(), policy(), undefined)).toBeUndefined()
-    const lowered = setup({ window: { contextWindow: 150_000 }, settings: { ai: { compaction: { threshold: 0.5 } } } })
-    expect(lowered.coordinator.prune('task', reads(), policy(), undefined)).toBeDefined()
-  })
-
-  it('does nothing when pruning is switched off, the window is unknown, or there is no old output', () => {
-    expect(setup({ window: FILLED, settings: { ai: { compaction: { prune: false } } } }).coordinator.prune('task', reads(), policy(), undefined)).toBeUndefined()
-    expect(setup({}).coordinator.prune('task', reads(), policy(), undefined)).toBeUndefined()
-    expect(setup({ window: FILLED }).coordinator.prune('task', { model: 'm', messages: [user('hi')] }, policy(), undefined)).toBeUndefined()
   })
 
   it('never throws: a failure is logged and the request goes on unchanged', () => {

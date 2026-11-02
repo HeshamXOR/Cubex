@@ -1,0 +1,6 @@
+{
+  "title": "Change one line of a long file without disturbing the rest",
+  "prompt": "In src/messages.mjs, change the message of the error code E_QUOTA_117 to \"Storage quota exceeded. Free up space or upgrade your plan.\" Every other line of that file has to stay exactly as it is.",
+  "timeoutSec": 240,
+  "stub": {}
+}

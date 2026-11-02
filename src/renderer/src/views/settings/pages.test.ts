@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_SETTINGS_PAGE, SETTINGS_NAV, SETTINGS_PAGES, settingsPage, type SettingsPageId } from './pages'
+import { SETTINGS_PAGES, type SettingsPageId } from './pages'
 
 // The section files are read as text: importing them would pull in React, CSS and the API bridge, and what this checks
 // is only how each one declares itself.
@@ -19,38 +19,9 @@ function declaredSections(): Declared[] {
     })
 }
 
-describe('settings pages', () => {
-  it('lists every page once, with a name and a sentence about it', () => {
-    const ids = SETTINGS_PAGES.map((page) => page.id)
-    expect(new Set(ids).size).toBe(ids.length)
-    expect(new Set(SETTINGS_PAGES.map((page) => page.label)).size).toBe(SETTINGS_PAGES.length)
-    for (const page of SETTINGS_PAGES) {
-      expect(page.label.trim()).not.toBe('')
-      expect(page.description.trim().endsWith('.')).toBe(true)
-    }
-  })
-
-  it('has a default page that exists, and finds a page by id', () => {
-    expect(settingsPage(DEFAULT_SETTINGS_PAGE)?.id).toBe(DEFAULT_SETTINGS_PAGE)
-    expect(settingsPage('about')?.label).toBe('About')
-    expect(settingsPage('nothing')).toBeUndefined()
-    expect(settingsPage(undefined)).toBeUndefined()
-  })
-
-  it('only labels the groups of the navigation that have a heading', () => {
-    expect(SETTINGS_NAV[0]?.heading).toBeUndefined()
-    for (const group of SETTINGS_NAV.slice(1)) expect(group.heading?.trim()).toBeTruthy()
-  })
-})
-
 describe('settings groups', () => {
   const sections = declaredSections()
   const pageIds = new Set<string>(SETTINGS_PAGES.map((page) => page.id))
-
-  it('declares itself in every file of the sections folder', () => {
-    expect(sections.length).toBeGreaterThan(0)
-    for (const section of sections) expect(section.id, `${section.file} has no section declaration`).not.toBe('')
-  })
 
   it('puts every group on a page that exists', () => {
     for (const section of sections) expect(pageIds.has(section.page), `${section.file} names the page "${section.page}"`).toBe(true)

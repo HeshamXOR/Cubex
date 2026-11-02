@@ -76,6 +76,10 @@ export interface AppSettings {
     autoCompact: boolean
     compaction?: CompactionSettings
     budget?: BudgetSettings
+    /** How many tools and how much instruction a model is shown. `auto` picks by model (see main/modelProfiles.ts); the others apply to every model. */
+    harnessProfile?: HarnessProfileSetting
+    /** A second model that reads the diff before a turn that changed files ends (see main/turnReviewer.ts). */
+    reviewer?: ReviewerSettings
   }
   local: {
     modelsDir?: string
@@ -123,6 +127,16 @@ export interface SettingsMeta {
 
 /** Bump when stored settings need a one-time rewrite, and add the step to `migrate` in main/config.ts. */
 export const SETTINGS_SCHEMA_VERSION = 1
+
+/** `lean` shows a model fewer tools and a shorter prompt, which suits small and open models; `full` shows everything. */
+export type HarnessProfileSetting = 'auto' | 'full' | 'lean'
+
+/** The optional reviewer pass. It is billed like any other request, and runs only while `enabled` and a model is chosen. */
+export interface ReviewerSettings {
+  enabled: boolean
+  providerId?: string
+  model?: string
+}
 
 /** Spend caps in US dollars. A missing cap is no cap; the action applies to all of them. */
 export interface BudgetSettings {
@@ -188,7 +202,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
     timeout: { ...DEFAULT_TIMEOUT_CONFIG },
     autoCompact: true,
     // No `auto` here on purpose: an install that only has the older autoCompact key keeps its choice.
-    compaction: { threshold: DEFAULT_COMPACTION_THRESHOLD, prune: true }
+    compaction: { threshold: DEFAULT_COMPACTION_THRESHOLD, prune: true },
+    harnessProfile: 'auto',
+    reviewer: { enabled: false }
   },
   local: {
     preferredRuntime: 'ollama',

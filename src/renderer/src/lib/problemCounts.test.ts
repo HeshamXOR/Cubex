@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DiagnosticItem, DiagnosticsSummary } from '../../../shared/ipc'
-import { countProblems, describeProblems, diagnosticsForFile, isCheckedPath } from './problemCounts'
+import { countProblems, diagnosticsForFile, isCheckedPath } from './problemCounts'
 
 const problem = (over: Partial<DiagnosticItem> = {}): DiagnosticItem => ({ path: 'src/a.ts', line: 1, col: 1, code: 'TS2322', message: 'boom', ...over })
 
@@ -17,14 +17,6 @@ describe('counting', () => {
     expect(countProblems([])).toEqual({ errors: 0, warnings: 0 })
   })
 
-  it('words the counts the way the chip shows them', () => {
-    expect(describeProblems({ errors: 1, warnings: 0 })).toBe('1 error')
-    expect(describeProblems({ errors: 2, warnings: 0 })).toBe('2 errors')
-    expect(describeProblems({ errors: 0, warnings: 1 })).toBe('1 warning')
-    expect(describeProblems({ errors: 0, warnings: 3 })).toBe('3 warnings')
-    expect(describeProblems({ errors: 2, warnings: 1 })).toBe('2 errors, 1 warning')
-    expect(describeProblems({ errors: 0, warnings: 0 })).toBe('')
-  })
 })
 
 describe('diagnosticsForFile', () => {

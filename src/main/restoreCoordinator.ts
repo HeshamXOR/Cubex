@@ -156,6 +156,8 @@ export class RestoreCoordinator {
     try {
       this.repo.update(conversation.id, {
         messages: kept,
+        // The meter's saved snapshot counted the turns that were just removed.
+        lastContext: undefined,
         ...(contextCleared ? { contextStartMessageId: undefined, contextSummary: undefined, contextSummaryAt: undefined } : {})
       })
     } catch (error) {

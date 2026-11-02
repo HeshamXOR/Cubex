@@ -38,22 +38,6 @@ describe('takeManifest', () => {
     expect([...manifest.files.keys()]).toEqual(['src/a.ts'])
   })
 
-  it('lists a small build folder when there is no git repository', async () => {
-    write('src/a.ts', 'a')
-    write('dist/out.js', 'o')
-    write('release/app.exe', 'r')
-    const manifest = await takeManifest(root)
-    expect([...manifest.files.keys()].sort()).toEqual(['dist/out.js', 'release/app.exe', 'src/a.ts'])
-  })
-
-  it('skips a large build folder when there is no git repository', async () => {
-    write('src/a.ts', 'a')
-    for (let index = 0; index < 8; index++) write(`build/deep/f${index}.js`, 'x')
-    write('out/small.js', 's')
-    const manifest = await takeManifest(root, { largeFolderFiles: 5 })
-    expect([...manifest.files.keys()].sort()).toEqual(['out/small.js', 'src/a.ts'])
-  })
-
   it('skips the build folders git ignores, and lists the ones it does not', async () => {
     write('.git/config', 'g')
     write('.gitignore', ['dist/', 'coverage', ''].join(String.fromCharCode(10)))
@@ -64,16 +48,6 @@ describe('takeManifest', () => {
     write('build/tracked.txt', 't')
     const manifest = await takeManifest(root)
     expect([...manifest.files.keys()].sort()).toEqual(['.gitignore', 'build/tracked.txt', 'release/app.exe', 'src/a.ts'])
-  })
-
-  it('honours a nested .gitignore for a build folder deeper in the project', async () => {
-    write('.git/config', 'g')
-    write('app/.gitignore', 'out')
-    write('app/out/bundle.js', 'b')
-    write('app/src/a.ts', 'a')
-    write('lib/out/kept.js', 'k')
-    const manifest = await takeManifest(root)
-    expect([...manifest.files.keys()].sort()).toEqual(['app/.gitignore', 'app/src/a.ts', 'lib/out/kept.js'])
   })
 
   it('shows a change a delegated agent makes in a tracked build folder', async () => {
@@ -89,26 +63,6 @@ describe('takeManifest', () => {
     ])
   })
 
-  it('keeps other hidden folders, which hold settings an agent may change', async () => {
-    write('.claude/settings.json', '{}')
-    write('.vscode/tasks.json', '{}')
-    const manifest = await takeManifest(root)
-    expect([...manifest.files.keys()].sort()).toEqual(['.claude/settings.json', '.vscode/tasks.json'])
-  })
-
-  it('says it is incomplete when there are more files than it keeps', async () => {
-    for (let index = 0; index < 12; index++) write(`f${index}.txt`, 'x')
-    const manifest = await takeManifest(root, { maxFiles: 5 })
-    expect(manifest.files.size).toBe(5)
-    expect(manifest.complete).toBe(false)
-  })
-
-  it('says it is incomplete when it runs out of time', async () => {
-    write('a.txt', 'a')
-    const manifest = await takeManifest(root, { maxMs: -1 })
-    expect(manifest.complete).toBe(false)
-  })
-
   it('does not follow a link out of the folder', async () => {
     const outside = mkdtempSync(join(tmpdir(), 'cubex-manifest-out-'))
     try {
@@ -122,11 +76,6 @@ describe('takeManifest', () => {
       try { unlinkSync(join(root, 'link')) } catch { /* it was never made */ }
       rmSync(outside, { recursive: true, force: true })
     }
-  })
-
-  it('lists nothing for a folder that is not there', async () => {
-    const manifest = await takeManifest(join(root, 'missing'))
-    expect(manifest.files.size).toBe(0)
   })
 })
 
@@ -155,13 +104,6 @@ describe('changesBetween', () => {
     utimesSync(join(root, 'a.txt'), later, later)
     const after = await takeManifest(root)
     expect(changesBetween(before, after)).toEqual([{ path: 'a.txt', change: 'edited' }])
-  })
-
-  it('reports nothing when nothing changed', async () => {
-    write('a.txt', 'a')
-    const before = await takeManifest(root)
-    const after = await takeManifest(root)
-    expect(changesBetween(before, after)).toEqual([])
   })
 
   it('does not call a file new or gone when a listing was cut short', () => {

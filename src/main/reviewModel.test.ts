@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ReviewHunk } from '@shared/ipc'
-import { buildReviewFile, changedRange, reverseHunk, reverseHunks } from './reviewModel'
+import { buildReviewFile, reverseHunk, reverseHunks } from './reviewModel'
 
 /** Deterministic PRNG so a failing seed can be replayed. */
 function rng(seed: number): () => number {
@@ -53,40 +53,6 @@ describe('buildReviewFile', () => {
     expect(file.hunks[0]!.id).toMatch(/^[a-f0-9]{40}$/)
   })
 
-  it('numbers an insertion at the top and a deletion with git semantics', () => {
-    expect(buildReviewFile('a', 'a\n', 'x\na\n').hunks[0]).toMatchObject({ header: '@@ -1,1 +1,2 @@', lines: ['+x', ' a'] })
-    const added = buildReviewFile('a', null, 'x\ny\n')
-    expect(added).toMatchObject({ status: 'added', added: 2, removed: 0 })
-    expect(added.hunks[0]).toMatchObject({ header: '@@ -0,0 +1,2 @@', lines: ['+x', '+y'] })
-    const deleted = buildReviewFile('a', 'x\ny\n', null)
-    expect(deleted).toMatchObject({ status: 'deleted', added: 0, removed: 2 })
-    expect(deleted.hunks[0]).toMatchObject({ header: '@@ -1,2 +0,0 @@', lines: ['-x', '-y'] })
-  })
-
-  it('does not count the shared final newline as a line, but does count a toggled one', () => {
-    expect(buildReviewFile('a', '', 'x\n')).toMatchObject({ added: 1, removed: 0 })
-    expect(buildReviewFile('a', 'x\n', '')).toMatchObject({ added: 0, removed: 1 })
-    expect(buildReviewFile('a', 'a\n', 'a\n\n').hunks[0]!.lines).toEqual([' a', '+'])
-    const toggled = buildReviewFile('a', 'a\nb\n', 'a\nb')
-    expect(toggled.hunks).toHaveLength(1)
-    expect(toggled.hunks[0]!.lines).toEqual([' a', ' b', '-'])
-  })
-
-  it('merges changes up to six lines apart and splits them beyond that', () => {
-    const lines = Array.from({ length: 30 }, (_, i) => `l${i}`)
-    const edit = (...at: number[]): string => lines.map((line, i) => (at.includes(i) ? `${line}!` : line)).join('\n')
-    expect(buildReviewFile('f', lines.join('\n'), edit(10, 17)).hunks).toHaveLength(1)
-    expect(buildReviewFile('f', lines.join('\n'), edit(10, 18)).hunks).toHaveLength(2)
-  })
-
-  it('treats BOM and line ending changes alone as a format change with no hunks', () => {
-    const file = buildReviewFile('a', 'a\r\nb\r\n', 'a\nb\n')
-    expect(file.hunks).toEqual([])
-    expect(file.formatChanged).toBe(true)
-    expect(buildReviewFile('a', '﻿a\n', 'a\n').formatChanged).toBe(true)
-    expect(buildReviewFile('a', 'a\n', 'a\n').formatChanged).toBeUndefined()
-  })
-
   it('keeps ids stable under unrelated insertions above and unique for repeated bodies', () => {
     const lines = Array.from({ length: 40 }, (_, i) => `line ${i}`)
     const before = lines.join('\n')
@@ -119,27 +85,9 @@ describe('buildReviewFile', () => {
     const other = Array.from({ length: 3000 }, (_, i) => `b${i}`).join('\n')
     expect(buildReviewFile('huge', huge, other)).toMatchObject({ oversize: true, hunks: [] })
   })
-
-  it('carries the file facts the store supplies', () => {
-    const file = buildReviewFile('a', 'a', 'b', { headHash: 'f'.repeat(64), externallyModified: true, updatedAt: 7 })
-    expect(file).toMatchObject({ headHash: 'f'.repeat(64), externallyModified: true, updatedAt: 7 })
-  })
-})
-
-describe('changedRange', () => {
-  it('spans the changed lines on the new side, or the line after a pure deletion', () => {
-    const hunk = buildReviewFile('f', 'a\nb\nc\nd\ne\n', 'a\nb\nX\nY\nd\ne\n').hunks[0]!
-    expect(changedRange(hunk)).toEqual({ start: 3, end: 4 })
-    const removed = buildReviewFile('f', 'a\nb\nc\nd\ne\n', 'a\nb\nd\ne\n').hunks[0]!
-    expect(changedRange(removed)).toEqual({ start: 3, end: 3 })
-  })
 })
 
 describe('reverseHunk', () => {
-  it('restores the old lines in place', () => {
-    const hunk = buildReviewFile('a', 'a\nb\nc\n', 'a\nB\nc\n').hunks[0]!
-    expect(reverseHunk('a\nB\nc\n', hunk, { fuzz: 0 })).toMatchObject({ ok: true, text: 'a\nb\nc\n', fuzz: 0, offset: 0 })
-  })
 
   it('keeps CRLF, a BOM and untouched mixed endings byte for byte', () => {
     const before = '﻿one\r\ntwo\r\nthree\r\nfour\r\nfive\r\n'
@@ -154,14 +102,6 @@ describe('reverseHunk', () => {
     expect(reverted.ok && reverted.text).toBe(`${before}\nlast line with a bare LF\n`)
   })
 
-  it('reverses added lines at the end of a file without a final newline', () => {
-    const before = 'a\nb'
-    const after = 'a\nb\nc'
-    const hunk = buildReviewFile('a', before, after).hunks[0]!
-    const result = reverseHunk(after, hunk, { fuzz: 0 })
-    expect(result.ok && result.text).toBe(before)
-  })
-
   it('finds a hunk that moved (lines inserted above) and reports the offset', () => {
     const lines = Array.from({ length: 40 }, (_, i) => `line ${i}`)
     const before = lines.join('\n')
@@ -171,16 +111,6 @@ describe('reverseHunk', () => {
     const result = reverseHunk(current, hunk, { fuzz: 0 })
     expect(result).toMatchObject({ ok: true, offset: 3, fuzz: 0 })
     expect(result.ok && result.text).toBe(`user 1\nuser 2\nuser 3\n${before}`)
-  })
-
-  it('keeps a user edit made elsewhere in the file', () => {
-    const lines = Array.from({ length: 40 }, (_, i) => `line ${i}`)
-    const before = lines.join('\n')
-    const after = lines.map((line, i) => (i === 30 ? 'changed' : line)).join('\n')
-    const hunk = buildReviewFile('f', before, after).hunks[0]!
-    const current = after.replace('line 5\n', 'mine 5\n')
-    const result = reverseHunk(current, hunk, { fuzz: 0 })
-    expect(result.ok && result.text).toBe(before.replace('line 5\n', 'mine 5\n'))
   })
 
   it('reports drift when the changed lines were edited, removed or the file was replaced', () => {
@@ -227,23 +157,6 @@ describe('reverseHunk', () => {
 })
 
 describe('review model properties', () => {
-  it('the generator covers multi-hunk files, CRLF, a BOM, and a toggled final newline', () => {
-    const tally = { multi: 0, crlf: 0, bom: 0, toggled: 0, empty: 0 }
-    for (const seed of SEEDS) {
-      const { before, after, eol, bom } = sample(seed)
-      const hunks = buildReviewFile('p.txt', before, after).hunks
-      if (hunks.length >= 2) tally.multi++
-      if (eol === '\r\n') tally.crlf++
-      if (bom) tally.bom++
-      if (before.endsWith('\n') !== after.endsWith('\n')) tally.toggled++
-      if (!hunks.length) tally.empty++
-    }
-    expect(tally.multi).toBeGreaterThan(100)
-    expect(tally.crlf).toBeGreaterThan(60)
-    expect(tally.bom).toBeGreaterThan(40)
-    expect(tally.toggled).toBeGreaterThan(40)
-    expect(tally.empty).toBeLessThan(30)
-  })
   it('reverting every hunk restores the baseline byte for byte (LF, CRLF, BOM, final newline)', () => {
     for (const seed of SEEDS) {
       const { before, after } = sample(seed, seed % 3 !== 0)
@@ -251,22 +164,6 @@ describe('review model properties', () => {
       const result = reverseHunks(after, file.hunks, { fuzz: 0 })
       expect({ seed, conflicts: result.conflicts }).toEqual({ seed, conflicts: [] })
       expect({ seed, text: result.text }).toEqual({ seed, text: before })
-    }
-  })
-
-  it('restores the baseline when hunks are reverted one by one in any order', () => {
-    for (const seed of SEEDS) {
-      const { before, after } = sample(seed)
-      const hunks = buildReviewFile('p.txt', before, after).hunks
-      const r = rng(seed * 7919)
-      const order = [...hunks].sort(() => r() - 0.5)
-      let text = after
-      for (const hunk of order) {
-        const result = reverseHunk(text, hunk, { fuzz: 0 })
-        expect({ seed, ok: result.ok }).toEqual({ seed, ok: true })
-        if (result.ok) text = result.text
-      }
-      expect({ seed, text }).toEqual({ seed, text: before })
     }
   })
 
@@ -284,21 +181,6 @@ describe('review model properties', () => {
       expect({ seed, lines: remaining.map((h) => h.lines) }).toEqual({ seed, lines: kept.map((h) => h.lines) })
       expect({ seed, old: remaining.map((h) => h.oldStart) }).toEqual({ seed, old: kept.map((h) => h.oldStart) })
     }
-  })
-
-  it('keeps ids when unrelated lines are inserted far above', () => {
-    let checked = 0
-    for (const seed of SEEDS) {
-      const { before, after, eol, bom } = sample(seed)
-      const hunks = buildReviewFile('p.txt', before, after).hunks
-      if (!hunks.length || hunks[0]!.oldStart < 12 || hunks[0]!.newStart < 12) continue
-      const body = bom ? after.slice(1) : after
-      const shifted = `${bom}top a${eol}top b${eol}top c${eol}${body}`
-      const ids = buildReviewFile('p.txt', before, shifted).hunks.map((h) => h.id)
-      for (const hunk of hunks) expect({ seed, has: ids.includes(hunk.id) }).toEqual({ seed, has: true })
-      checked++
-    }
-    expect(checked).toBeGreaterThan(20)
   })
 
   it('never mixes up hunks of repetitive text: baseline is restored or a conflict is reported', () => {

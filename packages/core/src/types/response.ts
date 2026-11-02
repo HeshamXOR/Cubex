@@ -10,11 +10,21 @@ export type StopReason =
   | 'error'
   | 'unknown'
 
+/**
+ * Token counts for one request, in one convention whatever the provider reports: `inputTokens` is the whole prompt
+ * (system, tools and history), the cached counts are subsets of it, and `outputTokens` is everything generated,
+ * thinking included. Anthropic reports the three input kinds apart and the adapter sums them; OpenAI's and Gemini's
+ * prompt counts already include the cached part. A consumer therefore never adds a cached count to
+ * `inputTokens`. The context meter reads `inputTokens` alone: it is what the request put in the window, while
+ * `outputTokens` is not, since thinking is rarely sent back.
+ */
 export interface Usage {
   /** Total input context, including cache reads and cache writes when reported. */
   inputTokens?: number
+  /** Everything generated, `reasoningTokens` included. */
   outputTokens?: number
   totalTokens?: number
+  /** The part of `outputTokens` spent thinking. It counts toward the next request's input only if the history carries it. */
   reasoningTokens?: number
   /** Subset of inputTokens read from the provider's prompt cache. */
   cachedInputTokens?: number
