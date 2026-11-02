@@ -66,6 +66,11 @@ function reportedEfforts(efforts: readonly ReasoningEffort[]): EffortOption[] {
 const REASONING_IDS = [
   /(^|[^a-z])r1([^0-9]|$)/,          // deepseek-r1 and its distills
   /deepseek-(r\d|reasoner)/,
+  /deepseek-(v3(\.[1-9]|-thinking)|v4)/,
+  /claude-(opus|sonnet|fable|3-7-sonnet)/,
+  /gemini-(2\.5|3)/,
+  /grok-(3-mini|[4-9])/,
+  /(cogito|openthinker|olympiccoder|marco-o1|skywork-o1|step-r1|reka-flash-3)/,
   /qwq/,
   /qwen-?3/,                          // Qwen3 reasons by default
   /gpt-oss/,

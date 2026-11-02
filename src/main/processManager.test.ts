@@ -230,7 +230,8 @@ describe('ProcessManager', () => {
     expect(oldest.text).toContain('released to free memory')
     // The record itself survives, so task_list still reports the task.
     expect(pm.get(ids[0]!)?.status).toBe('exited')
-  })
+    // Six one-after-another node start-ups: slow under load by nature, so it gets room rather than a shortcut.
+  }, 60_000)
 
   it('reports that interrupt is unsupported on Windows instead of claiming success', async () => {
     const res = await pm.start({

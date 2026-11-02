@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DEFAULT_RETRY_POLICY } from '@core/types'
-import type { AIProvider, AIStreamEvent } from '@core/types'
+import type { AIProvider, AIRequest, AIStreamEvent, ToolCall } from '@core/types'
 import type { ChatEvent, ChatStartRequest } from '@shared/ipc'
 import type { HookConfig } from '@shared/settings'
 import type { HookOutcome, HookPayload } from './hooks'
@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   workspace: '',
   hooks: [] as HookConfig[],
   runs: [] as HookRun[],
+  /** Every run, SessionStart included; `runs` leaves it out so the tests of other events stay about those. */
+  all: [] as HookRun[],
   verdict: (_payload: HookPayload): HookOutcome => ({ block: false })
 }))
 vi.mock('./paths', () => ({ dataDir: () => mocks.dataRoot }))
@@ -28,7 +30,8 @@ vi.mock('./logger', () => ({ logger: { info: vi.fn(), error: vi.fn(), warn: vi.f
 // The real runner starts shell commands; what matters here is what ChatService hands it and when.
 vi.mock('./hooks', () => ({
   runHooks: async (hooks: HookConfig[] | undefined, payload: HookPayload, cwd?: string): Promise<HookOutcome> => {
-    mocks.runs.push({ hooks, payload, cwd })
+    mocks.all.push({ hooks, payload, cwd })
+    if (payload.event !== 'SessionStart') mocks.runs.push({ hooks, payload, cwd })
     return mocks.verdict(payload)
   }
 }))
@@ -49,6 +52,7 @@ beforeEach(() => {
     { id: 'h2', event: 'Stop', command: 'echo stop', enabled: true }
   ]
   mocks.runs = []
+  mocks.all = []
   mocks.verdict = () => ({ block: false })
   for (const dir of [mocks.dataRoot, mocks.workspace]) mkdirSync(dir)
 })
@@ -61,6 +65,15 @@ afterEach(() => {
 const answering = (text: string): AIProvider => ({
   id: 'p',
   async *streamMessage(): AsyncGenerator<AIStreamEvent> { yield { type: 'text_delta', text } }
+}) as unknown as AIProvider
+
+/** A model that gives each request the next of `replies` (the last one repeats), and keeps what it was asked. */
+const scripted = (replies: string[], seen: AIRequest[]): AIProvider => ({
+  id: 'p',
+  async *streamMessage(request: AIRequest): AsyncGenerator<AIStreamEvent> {
+    seen.push(request)
+    yield { type: 'text_delta', text: replies[Math.min(seen.length - 1, replies.length - 1)]! }
+  }
 }) as unknown as AIProvider
 
 /** A model whose connection breaks as soon as the turn reads from it. */
@@ -100,17 +113,148 @@ describe('UserPromptSubmit and Stop hooks', () => {
     expect(mocks.runs[0]?.payload.prompt).toHaveLength(2000)
   })
 
-  it('does not let a block answer from the prompt or stop hook change the turn', async () => {
-    mocks.verdict = () => ({ block: true, reason: 'not today' })
-    const events = await turn(answering('Done.'), 'hello')
+  it('stops the turn before any request when the prompt hook blocks, and shows the reason as the error', async () => {
+    mocks.verdict = (payload) => payload.event === 'UserPromptSubmit' ? { block: true, reason: 'not today' } : { block: false }
+    const seen: AIRequest[] = []
+    const events = await turn(scripted(['never sent'], seen), 'hello')
+    expect(ended(events, 'error')).toBe(true)
+    expect(ended(events, 'completed')).toBe(false)
+    const error = events.flatMap((e) => (e.kind === 'stream' && e.event.type === 'error' ? [e.event.error] : []))[0]
+    expect(error?.message).toContain('not today')
+    expect(seen).toHaveLength(0)
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    expect(ran()).toEqual(['UserPromptSubmit'])
+  })
+
+  it('adds the context a prompt hook prints to the message the model gets', async () => {
+    mocks.verdict = (payload) => payload.event === 'UserPromptSubmit' ? { block: false, additionalContext: 'Branch policy: never touch main.' } : { block: false }
+    const seen: AIRequest[] = []
+    await turn(scripted(['ok'], seen), 'hello')
+    const last = seen[0]!.messages.at(-1)!
+    expect(JSON.stringify(last.content)).toContain('hello')
+    expect(JSON.stringify(last.content)).toContain('Branch policy: never touch main.')
+  })
+
+  it('runs the stop hook once for a turn that ends normally', async () => {
+    await turn(answering('Done.'), 'hello')
+    // The end of the turn must not run it a second time after the reply already did.
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    expect(ran()).toEqual(['UserPromptSubmit', 'Stop'])
+    expect(mocks.runs[1]?.payload.stop_hook_active).toBe(false)
+  })
+
+  it('lets a stop hook that blocks send the agent back to work, with its message', async () => {
+    let asked = 0
+    mocks.verdict = (payload) => payload.event === 'Stop' && asked++ === 0 ? { block: true, reason: 'The tests are not green yet.' } : { block: false }
+    const seen: AIRequest[] = []
+    const events = await turn(scripted(['First answer.', 'Second answer.'], seen), 'hello')
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    // A second request, which carries the first answer and the hook's message, and one end of the turn, after it.
+    expect(seen).toHaveLength(2)
+    const second = JSON.stringify(seen[1]!.messages)
+    expect(second).toContain('First answer.')
+    expect(second).toContain('A Stop hook asked you to keep working before you finish.')
+    expect(second).toContain('The tests are not green yet.')
+    expect(events.filter((e) => e.kind === 'stream' && e.event.type === 'completed')).toHaveLength(1)
+    const card = events.find((e) => e.kind === 'tool' && e.tool.name === 'stop_hook')
+    expect(card).toMatchObject({ tool: { phase: 'done', title: 'Stop hook asked for more work', detail: 'The tests are not green yet.' } })
+    // The hook is told when it is being asked a second time, and is not run again after the turn ends.
+    expect(mocks.runs.filter((run) => run.payload.event === 'Stop').map((run) => run.payload.stop_hook_active)).toEqual([false, true])
+  })
+
+  it('ends the turn after three requests for more work, and says so', async () => {
+    mocks.verdict = (payload) => payload.event === 'Stop' ? { block: true, reason: 'again' } : { block: false }
+    const seen: AIRequest[] = []
+    const events = await turn(scripted(['a'], seen), 'hello')
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    expect(seen).toHaveLength(4)
+    expect(mocks.runs.filter((run) => run.payload.event === 'Stop')).toHaveLength(4)
+    const text = events.flatMap((e) => (e.kind === 'stream' && e.event.type === 'text_delta' ? [e.event.text] : [])).join('')
+    expect(text).toContain('A Stop hook asked for more work 3 times')
     expect(ended(events, 'completed')).toBe(true)
-    expect(ended(events, 'error')).toBe(false)
-    await vi.waitFor(() => expect(ran()).toEqual(['UserPromptSubmit', 'Stop']))
+  })
+
+  it('uses a default message when the hook gives no reason', async () => {
+    let asked = 0
+    mocks.verdict = (payload) => payload.event === 'Stop' && asked++ === 0 ? { block: true } : { block: false }
+    const seen: AIRequest[] = []
+    await turn(scripted(['One.', 'Two.'], seen), 'hello')
+    expect(JSON.stringify(seen[1]!.messages)).toContain('A Stop hook asked you to keep working.')
   })
 
   it('still runs the stop hook when the model fails', async () => {
     const events = await turn(unreachable(), 'hello')
     expect(ended(events, 'error')).toBe(true)
     await vi.waitFor(() => expect(ran()).toEqual(['UserPromptSubmit', 'Stop']))
+  })
+})
+
+/** A service whose permission prompts are answered with "allow", over the scripted model. */
+async function run(steps: Array<ToolCall[] | string>, options: { mode?: ChatStartRequest['permissionMode']; turns?: number } = {}): Promise<{ events: ChatEvent[]; seen: AIRequest[] }> {
+  const events: ChatEvent[] = []
+  const seen: AIRequest[] = []
+  let requests = 0
+  const provider = {
+    id: 'p',
+    async *streamMessage(request: AIRequest): AsyncGenerator<AIStreamEvent> {
+      seen.push(request)
+      const step = steps[Math.min(requests++, steps.length - 1)]!
+      if (typeof step === 'string') yield { type: 'text_delta', text: step }
+      else for (const toolCall of step) yield { type: 'tool_call', toolCall }
+    }
+  } as unknown as AIProvider
+  const service: ChatService = new ChatService({ resolve: () => provider, getModelInfo: () => undefined } as unknown as ProviderManager, (event) => {
+    events.push(event)
+    if (event.kind === 'permission') queueMicrotask(() => service.resolvePermission(event.ask.id, 'allow'))
+  })
+  services.push(service)
+  for (let n = 1; n <= (options.turns ?? 1); n++) {
+    const from = events.length
+    await service.start({
+      streamId: `s${n}`, conversationId: 'c1', messageId: `u${n}`, userText: 'go', fileToolsEnabled: true,
+      permissionMode: options.mode ?? 'default', policy
+    })
+    await vi.waitFor(() => expect(events.slice(from).some((e) => e.kind === 'stream' && (e.event.type === 'completed' || e.event.type === 'error'))).toBe(true), { timeout: 8000 })
+  }
+  return { events, seen }
+}
+const write = (id: string, path: string, content = 'x'): ToolCall => ({ id, name: 'write_file', input: { path, content } })
+
+describe('hooks v2', () => {
+  it('runs SessionStart on the first turn of a conversation only', async () => {
+    await run(['one'], { turns: 2 })
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    expect(mocks.all.filter((r) => r.payload.event === 'SessionStart')).toHaveLength(1)
+    expect(mocks.all[0]?.payload).toMatchObject({ event: 'SessionStart', session_id: 'c1', cwd: mocks.workspace })
+  })
+
+  it('runs the tool with the input a PreToolUse hook printed, through the permission gate again', async () => {
+    mocks.verdict = (payload) => payload.event === 'PreToolUse' && (payload.tool_input as { path?: string }).path === 'a.txt'
+      ? { block: false, updatedInput: { path: 'b.txt', content: 'rewritten' } } : { block: false }
+    const { events } = await run([[write('w1', 'a.txt', 'original')], 'done'])
+    expect(existsSync(join(mocks.workspace, 'a.txt'))).toBe(false)
+    expect(readFileSync(join(mocks.workspace, 'b.txt'), 'utf8')).toBe('rewritten')
+    // Asked for the call as the model made it and again for the call as it runs.
+    const asks = events.flatMap((e) => (e.kind === 'permission' ? [e.ask] : []))
+    expect(asks).toHaveLength(2)
+    expect(asks[1]!.title).toContain('b.txt')
+    const card = events.filter((e) => e.kind === 'tool' && e.tool.id === 'w1').at(-1)
+    expect(card).toMatchObject({ tool: { phase: 'done', title: expect.stringContaining('b.txt') } })
+    // The hooks after it see the input that ran, and PreToolUse is not asked twice.
+    expect(mocks.all.filter((r) => r.payload.event === 'PreToolUse')).toHaveLength(1)
+    expect(mocks.all.find((r) => r.payload.event === 'PostToolUse')?.payload.tool_input).toMatchObject({ path: 'b.txt' })
+  })
+
+  it('still validates and gates the replaced input: a protected path is refused', async () => {
+    mocks.verdict = (payload) => payload.event === 'PreToolUse' ? { block: false, updatedInput: { path: '../outside.txt', content: 'x' } } : { block: false }
+    const { events } = await run([[write('w1', 'a.txt')], 'done'], { mode: 'bypass' })
+    expect(existsSync(join(mocks.workspace, '..', 'outside.txt'))).toBe(false)
+    expect(events.filter((e) => e.kind === 'tool' && e.tool.id === 'w1').at(-1)).toMatchObject({ tool: { phase: 'error' } })
+  })
+
+  it('tells Notification hooks when a permission prompt starts waiting', async () => {
+    await run([[write('w1', 'a.txt')], 'done'])
+    await vi.waitFor(() => expect(mocks.all.some((r) => r.payload.event === 'Notification')).toBe(true))
+    expect(mocks.all.find((r) => r.payload.event === 'Notification')?.payload).toMatchObject({ notification_type: 'permission', session_id: 'c1' })
   })
 })

@@ -4,6 +4,8 @@ import { useStore, type LiveMessage } from '../../state/store'
 import { useRestore } from '../../state/restore'
 import { useBusy } from '../../lib/useBusy'
 import { useSkillInvocation } from '../../lib/useSkillCatalog'
+import { parseGoalMessage } from '../../../../shared/goal'
+import { GoalCheckRow } from './GoalCheckRow'
 import { RestoreMenu } from './RestoreMenu'
 import './skillchip.css'
 
@@ -59,6 +61,8 @@ export const UserRow = memo(function UserRow({ message: m, outside }: UserRowPro
   const editUserMessage = useStore((s) => s.editUserMessage)
   const [editing, setEditing] = useState(false)
   const [editText, setEditText] = useState('')
+  // A message Cubex sent to keep a goal going is a divider with the reason, not something you wrote.
+  const goalMessage = parseGoalMessage(m.text)
 
   const startEdit = (): void => {
     setEditText(m.text)
@@ -73,6 +77,8 @@ export const UserRow = memo(function UserRow({ message: m, outside }: UserRowPro
     cancelEdit()
     if (next) void editUserMessage(m.id, next)
   }
+
+  if (goalMessage) return <GoalCheckRow message={goalMessage} />
 
   return (
     <div className={`u${outside ? ' is-outside' : ''}`} data-message="user">

@@ -131,7 +131,7 @@ function Panel({ report, period, setPeriod, nameOfProvider, onSettings, onClose,
 }
 
 /** "Spend today" in the sidebar footer. It opens the breakdown of what was spent, and against which budget. */
-export function UsageButton(): JSX.Element | null {
+export function UsageButton({ variant = 'row' }: { variant?: 'row' | 'strip' } = {}): JSX.Element | null {
   const id = useId()
   const trigger = useRef<HTMLButtonElement>(null)
   const panel = useRef<HTMLDivElement>(null)
@@ -212,7 +212,7 @@ export function UsageButton(): JSX.Element | null {
       <button
         ref={trigger}
         type="button"
-        className={`usage-btn ${open ? 'is-open' : ''}`}
+        className={`usage-btn ${variant === 'strip' ? 'usage-btn--strip' : ''} ${open ? 'is-open' : ''}`}
         data-budget={worst}
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -220,7 +220,7 @@ export function UsageButton(): JSX.Element | null {
         title="Spend by provider and model, and your budget"
         onClick={() => (open ? close() : setOpen(true))}
       >
-        <span>Spend today</span>
+        <span>{variant === 'strip' ? 'Today' : 'Spend today'}</span>
         <b>{worst !== 'ok' && <TriangleAlert size={12} aria-hidden="true" />}{formatUsd(report.today.costUsd)}</b>
         {worst !== 'ok' && <span className="sr-only">{worst === 'over' ? ', over a budget cap' : ', near a budget cap'}</span>}
       </button>

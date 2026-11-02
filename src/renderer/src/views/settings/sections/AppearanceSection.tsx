@@ -20,7 +20,7 @@ function AppearanceSettings(): JSX.Element | null {
   return (
     <>
       <SelectRow label="Theme" value={settings.general.theme} options={[['dark', 'Dark'], ['light', 'Light'], ['system', 'System']]} onChange={(v) => patch('general', { theme: v as AppSettings['general']['theme'] })} />
-      <RowShell label="Accent color" hint="Used for focus, selection and progress">
+      <RowShell label="Accent color" hint="Used to highlight selected text">
         <div className="row swatches">
           {ACCENTS.map((accent) => {
             const selected = settings.appearance.accent.toLowerCase() === accent.value

@@ -344,7 +344,9 @@ describe('automatic compaction', () => {
     expect(compactedEvents(h.events)).toHaveLength(1)
     const last = h.streams[1]!
     // History was replaced by the summary and the last two turns; this turn's user message, call and result survive.
-    expect(textOf(last)[0]).toBe(formatSummaryMessage(SUMMARY))
+    // The summary ends with a note on the todo list the agent had written by then.
+    expect(textOf(last)[0]).toContain(SUMMARY)
+    expect(textOf(last)[0]).toContain('Todo list:')
     expect(last.messages.map((item) => item.role)).toEqual(['user', 'user', 'assistant', 'user', 'assistant', 'user', 'assistant', 'tool'])
     expect(textOf(last)[5]).toBe('Inspect this task')
     expect(last.messages[6]!.content.some((part) => part.type === 'tool_use')).toBe(true)

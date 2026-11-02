@@ -1,6 +1,6 @@
 import type { StoredMessage, ToolActivity, ToolFileActivity } from './ipc'
 import { sanitizeDiagnosticsSummary } from './diagnosticsSummary'
-import { sanitizePeerActivity } from './peers'
+import { sanitizeDelegateActivity, sanitizePeerActivity } from './peers'
 
 export type MessageTranscriptBlock =
   | { type: 'text'; text: string; textStart?: number; textEnd?: number }
@@ -125,6 +125,8 @@ function sanitizeTool(value: unknown, legacy = false): ToolActivity | undefined 
   if (diagnostics) tool.diagnostics = diagnostics
   const peer = sanitizePeerActivity(value.peer)
   if (peer) tool.peer = peer
+  const delegate = sanitizeDelegateActivity(value.delegate)
+  if (delegate) tool.delegate = delegate
   if (value.interrupted === true) tool.interrupted = true
   if (!phase) {
     tool.interrupted = true

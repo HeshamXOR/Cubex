@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent } from 'react'
+import { useEffect, useRef, useState, type ReactNode, type ChangeEvent, type ClipboardEvent, type DragEvent } from 'react'
 import {
   ArrowUp,
   Check,
@@ -13,11 +13,11 @@ import {
   MessagesSquare,
   Paperclip,
   Plus,
+  Search,
   Shield,
   ShieldOff,
   Square,
   SquarePen,
-  Target,
   Wrench,
   X
 } from 'lucide-react'
@@ -41,10 +41,12 @@ import { activitySpecFor } from '../../status/StatusIndicator'
 import { slashQuery } from '../../lib/slashCommands'
 import { useSkillCatalog } from '../../lib/useSkillCatalog'
 import { useSkills } from '../../state/skills'
+import { useCommandNotice } from '../../state/commandNotice'
 import { ProviderModelChoices } from './ProviderModelChoices'
 import { SlashMenu, useSlashMenu } from './SlashMenu'
 import { EffortSlider } from './EffortSlider'
 import { QueueStack } from './QueueStack'
+import { GoalBar } from './GoalBar'
 
 const IMAGE_ATTACHMENT_ACCEPT = 'image/png,image/jpeg,image/webp,image/gif'
 /** The model popover also holds a slider, so only the model buttons take the arrow keys. */
@@ -71,10 +73,12 @@ export const PERM_MODES: Record<PermissionMode, { label: string; icon: typeof Sh
 interface ComposerProps {
   modelOpen: boolean
   setModelOpen: (open: boolean) => void
+  /** A request that waits for the person (approval, question, plan). It docks as the top section of the box. */
+  ask?: ReactNode
 }
 
 /** The dock's input: text, attachments, the slash and @ pickers, and the model, permission and context controls. */
-export function Composer({ modelOpen, setModelOpen }: ComposerProps): JSX.Element {
+export function Composer({ modelOpen, setModelOpen, ask }: ComposerProps): JSX.Element {
   const status = useStore((s) => s.status)
   const providers = useStore((s) => s.providers)
   const settings = useStore((s) => s.settings)
@@ -102,8 +106,6 @@ export function Composer({ modelOpen, setModelOpen }: ComposerProps): JSX.Elemen
   const clearAttachments = useStore((s) => s.clearAttachments)
   const setView = useStore((s) => s.setView)
   const sessionSystem = useStore((s) => s.sessionSystem)
-  const sessionGoal = useStore((s) => s.sessionGoal)
-  const setGoal = useStore((s) => s.setGoal)
   const contextUsage = useStore((s) => s.contextUsage)
   const lastUsage = useStore((s) => s.debug.usage)
   const text = useStore((s) => s.composerText)
@@ -119,10 +121,11 @@ export function Composer({ modelOpen, setModelOpen }: ComposerProps): JSX.Elemen
   const restoring = useRestore((s) => s.restoring)
 
   const availableProviders = providers.filter((provider) => selectableProvider(provider, settings))
+  const totalModels = availableProviders.reduce((sum, p) => sum + (models[p.id]?.length ?? (p.defaultModel ? 1 : 0)), 0)
   // Other agents the model may ask: those that are on in Settings, and the ones this chat turned on among them.
   const agentList = (settings?.peers?.list ?? []).filter((entry) => entry.enabled)
   const programsOff = !!settings?.privacy.localOnly
-  const agentsOn = agentList.filter((entry) => chatPeers.includes(entry.id) && !(programsOff && entry.kind === 'cli'))
+  const agentsOn = agentList.filter((entry) => chatPeers.includes(entry.id) && !(programsOff && entry.kind !== 'model'))
   const agentsLabel = agentsOn.length === 1 ? agentsOn[0]!.name : agentsOn.length === 2 ? `${agentsOn[0]!.name}, ${agentsOn[1]!.name}` : `${agentsOn.length} agents`
   const activeModelInfo = activeProviderId ? models[activeProviderId]?.find((m) => m.id === activeModel) : undefined
   const activeKind = providers.find((p) => p.id === activeProviderId)?.kind
@@ -153,6 +156,8 @@ export function Composer({ modelOpen, setModelOpen }: ComposerProps): JSX.Elemen
   const plusMenu = useMenuKeys(plusOpen, () => setPlusOpen(false))
   const permMenu = useMenuKeys(permOpen, () => setPermOpen(false))
   const modelMenu = useMenuKeys(modelOpen, () => setModelOpen(false), MODEL_ENTRIES)
+  const [modelQuery, setModelQuery] = useState('')
+  useEffect(() => { if (!modelOpen) setModelQuery('') }, [modelOpen])
 
   useEffect(() => {
     setAttachmentErrors([])
@@ -314,6 +319,9 @@ export function Composer({ modelOpen, setModelOpen }: ComposerProps): JSX.Elemen
   // A skill that could not be applied is explained until the message changes.
   const skillFailure = useSkills((s) => (conversationId ? s.failures[conversationId] : undefined))
   useEffect(() => { if (conversationId) useSkills.getState().clearFailure(conversationId) }, [text, conversationId])
+  // A command that could not do what it was asked is explained the same way, in a new session too.
+  const commandNotice = useCommandNotice((s) => s.notices[conversationId ?? ''])
+  useEffect(() => { useCommandNotice.getState().clear(conversationId) }, [text, conversationId])
   const history = usePromptHistory(workspace, conversationId, text, setText)
 
   // While a turn runs, a summary is written or a request is starting, Enter queues the message for when that is done.
@@ -364,13 +372,7 @@ export function Composer({ modelOpen, setModelOpen }: ComposerProps): JSX.Elemen
         </div>
       )}
 
-      {sessionGoal && (
-        <div className="banner banner--goal">
-          <Target size={13} />
-          <span className="banner__text"><b>Goal</b> {sessionGoal}</span>
-          <button className="banner__x" onClick={() => setGoal(undefined)} aria-label="Clear goal" title="Clear goal"><X size={13} /></button>
-        </div>
-      )}
+      <GoalBar />
       {sessionSystem && (
         <div className="banner" title={sessionSystem}>
           <Wrench size={13} />
@@ -393,6 +395,12 @@ export function Composer({ modelOpen, setModelOpen }: ComposerProps): JSX.Elemen
           <button className="callout__icon" onClick={() => useSkills.getState().clearFailure(conversationId)} aria-label="Dismiss this message" title="Dismiss"><X size={14} aria-hidden="true" /></button>
         </div>
       )}
+      {commandNotice && (
+        <div className="callout callout--error composer__failure" role="alert">
+          <div className="callout__body">{commandNotice}</div>
+          <button className="callout__icon" onClick={() => useCommandNotice.getState().clear(conversationId)} aria-label="Dismiss this message" title="Dismiss"><X size={14} aria-hidden="true" /></button>
+        </div>
+      )}
       <input ref={imgInputRef} type="file" accept={IMAGE_ATTACHMENT_ACCEPT} multiple hidden onChange={(e) => { void onFiles(e.target.files, true); e.target.value = '' }} />
       <input ref={fileInputRef} type="file" accept={TEXT_ATTACHMENT_ACCEPT} multiple hidden onChange={(e) => { void onFiles(e.target.files); e.target.value = '' }} />
 
@@ -408,6 +416,7 @@ export function Composer({ modelOpen, setModelOpen }: ComposerProps): JSX.Elemen
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
       >
+        {ask && <div className="cbox__ask">{ask}</div>}
         {attachments.length > 0 && (
           <div className="attachrow">
             {attachments.map((attachment, index) => (
@@ -506,14 +515,14 @@ export function Composer({ modelOpen, setModelOpen }: ComposerProps): JSX.Elemen
                       </span>
                     </button>
                   ) : agentList.map((entry) => {
-                    const blocked = programsOff && entry.kind === 'cli'
+                    const blocked = programsOff && entry.kind !== 'model'
                     const on = chatPeers.includes(entry.id) && !blocked
                     return (
                       <button key={entry.id} className="menu__item menu__item--toggle" role="menuitemcheckbox" aria-checked={on} aria-disabled={blocked || undefined} onClick={() => { if (!blocked) togglePeer(entry.id) }}>
                         <MessagesSquare size={15} />
                         <span>
                           <span className="menu__t">{entry.name}</span>
-                          <span className="menu__s">{blocked ? 'Off in local-only mode' : entry.kind === 'cli' ? 'Program on this computer' : 'Model'}</span>
+                          <span className="menu__s">{blocked ? 'Off in local-only mode' : entry.kind === 'model' ? 'Model' : entry.kind === 'acp' && entry.canDelegate === true ? 'Takes on tasks in this project' : 'Program on this computer'}</span>
                         </span>
                         <span className={`switchdot ${on ? 'on' : ''}`} />
                       </button>
@@ -612,6 +621,36 @@ export function Composer({ modelOpen, setModelOpen }: ComposerProps): JSX.Elemen
                       <div className="menu__sep" />
                     </div>
                   )}
+                  {totalModels > 8 && (
+                    <div className="menu__search-wrap">
+                      <Search size={13} aria-hidden="true" />
+                      <input
+                        type="search"
+                        className="menu__search"
+                        placeholder="Filter models"
+                        aria-label="Filter models"
+                        value={modelQuery}
+                        onChange={(e) => setModelQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape' && modelQuery) {
+                            e.stopPropagation()
+                            setModelQuery('')
+                          }
+                        }}
+                      />
+                      {modelQuery && (
+                        <button
+                          type="button"
+                          className="menu__search-clear"
+                          onClick={() => setModelQuery('')}
+                          aria-label="Clear filter"
+                          title="Clear filter"
+                        >
+                          <X size={13} aria-hidden="true" />
+                        </button>
+                      )}
+                    </div>
+                  )}
                   <div className="menu__scroll">
                     {availableProviders.length === 0 && (
                       <>
@@ -621,7 +660,14 @@ export function Composer({ modelOpen, setModelOpen }: ComposerProps): JSX.Elemen
                         </button>
                       </>
                     )}
-                    {availableProviders.map((provider) => <ProviderModelChoices key={provider.id} provider={provider} onSelect={() => setModelOpen(false)} />)}
+                    {availableProviders.map((provider) => (
+                      <ProviderModelChoices
+                        key={provider.id}
+                        provider={provider}
+                        query={modelQuery}
+                        onSelect={() => setModelOpen(false)}
+                      />
+                    ))}
                   </div>
                 </div>
               </>

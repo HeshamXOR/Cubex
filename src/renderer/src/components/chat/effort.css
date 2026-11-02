@@ -1,188 +1,397 @@
 /* ============================================================================
-   Cubex, Atelier: reasoning effort as a slider. Brand blue for every stop but
-   the last; the last is amber and keeps moving, because it is the one that
-   costs. Colors in between would only be a muddy blend, so there are none.
+   Cubex, Atelier: reasoning effort as a thick tactile capsule slider.
+   Normal stops use the neutral-inverse monochrome palette inside a deep well
+   capsule. Pushing to Max ignites a shining constellation of Cubex compass
+   stars inside the thick bar ("Ultracode"-style, in Cubex starlight).
    ============================================================================ */
 
 .eslider {
   --eff-t: 0;
-  --eff-hue: var(--color-brand);
-  --eff-heat: var(--color-warning);
-  /* Light can be brighter than the text amber: it is only ever light, never read. */
-  --eff-glow: var(--color-warning);
+  --eff-thumb-bg: var(--action-bg);
+  --eff-thumb-fg: var(--action-fg);
+  --eff-star: #f2c97d;
+  --eff-star-bright: #fff9eb;
+  --eff-star-text: var(--color-warning);
   --eff-surface: var(--color-menu);
   position: relative;
   isolation: isolate;
-  padding: 9px 10px 4px;
+  padding: 8px 10px 6px;
   border-radius: 10px;
 }
-.eslider.is-max { --eff-hue: var(--color-warning); }
+:root[data-theme='light'] .eslider {
+  --eff-star: #d48806;
+  --eff-star-bright: #ffffff;
+  --eff-star-text: color-mix(in srgb, var(--color-warning) 75%, var(--color-foreground));
+}
+.eslider.is-max {
+  --eff-thumb-bg: #fff5dc;
+  --eff-thumb-fg: #1b1406;
+}
+:root[data-theme='light'] .eslider.is-max {
+  --eff-thumb-bg: #1c1608;
+  --eff-thumb-fg: #ffd666;
+}
 
-.eslider__head { display: flex; align-items: center; gap: 10px; min-height: 16px; }
-.eslider__label { flex: 1; min-width: 0; font-size: 12px; color: var(--color-foreground-subtlest); }
+.eslider__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 20px;
+}
+.eslider__label {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-foreground-subtle);
+}
 .eslider__value {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   flex: none;
-  font: 600 12.5px/1 var(--display);
-  color: var(--eff-hue);
-  font-variant-numeric: tabular-nums;
-  transition: color 0.2s;
-}
-.eslider__flame { flex: none; transform-origin: 50% 90%; }
-
-.eslider__track { position: relative; height: 22px; margin-top: 7px; }
-/* The rail. */
-.eslider__track::before {
-  content: '';
-  position: absolute;
-  top: 9px;
-  left: 0;
-  right: 0;
-  height: 4px;
+  height: 20px;
+  padding: 0 8px;
   border-radius: 999px;
-  background: var(--color-surface-hover);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  font: 600 11.5px/1 var(--display);
+  color: var(--color-foreground);
+  font-variant-numeric: tabular-nums;
+  transition: color 0.18s ease, background 0.18s ease, border-color 0.18s ease, transform 0.2s ease;
+}
+.eslider.is-max .eslider__value {
+  color: var(--eff-star-text);
+  background: var(--color-warning-surface);
+  border-color: var(--color-warning-border);
+  animation: eff-badge-pop 0.36s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes eff-badge-pop {
+  0% { transform: scale(0.88); }
+  60% { transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+.eslider__star {
+  flex: none;
+  display: block;
+  transform-origin: 50% 50%;
+}
+.eslider.is-max .eslider__star {
+  animation: eff-cubex-star 1.8s cubic-bezier(0.6, -0.28, 0.25, 1.3) infinite;
+}
+
+/* ---------- Thick tactile capsule track ---------- */
+
+.eslider__track {
+  position: relative;
+  height: 28px;
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+}
+.eslider__rail {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--well);
+  border: 1px solid var(--color-input-border);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  transition: border-color 0.2s ease, box-shadow 0.25s ease;
+}
+:root[data-theme='light'] .eslider__rail {
+  box-shadow: inset 0 1px 2px rgba(20, 20, 40, 0.08);
+}
+.eslider:has(.eslider__input:hover) .eslider__rail {
+  border-color: var(--color-input-border-hover);
 }
 .eslider__fill {
   position: absolute;
-  top: 9px;
-  left: 0;
-  width: calc(var(--eff-t) * 100%);
-  height: 4px;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc(22px + var(--eff-t) * (100% - 26px));
   border-radius: 999px;
-  background: var(--eff-hue);
-  transition: width 0.16s ease, background 0.2s;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--action-bg) 18%, var(--color-surface-hover)) 0%,
+    color-mix(in srgb, var(--action-bg) 34%, var(--color-surface-hover)) 100%
+  );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+  transition: width 0.24s cubic-bezier(0.22, 1, 0.36, 1), background 0.25s ease, box-shadow 0.25s ease;
+}
+:root[data-theme='light'] .eslider__fill {
+  background: linear-gradient(
+    90deg,
+    rgba(20, 20, 30, 0.1) 0%,
+    rgba(20, 20, 30, 0.2) 100%
+  );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 
-/* Stops, so the scale reads as discrete even though it slides. */
-.eslider__ticks { position: absolute; top: 9px; left: 0; right: 0; height: 4px; display: flex; justify-content: space-between; }
-.eslider__tick { width: 2px; height: 4px; border-radius: 1px; background: var(--color-backdrop); opacity: 0.55; }
-.eslider__tick:first-child,
-.eslider__tick:last-child { opacity: 0; }
+/* Discrete detent dots inside the thick capsule */
+.eslider__ticks {
+  position: absolute;
+  inset: 0 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  pointer-events: none;
+  z-index: 1;
+}
+.eslider__tick {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--color-foreground-faint);
+  opacity: 0.7;
+  transition: background 0.18s ease, opacity 0.18s ease, transform 0.18s ease;
+}
+.eslider__tick.is-passed {
+  background: var(--color-foreground);
+  opacity: 0.45;
+}
+.eslider__tick.is-current {
+  opacity: 0;
+}
+.eslider.is-max .eslider__tick {
+  opacity: 0;
+}
 
-/* A real range input, made invisible: it keeps the keyboard and pointer behavior. */
+/* ---------- Interior Floating Cubex Star Constellation (ignites at Max) ---------- */
+
+.eslider__stars {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.26s ease;
+}
+.eslider.is-max .eslider__stars {
+  opacity: 1;
+}
+.eslider__inner-star {
+  position: absolute;
+  top: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--eff-star-bright);
+  filter: drop-shadow(0 0 4px rgba(255, 226, 150, 0.9));
+  transform-origin: 50% 50%;
+  transform: translate3d(-50%, calc(-50% + var(--star-y, 0px)), 0);
+}
+.eslider.is-max .eslider__inner-star {
+  animation: eff-inner-star-float var(--star-dur, 2.5s) ease-in-out infinite;
+  animation-delay: var(--star-delay, 0s);
+}
+@keyframes eff-inner-star-float {
+  0%, 100% {
+    opacity: 0.52;
+    transform: translate3d(-50%, calc(-50% + var(--star-y, 0px)), 0) rotate(0deg) scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: translate3d(
+        calc(-50% + var(--star-dx, 4px)),
+        calc(-50% + var(--star-y, 0px) + var(--star-dy, -3px)),
+        0
+      )
+      rotate(90deg)
+      scale(1.18);
+  }
+}
+
+/* ---------- Chunky dial thumb with Cubex compass star ---------- */
+
+.eslider__thumb {
+  position: absolute;
+  top: 3px;
+  left: calc(13px + var(--eff-t) * (100% - 26px));
+  width: 22px;
+  height: 22px;
+  margin-left: -11px;
+  border-radius: 50%;
+  background: var(--eff-thumb-bg);
+  color: var(--eff-thumb-fg);
+  border: 1.5px solid rgba(0, 0, 0, 0.28);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  z-index: 2;
+  transition:
+    left 0.24s cubic-bezier(0.22, 1, 0.36, 1),
+    background 0.2s ease,
+    color 0.2s ease,
+    transform 0.15s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.2s ease;
+}
+:root[data-theme='light'] .eslider__thumb {
+  border-color: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 2px 6px rgba(20, 20, 40, 0.24);
+}
+.eslider__thumb-star {
+  display: block;
+  transform-origin: 50% 50%;
+  transform: rotate(calc(var(--eff-t) * 90deg));
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.eslider:has(.eslider__input:hover) .eslider__thumb {
+  transform: scale(1.06);
+}
+.eslider:has(.eslider__input:active) .eslider__thumb {
+  transform: scale(0.97);
+}
+.eslider:has(.eslider__input:focus-visible) .eslider__thumb {
+  box-shadow: 0 0 0 2px var(--eff-surface), 0 0 0 3.5px var(--focus-ring);
+}
+
+/* Invisible native range input keeps full keyboard, click, and drag accessibility. */
 .eslider__input {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   margin: 0;
-  background: none;
-  appearance: none;
-  -webkit-appearance: none;
-}
-.eslider__input::-webkit-slider-thumb {
-  appearance: none;
-  -webkit-appearance: none;
-  width: 14px;
-  height: 14px;
-  border: 0;
-  border-radius: 50%;
-  background: var(--eff-hue);
-  box-shadow: 0 0 0 3px var(--eff-surface), 0 1px 3px rgba(0, 0, 0, 0.5);
+  opacity: 0;
   cursor: default;
-  transition: background 0.2s, transform 0.12s;
+  z-index: 3;
 }
-.eslider__input:hover::-webkit-slider-thumb { transform: scale(1.1); }
-.eslider__input:active::-webkit-slider-thumb { transform: scale(1.04); }
 .eslider__input:focus,
-.eslider__input:focus-visible { outline: none; }
-.eslider__input:focus-visible::-webkit-slider-thumb {
-  box-shadow: 0 0 0 3px var(--eff-surface), 0 0 0 5px var(--focus-ring);
+.eslider__input:focus-visible {
+  outline: none !important;
 }
 
-.eslider__hint { margin-top: 7px; font-size: 11.5px; line-height: 1.5; color: var(--color-foreground-subtlest); }
-.eslider__cost { margin-top: 2px; font-size: 11.5px; line-height: 1.5; font-weight: 500; color: var(--eff-heat); }
-:root[data-theme='light'] .eslider { --eff-heat: color-mix(in srgb, var(--color-warning) 55%, var(--color-foreground)); --eff-glow: #f2a612; }
-
-/* ---- The top stop. Several layers at once, because this is the one that burns. ---- */
-
-/* Heat gathering around the rail, breathing. An ellipse that ends inside its box, so it has no edge. */
-.eslider.is-max .eslider__track::after {
-  content: '';
-  position: absolute;
-  inset: -16px -12px;
-  z-index: -1;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--eff-glow) 24%, transparent), transparent);
-  pointer-events: none;
-  animation: eff-heat 2.2s ease-in-out infinite;
+.eslider__hint {
+  margin-top: 6px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--color-foreground-subtlest);
 }
-@keyframes eff-heat {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
+.eslider__cost {
+  margin-top: 2px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  font-weight: 500;
+  color: var(--eff-star-text);
 }
 
-/* The fill glows and a bright current runs through it, faster than anything else in the menu. */
+/* ---------- Max stop: Shining Cubex Starfield Bar ---------- */
+
+.eslider.is-max .eslider__rail {
+  border-color: color-mix(in srgb, var(--eff-star) 65%, var(--color-border));
+  box-shadow:
+    inset 0 0 10px rgba(242, 201, 125, 0.22),
+    0 0 16px rgba(242, 201, 125, 0.18);
+}
+
+/* Luminous metallic starlight sheen sweeping through the thick capsule at Max */
 .eslider.is-max .eslider__fill {
-  background-image: linear-gradient(
-    100deg,
-    transparent 15%,
-    color-mix(in srgb, #fff 62%, transparent) 50%,
-    transparent 85%
+  background: linear-gradient(
+    110deg,
+    #1c170d 0%,
+    #3f3116 20%,
+    #a87928 38%,
+    #f5d082 48%,
+    #fff9e6 50%,
+    #f5d082 52%,
+    #a87928 62%,
+    #3f3116 80%,
+    #1c170d 100%
   );
-  background-size: 190% 100%;
-  background-repeat: no-repeat;
-  animation: eff-current 1.05s linear infinite, eff-glow 1.4s ease-in-out infinite;
+  background-size: 240% 100%;
+  box-shadow: inset 0 1px 0 rgba(255, 250, 230, 0.45);
+  animation: eff-star-sheen 2.1s linear infinite;
 }
-@keyframes eff-current {
-  from { background-position: -130% 0; }
-  to { background-position: 230% 0; }
+:root[data-theme='light'] .eslider.is-max .eslider__fill {
+  background: linear-gradient(
+    110deg,
+    #7c5106 0%,
+    #b37710 22%,
+    #e6a938 42%,
+    #fff3cf 50%,
+    #e6a938 58%,
+    #b37710 78%,
+    #7c5106 100%
+  );
+  background-size: 240% 100%;
+  animation: eff-star-sheen 2.1s linear infinite;
 }
-@keyframes eff-glow {
-  0%, 100% { box-shadow: 0 0 3px color-mix(in srgb, var(--eff-glow) 45%, transparent); }
-  50% { box-shadow: 0 0 11px 1px color-mix(in srgb, var(--eff-glow) 85%, transparent); }
+@keyframes eff-star-sheen {
+  from { background-position: 140% 0; }
+  to { background-position: -100% 0; }
 }
 
-/* Rings leave the thumb, one after another, like a pulse being sent out. */
+/* The Cubex compass star inside the thumb makes crisp quarter-turns at Max */
+.eslider.is-max .eslider__thumb {
+  border-color: rgba(255, 248, 224, 0.9);
+  box-shadow:
+    0 0 14px rgba(242, 201, 125, 0.75),
+    0 1px 4px rgba(0, 0, 0, 0.5);
+}
+.eslider.is-max .eslider__thumb-star {
+  animation: eff-cubex-star 1.8s cubic-bezier(0.6, -0.28, 0.25, 1.3) infinite;
+}
+@keyframes eff-cubex-star {
+  0%, 38% { transform: rotate(0deg) scale(1); }
+  50% { transform: rotate(45deg) scale(1.16); }
+  100% { transform: rotate(90deg) scale(1); }
+}
+
+/* Starlight pulse rings radiating from the Cubex star thumb at Max */
 .eslider__beacon {
   position: absolute;
-  top: 4px;
-  left: calc(7px + var(--eff-t) * (100% - 14px));
-  width: 14px;
-  height: 14px;
-  margin-left: -7px;
+  top: 3px;
+  left: calc(13px + var(--eff-t) * (100% - 26px));
+  width: 22px;
+  height: 22px;
+  margin-left: -11px;
   pointer-events: none;
+  opacity: 0;
+  z-index: 1;
+  transition: left 0.24s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease;
+}
+.eslider.is-max .eslider__beacon {
+  opacity: 1;
+}
+.eslider:not(.is-max) .eslider__beacon::before,
+.eslider:not(.is-max) .eslider__beacon::after {
+  animation: none;
 }
 .eslider__beacon::before,
 .eslider__beacon::after {
   content: '';
   position: absolute;
   inset: 0;
-  border: 1.5px solid var(--eff-glow);
+  border: 1.25px solid var(--eff-star);
   border-radius: 50%;
   opacity: 0;
-  animation: eff-ripple 1.6s cubic-bezier(0.2, 0.6, 0.35, 1) infinite;
+  animation: eff-star-ripple 1.8s cubic-bezier(0.2, 0.65, 0.35, 1) infinite;
 }
-.eslider__beacon::after { animation-delay: -0.8s; }
-@keyframes eff-ripple {
-  0% { transform: scale(0.9); opacity: 0.85; }
-  100% { transform: scale(2.4); opacity: 0; }
+.eslider__beacon::after {
+  animation-delay: -0.9s;
 }
-
-/* Naming the stop is the first thing that moves: it pops once, then the flame keeps going. */
-.eslider.is-max .eslider__value { animation: eff-pop 0.42s cubic-bezier(0.2, 0.9, 0.3, 1.5) both; }
-@keyframes eff-pop {
-  0% { transform: scale(0.8); }
-  100% { transform: scale(1); }
-}
-.eslider.is-max .eslider__flame { animation: eff-flicker 0.9s ease-in-out infinite; }
-@keyframes eff-flicker {
-  0%, 100% { transform: scale(1, 1) rotate(0deg); }
-  22% { transform: scale(0.94, 1.1) rotate(-4deg); }
-  48% { transform: scale(1.04, 0.95) rotate(3deg); }
-  74% { transform: scale(0.96, 1.08) rotate(-2deg); }
+@keyframes eff-star-ripple {
+  0% { transform: scale(0.92); opacity: 0.85; }
+  100% { transform: scale(1.85); opacity: 0; }
 }
 
-/* Without motion the meaning has to survive in color and words alone. */
 @media (prefers-reduced-motion: reduce) {
-  .eslider.is-max .eslider__track::after { animation: none; opacity: 0.8; }
-  .eslider.is-max .eslider__fill { animation: none; background-image: none; box-shadow: 0 0 7px color-mix(in srgb, var(--eff-glow) 60%, transparent); }
+  .eslider.is-max .eslider__fill { animation: none; background-position: 50% 0; }
   .eslider__beacon::before,
   .eslider__beacon::after { animation: none; opacity: 0; }
   .eslider.is-max .eslider__value,
-  .eslider.is-max .eslider__flame { animation: none; }
+  .eslider.is-max .eslider__star,
+  .eslider.is-max .eslider__thumb-star,
+  .eslider.is-max .eslider__inner-star { animation: none; }
   .eslider__fill,
+  .eslider__beacon,
+  .eslider__tick,
   .eslider__value,
-  .eslider__input::-webkit-slider-thumb { transition: none; }
+  .eslider__thumb,
+  .eslider__thumb-star,
+  .eslider__stars { transition: none; }
 }

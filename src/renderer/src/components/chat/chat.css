@@ -277,9 +277,9 @@
 .ask {
   margin-bottom: 10px;
   padding: 14px 16px;
-  border: 1px solid var(--color-warning-border);
+  border: 1px solid var(--raise-border, var(--color-popover-border));
   border-radius: 12px;
-  background: linear-gradient(var(--color-warning-surface), transparent), var(--raise);
+  background: var(--raise);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
   animation: ask-in 160ms ease-out;
 }
@@ -332,7 +332,7 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.ask-risk { margin: 8px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--color-warning); }
+.ask-risk { margin: 8px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--color-foreground-subtle); }
 .ask-why { margin: 0 0 12px; font-size: 12.5px; color: var(--color-foreground-subtlest); }
 .ask-risk + .ask-why { margin-top: 8px; }
 .ask-why b { font-weight: 600; color: var(--color-foreground-subtle); }
@@ -382,7 +382,7 @@
    :focus-visible rule has the same specificity as `.cph`, so opt out by name. */
 .cbox:focus-within { border-color: var(--color-input-border-focused); background: var(--color-input-focused); }
 .cph:focus,
-.cph:focus-visible { outline: none; }
+.cph:focus-visible { outline: none !important; }
 .cbox--drag { border-color: var(--color-input-border-focused); background: var(--color-accent); }
 .cph {
   display: block;
@@ -439,16 +439,105 @@
 .perm--bypass svg { color: var(--color-warning); }
 
 .menu--up { bottom: calc(100% + 8px); }
-/* Keyboard focus on a menu entry stays inside its own box, where the menu's overflow cannot clip the ring. */
-.menu__item:focus-visible { outline-offset: -2px; }
+/* A mouse-opened menu shows no ring; keyboard focus gets a quiet 1px inset ring so it stays
+   distinguishable from the selected row, which shares the hover fill. */
+.menu__item:focus { outline: none; }
+.menu__item:focus-visible {
+  outline: 1px solid var(--color-input-border-focused);
+  outline-offset: -1px;
+  background: var(--color-menu-hover);
+}
 .menu__confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 9px 7px; }
 .menu__confirm .menu__s { flex: 1 1 110px; color: var(--color-foreground); }
 .menu__confirm-actions { display: inline-flex; gap: 4px; margin-left: auto; }
-/* The effort control stays put; only the models beneath it scroll. */
-.menu--models { width: min(340px, calc(100vw - 32px)); max-height: min(460px, calc(100vh - 140px)); overflow: hidden; }
-.menu--models .menu__scroll { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 1px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
-.menu--models .menu__scroll .menu__label { top: 0; }
+/* The effort control and filter stay put; only the models beneath them scroll. */
+.menu.menu--models {
+  display: flex;
+  flex-direction: column;
+  width: min(340px, calc(100vw - 32px));
+  max-height: min(460px, calc(100vh - 140px));
+  overflow: hidden;
+}
+.menu.menu--models .menu__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.menu.menu--models .menu__scroll .menu__label { top: 0; }
 .effort { flex: none; padding: 2px 0 0; }
+
+.menu__search-wrap {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 5px 6px 6px;
+}
+.menu__search-wrap > svg {
+  position: absolute;
+  left: 15px;
+  color: var(--color-foreground-subtlest);
+  pointer-events: none;
+  transition: color 0.14s ease;
+}
+.menu__search-wrap:focus-within > svg {
+  color: var(--color-foreground-subtle);
+}
+.menu__search {
+  width: 100%;
+  height: 30px;
+  padding: 0 26px 0 28px;
+  border: 1px solid var(--color-input-border);
+  border-radius: 7px;
+  background: var(--well);
+  color: var(--color-foreground);
+  font: 12.5px/1 var(--sans);
+  transition: border-color 0.14s ease, background 0.14s ease;
+}
+.menu__search:hover {
+  border-color: var(--color-input-border-hover);
+}
+.menu__search::placeholder {
+  color: var(--color-foreground-subtlest);
+}
+.menu__search:focus,
+.menu__search:focus-visible {
+  outline: none !important;
+  border-color: var(--color-input-border-focused);
+}
+.menu__search::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
+.menu__search-clear {
+  position: absolute;
+  right: 11px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--color-foreground-subtlest);
+  background: transparent;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+}
+.menu__search-clear:hover {
+  background: var(--color-menu-hover);
+  color: var(--color-foreground);
+}
+.menu__search-clear:focus,
+.menu__search-clear:focus-visible {
+  outline: none;
+}
 
 .send {
   flex: none;
@@ -506,9 +595,6 @@
 .banner__text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .banner__x { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 5px; color: var(--color-foreground-subtlest); }
 .banner__x:hover { background: var(--color-hover); color: var(--color-destructive); }
-.banner--goal { background: var(--color-accent); border-color: var(--color-accent-border); color: var(--color-accent-foreground); }
-.banner--goal svg,
-.banner--goal b { color: var(--color-accent-foreground); }
 
 .attachrow { display: flex; flex-wrap: wrap; gap: 7px; max-height: 110px; overflow-y: auto; padding: 10px 12px 0; }
 .attachchip {

@@ -54,10 +54,13 @@ describe('compactTokens', () => {
 })
 
 describe('formatSeconds', () => {
-  it('keeps one decimal under ten seconds', () => {
-    expect(formatSeconds(800)).toBe('0.8s')
-    expect(formatSeconds(6_000)).toBe('6s')
+  it('counts in whole seconds, minutes and hours', () => {
+    expect(formatSeconds(800)).toBe('0s')
+    expect(formatSeconds(6_900)).toBe('6s')
+    expect(formatSeconds(59_999)).toBe('59s')
     expect(formatSeconds(72_000)).toBe('1m 12s')
+    expect(formatSeconds(3_600_000)).toBe('1h 0m')
+    expect(formatSeconds(7_512_000)).toBe('2h 5m')
   })
 })
 

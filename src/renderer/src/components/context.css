@@ -12,7 +12,7 @@
 .context-popover button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .context-meter__ring { display: block; width: 16px; height: 16px; flex: 0 0 16px; transform: rotate(-90deg); }
 .context-meter__track { stroke: color-mix(in srgb, var(--color-foreground) 14%, transparent); }
-.context-meter__progress { stroke: var(--color-accent-foreground); transition: stroke-dashoffset 160ms ease-out, stroke 160ms; }
+.context-meter__progress { stroke: var(--color-foreground-subtle); transition: stroke-dashoffset 160ms ease-out, stroke 160ms; }
 .context-meter.is-high .context-meter__progress { stroke: var(--color-warning); }
 .context-meter.is-full .context-meter__progress { stroke: var(--color-destructive); }
 .context-meter__label { font-weight: 500; }
@@ -36,7 +36,7 @@
 .context-popover__budget { position: relative; display: flex; height: 6px; margin-top: 13px; overflow: hidden; border-radius: 3px; background: var(--color-surface-hover); }
 .context-popover__budget > span { height: 100%; min-width: 0; flex-shrink: 0; }
 .context-popover__tick { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--color-foreground); box-shadow: 0 0 0 1px var(--color-popover); }
-.context-popover__budget-used { background: var(--color-accent-foreground); }
+.context-popover__budget-used { background: var(--color-foreground-subtle); }
 .context-popover.is-high .context-popover__budget-used,
 .context-popover.is-full .context-popover__budget-used { background: var(--color-warning); }
 .context-popover__budget-reserve { background: var(--color-foreground-subtlest); border-left: 2px solid var(--color-popover); }

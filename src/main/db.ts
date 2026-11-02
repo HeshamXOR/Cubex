@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import { dbPath } from './paths'
 import { normalizeMessageTranscriptJson } from '@shared/messageTranscript'
 import { cleanPeerIds } from '@shared/peers'
+import { normalizeStoredGoal, storableGoal, type Goal } from '@shared/goal'
 import type {
   Conversation,
   ConversationComposer,
@@ -146,6 +147,13 @@ function migrate(d: Database.Database): void {
   if (!hasUsageCol('cacheReadTokens')) d.exec('ALTER TABLE usage_records ADD COLUMN cacheReadTokens INTEGER')
   if (!hasUsageCol('cacheWriteTokens')) d.exec('ALTER TABLE usage_records ADD COLUMN cacheWriteTokens INTEGER')
   d.exec('CREATE INDEX IF NOT EXISTS idx_usage_conversation ON usage_records(conversationId)')
+  // The goal of a task lives beside the task, not in it: exporting or importing a chat never reads or writes it.
+  d.exec(`CREATE TABLE IF NOT EXISTS conversation_goals (
+    conversationId TEXT PRIMARY KEY,
+    goalJson TEXT NOT NULL,
+    updatedAt INTEGER NOT NULL,
+    FOREIGN KEY (conversationId) REFERENCES conversations(id) ON DELETE CASCADE
+  )`)
 }
 
 // --- Providers ---
@@ -319,6 +327,33 @@ export const conversationRepo = {
 
   delete(id: string): void {
     initDb().prepare('DELETE FROM conversations WHERE id = ?').run(id)
+  }
+}
+
+/** The goal of each task (see /goal). Stored apart from the conversation so exports and imports never carry it. */
+export const goalRepo = {
+  get(conversationId: string): Goal | undefined {
+    const row = initDb().prepare('SELECT goalJson FROM conversation_goals WHERE conversationId = ?').get(conversationId) as { goalJson: string } | undefined
+    if (!row) return undefined
+    try {
+      return normalizeStoredGoal(JSON.parse(row.goalJson))
+    } catch {
+      return undefined
+    }
+  },
+
+  /** Keep the goal of a task, or forget it when undefined. A task that no longer exists keeps nothing. */
+  set(conversationId: string, goal: Goal | undefined): void {
+    const d = initDb()
+    if (!goal) {
+      d.prepare('DELETE FROM conversation_goals WHERE conversationId = ?').run(conversationId)
+      return
+    }
+    if (!d.prepare('SELECT 1 FROM conversations WHERE id = ?').get(conversationId)) return
+    d.prepare(
+      `INSERT INTO conversation_goals (conversationId, goalJson, updatedAt) VALUES (?, ?, ?)
+       ON CONFLICT(conversationId) DO UPDATE SET goalJson = excluded.goalJson, updatedAt = excluded.updatedAt`
+    ).run(conversationId, JSON.stringify(storableGoal(goal)), Date.now())
   }
 }
 

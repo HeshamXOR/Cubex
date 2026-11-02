@@ -10,6 +10,9 @@ import { matchesShortcut } from './lib/shortcuts'
 import { Sidebar } from './components/Sidebar'
 import { TitleBar } from './components/TitleBar'
 import { ReviewPanel } from './components/ReviewPanel'
+import { RunRail } from './components/RunRail'
+import { StatusStrip } from './components/StatusStrip'
+import { RAIL_WIDTH, useRailAvailable, useRailCollapsed } from './lib/runRail'
 import { ChangesProvider } from './lib/useSessionChanges'
 import { useNotificationBridge } from './lib/useNotificationBridge'
 import { ChatView } from './views/ChatView'
@@ -155,8 +158,7 @@ export function App(): JSX.Element {
     root.setProperty('--color-brand-strong', hover)
     root.setProperty('--color-primary', accent)
     root.setProperty('--color-primary-foreground', foreground)
-    root.setProperty('--color-accent-border', accent + '66')
-    root.setProperty('--color-accent', accent + '1a')
+    // Tints and borders stay neutral in Graphite; the chosen colour marks text selection only.
     root.setProperty('--sans', FONT_STACK[appearance.font] ?? FONT_STACK.system!)
     document.documentElement.setAttribute('data-density', appearance.density)
   }, [appearance])
@@ -210,7 +212,12 @@ export function App(): JSX.Element {
     remember('cubex.review', width)
   }
 
-  const columns = [sideOpen ? `${SIDE_WIDTH}px` : '', 'minmax(0, 1fr)', reviewVisible && docked ? `${clamped}px` : ''].filter(Boolean).join(' ')
+  // The run rail takes the review panel's column while the panel is closed; it steps aside in narrow windows.
+  const hasMessages = useStore((s) => s.liveMessages.length > 0)
+  const railAvailable = useRailAvailable(view === 'chat', panelOpen)
+  const railCollapsed = useRailCollapsed()
+  const railVisible = railAvailable && !railCollapsed && hasMessages
+  const columns = [sideOpen ? `${SIDE_WIDTH}px` : '', 'minmax(0, 1fr)', reviewVisible && docked ? `${clamped}px` : '', railVisible ? `${RAIL_WIDTH}px` : ''].filter(Boolean).join(' ')
   const bodyStyle = { gridTemplateColumns: columns, '--side-w': `${SIDE_WIDTH}px` } as CSSProperties
 
   return (
@@ -227,6 +234,11 @@ export function App(): JSX.Element {
           {view === 'presets' && <PresetsView />}
           {view === 'settings' && <SettingsView />}
         </main>
+        {railVisible && (
+          <aside className="rail-wrap" aria-label="Run">
+            <div className="panel"><RunRail /></div>
+          </aside>
+        )}
         {reviewVisible && (
           <aside className={`review-wrap ${docked ? '' : 'review-wrap--float'}`} aria-label="Review" style={docked ? undefined : { width: clamped }}>
             <div
@@ -246,6 +258,7 @@ export function App(): JSX.Element {
           </aside>
         )}
       </div>
+      <StatusStrip />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <ShortcutSheet />
       <UpdateDialog />

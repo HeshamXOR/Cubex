@@ -53,7 +53,7 @@ export interface SettingsNavSection {
 export const SETTINGS_NAV: SettingsNavSection[] = [
   {
     pages: [
-      { id: 'general', label: 'General', description: 'Startup, and the folder Cubex works in.', keywords: 'start maximized window working folder workspace project', icon: SlidersHorizontal },
+      { id: 'general', label: 'General', description: 'Startup, the folder Cubex works in, and keeping the PC awake.', keywords: 'start maximized window working folder workspace project sleep awake power', icon: SlidersHorizontal },
       { id: 'appearance', label: 'Appearance', description: 'Theme, accent color, font, density and the shape of corners.', keywords: 'theme dark light system accent color font density corners', icon: Palette },
       { id: 'notifications', label: 'Notifications', description: 'When Cubex tells you that a session needs you or has ended.', keywords: 'alerts badge taskbar flash', icon: Bell }
     ]
@@ -71,7 +71,7 @@ export const SETTINGS_NAV: SettingsNavSection[] = [
     pages: [
       { id: 'tools', label: 'Tools', description: 'The shell, type checking, skills, MCP servers and hooks the agent can use.', keywords: 'shell terminal command type checking diagnostics skills mcp hooks', icon: Wrench },
       { id: 'permissions', label: 'Permissions', description: 'Which actions Cubex allows, asks about or blocks.', keywords: 'allow ask deny block rules approvals', icon: ShieldCheck },
-      { id: 'agents', label: 'Other agents', description: 'Let the agent consult Claude Code, Antigravity or another model and settle a question together.', keywords: 'claude code agy antigravity consult second opinion peer cli agree', icon: MessagesSquare }
+      { id: 'agents', label: 'Other agents', description: 'Let the agent ask Claude Code, Codex, Gemini or another agent for an opinion, or hand it a task. They use the sign-in already on this PC.', keywords: 'claude code codex gemini opencode copilot cursor goose qwen agy antigravity acp agent client protocol consult second opinion delegate task hand off subscription sign in login account installed detect peer cli agree', icon: MessagesSquare }
     ]
   },
   {

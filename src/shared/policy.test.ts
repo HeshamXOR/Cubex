@@ -110,8 +110,8 @@ describe('validateHookTestRequest', () => {
   it.each([
     [undefined, 'Expected a hook.'],
     ['x', 'Expected a hook.'],
-    [{ command: 'x' }, 'Choose one of the four hook events.'],
-    [{ event: 'OnSave', command: 'x' }, 'Choose one of the four hook events.'],
+    [{ command: 'x' }, 'Choose one of the hook events.'],
+    [{ event: 'OnSave', command: 'x' }, 'Choose one of the hook events.'],
     [{ event: 'Stop' }, 'Enter the command to run.'],
     [{ event: 'Stop', command: '   ' }, 'Enter the command to run.'],
     [{ event: 'Stop', command: 4 }, 'Enter the command to run.'],
@@ -125,8 +125,8 @@ describe('validateHookTestRequest', () => {
 })
 
 describe('hook events', () => {
-  it('lets only PreToolUse block, and only tool events match a tool', () => {
-    expect(HOOK_EVENTS.filter((event) => HOOK_EVENT_INFO[event].canBlock)).toEqual(['PreToolUse'])
+  it('lets only PreToolUse and Stop block, and only tool events match a tool', () => {
+    expect(HOOK_EVENTS.filter((event) => HOOK_EVENT_INFO[event].canBlock)).toEqual(['PreToolUse', 'UserPromptSubmit', 'Stop'])
     expect(HOOK_EVENTS.filter((event) => HOOK_EVENT_INFO[event].matchesTools)).toEqual(['PreToolUse', 'PostToolUse'])
   })
 })

@@ -9,11 +9,13 @@ export const WEB_TOOLS: ReadonlySet<string> = new Set(['web_fetch', 'web_search'
 const KIND: Record<string, string> = {
   read_file: 'Read', write_file: 'Write', edit_file: 'Edit', multi_edit: 'Edit', apply_patch: 'Patch',
   remove_file: 'Remove', delete_file: 'Remove', list_files: 'List', search_files: 'Search', glob_files: 'Find',
-  run_command: 'Run', web_fetch: 'Fetch', web_search: 'Web', skill: 'Skill', delegate_to_subagent: 'Subagent', consult_agent: 'Ask',
+  run_command: 'Run', web_fetch: 'Fetch', web_search: 'Web', skill: 'Skill', goal_update: 'Goal', delegate_to_subagent: 'Subagent', consult_agent: 'Ask', delegate_task: 'Delegate',
   exit_plan_mode: 'Plan', read_plan: 'Read plan', ask_user_question: 'Question', read_command_output: 'Read output'
 }
 
 const SUBAGENT_PREFIX = 'Subagent: '
+/** Saved transcripts from before 0.3 wrote the subagent prefix with a middle dot. */
+const OLD_SUBAGENT_PREFIX = 'Subagent · '
 
 export function toolKind(name: string): string {
   return KIND[name] ?? name
@@ -22,13 +24,19 @@ export function toolKind(name: string): string {
 /** The title without its verb and without the subagent prefix: "Edit src/a.ts" becomes "src/a.ts". */
 export function toolTarget(tool: Pick<ToolActivity, 'name' | 'title'>): string {
   const title = tool.title ?? ''
-  const body = title.startsWith(SUBAGENT_PREFIX) ? title.slice(SUBAGENT_PREFIX.length) : title
-  const kind = toolKind(tool.name)
-  return body.toLowerCase().startsWith(`${kind.toLowerCase()} `) ? body.slice(kind.length + 1) : body
+  const prefix = [SUBAGENT_PREFIX, OLD_SUBAGENT_PREFIX].find((p) => title.startsWith(p) && tool.name !== 'delegate_to_subagent')
+  const body = prefix ? title.slice(prefix.length) : title
+  const kind = toolKind(tool.name).toLowerCase()
+  // The verb is shown beside the target, so it is not repeated: "Edit src/a.ts", and older "Skill: name" titles.
+  for (const lead of [`${kind} `, `${kind}: `, `${kind} · `]) {
+    if (body.toLowerCase().startsWith(lead)) return body.slice(lead.length)
+  }
+  return body
 }
 
 export function fromSubagent(tool: Pick<ToolActivity, 'title'>): boolean {
-  return (tool.title ?? '').startsWith(SUBAGENT_PREFIX)
+  const title = tool.title ?? ''
+  return title.startsWith(SUBAGENT_PREFIX) || title.startsWith(OLD_SUBAGENT_PREFIX)
 }
 
 export type Phase = ToolActivity['phase']

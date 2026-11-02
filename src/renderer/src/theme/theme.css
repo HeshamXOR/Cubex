@@ -18,10 +18,13 @@
 
   /* Surfaces. Mica is the window frame, the card is where work happens,
      raised is for things that sit on the card, well is for inset content. */
-  --mica: #1f1f21;
-  --card: #151516;
-  --raise: #1b1b1d;
-  --well: #111112;
+  /* Three clear steps: frame #0c0c0e, working card #161619, raised #1d1d22. */
+  --mica: #0c0c0e;
+  --card: #161619;
+  --raise: #1d1d22;
+  --well: #111113;
+  --hairline: #222227;
+  --raise-border: #2c2c33;
 
   --color-backdrop: var(--mica);
   --color-background: var(--card);
@@ -33,8 +36,8 @@
   --color-surface-hover: rgba(255, 255, 255, 0.075);
   --color-card: var(--raise);
   --color-card-selected: rgba(255, 255, 255, 0.07);
-  --color-popover: #212124;
-  --color-menu: #232326;
+  --color-popover: #232329;
+  --color-menu: #25252b;
   --color-menu-hover: rgba(255, 255, 255, 0.07);
   --color-input: var(--well);
   --color-input-focused: var(--well);
@@ -42,26 +45,27 @@
   /* Text. The lightest two keep at least 4.5:1 on every surface they sit on (card,
      mica, menus, hover and selected states). */
   --color-foreground: #ececee;
-  --color-foreground-subtle: #a2a2a8;
-  --color-foreground-subtlest: #8e8e97;
+  --color-foreground-subtle: #a7a7b0;
+  --color-foreground-subtlest: #8b8b95;
   --color-foreground-faint: #4d4d53;
-  --color-foreground-body: #dcdce0;
+  --color-foreground-body: #e1e1e6;
   --color-foreground-inverse: #151516;
 
   /* Hairlines. */
-  --color-border: rgba(255, 255, 255, 0.07);
+  --color-border: #222227;
   --color-border-hover: rgba(255, 255, 255, 0.18);
-  --color-card-border: rgba(255, 255, 255, 0.07);
-  --color-popover-border: rgba(255, 255, 255, 0.11);
-  --color-input-border: rgba(255, 255, 255, 0.11);
+  --color-card-border: #222227;
+  --color-popover-border: #2f2f36;
+  --color-input-border: #2c2c33;
   --color-input-border-hover: rgba(255, 255, 255, 0.2);
   /* Focus is neutral: a lighter border on dark surfaces and a darker one on light, never the accent. */
   --color-input-border-focused: rgba(255, 255, 255, 0.5);
   --focus-ring: rgba(255, 255, 255, 0.82);
 
-  --color-accent: rgba(79, 108, 255, 0.14);
-  --color-accent-border: rgba(79, 108, 255, 0.4);
-  --color-accent-foreground: #8fa1ff;
+  /* The accent is the text colour: Graphite keeps colour for meaning (added, removed, needs you). */
+  --color-accent: rgba(255, 255, 255, 0.07);
+  --color-accent-border: rgba(255, 255, 255, 0.28);
+  --color-accent-foreground: #ececee;
 
   --color-hover: rgba(255, 255, 255, 0.045);
   --color-selected: rgba(255, 255, 255, 0.07);
@@ -130,8 +134,8 @@
 
   /* Type. The UI font size is the one knob for chrome scaling; the conversation reads larger. */
   --ui-font-size: 13px;
-  --chat-font-size: 14px;
-  --chat-line-height: 23px;
+  --chat-font-size: 15px;
+  --chat-line-height: 24px;
   --sans: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   --display: 'Segoe UI Variable Display', 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif;
   --mono: 'Cascadia Code', 'Cascadia Mono', 'JetBrains Mono', 'SF Mono', Consolas, monospace;
@@ -169,10 +173,13 @@
 :root[data-theme='light'] {
   color-scheme: light;
 
-  --mica: #eeeef1;
-  --card: #ffffff;
+  /* Frame, working card and raised surface each step visibly. */
+  --mica: #dfdfe5;
+  --card: #f4f4f7;
   --raise: #ffffff;
-  --well: #f5f5f8;
+  --well: #e9e9ef;
+  --hairline: #dcdce3;
+  --raise-border: #c9c9d2;
 
   --color-popover: #ffffff;
   --color-menu: #ffffff;
@@ -188,18 +195,18 @@
   --color-foreground-body: #2a2a2f;
   --color-foreground-inverse: #fafafa;
 
-  --color-border: rgba(20, 20, 30, 0.09);
-  --color-border-hover: rgba(20, 20, 30, 0.22);
-  --color-card-border: rgba(20, 20, 30, 0.09);
-  --color-popover-border: rgba(20, 20, 30, 0.13);
-  --color-input-border: rgba(20, 20, 30, 0.16);
+  --color-border: #dcdce3;
+  --color-border-hover: rgba(20, 20, 30, 0.24);
+  --color-card-border: #dcdce3;
+  --color-popover-border: #c9c9d2;
+  --color-input-border: #c9c9d2;
   --color-input-border-hover: rgba(20, 20, 30, 0.28);
   --color-input-border-focused: rgba(20, 20, 30, 0.78);
   --focus-ring: rgba(20, 20, 30, 0.86);
 
-  --color-accent: rgba(79, 108, 255, 0.1);
-  --color-accent-border: rgba(79, 108, 255, 0.45);
-  --color-accent-foreground: #3347c7;
+  --color-accent: rgba(20, 20, 30, 0.06);
+  --color-accent-border: rgba(20, 20, 30, 0.3);
+  --color-accent-foreground: #17171a;
   --color-hover: rgba(20, 20, 30, 0.05);
   --color-selected: rgba(20, 20, 30, 0.08);
   --color-secondary: #d6d6dc;

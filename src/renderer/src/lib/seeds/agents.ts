@@ -1,17 +1,30 @@
-import type { PeerConfig, PeerPresetStatus, PeersOverview, PeerStatus, PeerTestResult } from '../../../../shared/peers'
-import type { ToolActivity } from '../../../../shared/ipc'
+import { KNOWN_AGENTS, type AgentAccount, type AgentDetection, type AgentsDetection } from '../../../../shared/agentCatalog'
+import type { AcpPresetStatus, PeerConfig, PeerPresetStatus, PeersOverview, PeerStatus, PeerTestResult } from '../../../../shared/peers'
+import type { CubexAPI, ToolActivity } from '../../../../shared/ipc'
 import type { MessageTranscriptBlock } from '../../../../shared/messageTranscript'
 import { DEFAULT_SETTINGS, type AppSettings } from '../../../../shared/settings'
+import { previewRuntimeInstalled } from './antigravity'
 import type { PreviewSeed } from './index'
 
 /**
  * Other agents in the browser preview.
  *   ?seed=1&agents=none        no agents yet; Claude Code is installed here, Antigravity is not
- *   ?seed=1&agents=configured  four agents: Claude Code, Antigravity (not installed), Codex (a program) and a model
+ *   ?seed=1&agents=configured  five agents: Claude Code, Antigravity (not installed), Codex (a program), Gemini (an ACP agent) and a model
  *   ?seed=1&thread=1&agents=thread
  *                              the same, with a chat in which Claude Code was asked twice and the model reported back
  * Extra: `agentstest=fail` makes every test fail the way a program that is not signed in does, `agentstest=slow`
- * takes six seconds. Programs are never started in the preview; the results are canned.
+ * takes six seconds, `agentstest=notasks` makes an agent that may take tasks report that it asks about nothing. Programs
+ * are never started in the preview; the results are canned.
+ *
+ * What Settings finds on this computer (also on its own, without `agents`):
+ *   ?seed=1&detect=mixed       the default: Claude Code signed in, Codex signed out, Gemini and OpenCode found with no account to read, the rest missing
+ *   ?seed=1&detect=none        nothing installed, and no Node.js
+ *   ?seed=1&detect=nonode      the same as mixed, without Node.js
+ *   ?seed=1&detect=localonly   found but not started, so no versions and no accounts
+ *   ?seed=1&detect=desktop     this PC with the Claude desktop app and nothing else: Claude Code is found inside the app and is not signed in
+ *   ?seed=1&detect=slow        the check takes three seconds
+ *   ?seed=1&detect=error       the check fails
+ * Extra: `signin=fail` makes the sign-in window fail to open. A sign-in that opens counts as finished at the next check.
  */
 
 const WORKSPACE = 'C:\\Users\\dev\\code\\lumen-web'
@@ -19,18 +32,28 @@ const MIN = 60_000
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 const claude: PeerConfig = { kind: 'cli', id: 'claude-code', name: 'Claude Code', enabled: true, preset: 'claude-code', command: 'claude', readProject: true }
-const antigravity: PeerConfig = { kind: 'cli', id: 'antigravity', name: 'Antigravity', enabled: true, preset: 'antigravity', command: 'agy' }
+const antigravity: PeerConfig = { kind: 'acp', id: 'antigravity', name: 'Antigravity', enabled: true, preset: 'agy-acp', command: 'agy_acp_server', args: [], readProject: true }
 const codex: PeerConfig = { kind: 'cli', id: 'codex', name: 'Codex', enabled: true, preset: 'custom', command: 'codex', args: ['exec', '-'], input: 'stdin', passEnv: ['OPENAI_API_KEY'] }
+const gemini: PeerConfig = { kind: 'acp', id: 'gemini', name: 'Gemini', enabled: true, preset: 'gemini', command: 'gemini', args: ['--acp'], readProject: true }
 const reviewer: PeerConfig = { kind: 'model', id: 'gpt-review', name: 'GPT review', enabled: false, providerId: 'openai', model: 'gpt-5.5' }
 
 /** Where each program is "installed". Antigravity is not, so the page shows how that reads. */
 const INSTALLED: Record<string, string> = {
   claude: 'C:\\Users\\dev\\AppData\\Roaming\\npm\\claude.cmd',
-  codex: 'C:\\Users\\dev\\AppData\\Roaming\\npm\\codex.cmd'
+  codex: 'C:\\Users\\dev\\AppData\\Roaming\\npm\\codex.cmd',
+  gemini: 'C:\\Users\\dev\\AppData\\Roaming\\npm\\gemini.cmd',
+  npx: 'C:\\Program Files\\nodejs\\npx.cmd',
+  opencode: 'C:\\Users\\dev\\AppData\\Local\\Programs\\opencode\\opencode.exe'
 }
 
 function statusOf(peer: PeerConfig): PeerStatus {
   if (peer.kind === 'model') return { id: peer.id, found: true }
+  // The runtime of an Antigravity agent is the one Cubex installs, so it follows the simulated install (see seeds/antigravity.ts).
+  if (peer.kind === 'acp' && peer.preset === 'agy-acp') {
+    return previewRuntimeInstalled() === false
+      ? { id: peer.id, found: false, problem: 'Antigravity is not installed.' }
+      : { id: peer.id, found: true, path: 'C:\\Users\\dev\\AppData\\Roaming\\Cubex\\antigravity\\runtime\\win32-x64\\versions\\65215e0688681fa3116e048a9eab27ef53af1bbd6f3da3f1c52bd4911d8b17f9\\agy_acp_server.exe' }
+  }
   const path = INSTALLED[peer.command]
   return path ? { id: peer.id, found: true, path } : { id: peer.id, found: false, problem: `"${peer.command}" was not found on this computer.` }
 }
@@ -39,6 +62,75 @@ const presetStatuses = (): PeerPresetStatus[] => [
   { preset: 'claude-code', found: true, path: INSTALLED.claude },
   { preset: 'antigravity', found: false }
 ]
+
+/** Codex runs through npx, so it is as installed as Node.js is. */
+const acpStatuses = (): AcpPresetStatus[] => [
+  { preset: 'claude-direct', found: true, path: 'C:\\Users\\dev\\AppData\\Local\\Claude\\claude-code\\2.1.293\\claude.exe' },
+  { preset: 'agy-acp', found: previewRuntimeInstalled() === true },
+  { preset: 'codex', found: true, path: INSTALLED.npx },
+  { preset: 'gemini', found: true, path: INSTALLED.gemini },
+  { preset: 'copilot', found: false },
+  { preset: 'opencode', found: true, path: INSTALLED.opencode },
+  { preset: 'cursor', found: false },
+  { preset: 'goose', found: false },
+  { preset: 'qwen', found: false }
+]
+
+// --- What a check of this computer finds ------------------------------------------------------------------
+
+const PATHS: Record<string, string> = {
+  'claude-code': INSTALLED.claude!, codex: INSTALLED.codex!, gemini: INSTALLED.gemini!, opencode: INSTALLED.opencode!
+}
+const VERSIONS: Record<string, string> = { 'claude-code': '2.1.4', codex: '0.46.0', gemini: '0.9.1', opencode: '0.15.2' }
+const ACCOUNTS: Record<string, AgentAccount> = {
+  'claude-code': { state: 'signed-in', label: 'Claude subscription', email: 'dev@example.com' },
+  codex: { state: 'signed-out' }
+}
+
+function detection(mode: string, signedIn: ReadonlySet<string>): AgentsDetection {
+  // A computer with the Claude desktop app and nothing else: Claude Code is found inside the app, and is not signed in yet.
+  if (mode === 'desktop') {
+    const agents = KNOWN_AGENTS.map((entry): AgentDetection => entry.id === 'claude-code'
+      ? {
+        id: entry.id, found: true, path: 'C:\\Users\\dev\\AppData\\Local\\Claude\\claude-code\\2.1.293\\claude.exe', via: 'the Claude desktop app', version: '2.1.293', probed: true,
+        account: signedIn.has(entry.id) ? { state: 'signed-in', label: 'Claude subscription', email: 'dev@example.com' } : { state: 'signed-out' }
+      }
+      : { id: entry.id, found: false, account: { state: 'unknown' }, probed: false })
+    return { agents, node: { found: false }, localOnly: false, checkedAt: Date.now() }
+  }
+  const nothing = mode === 'none'
+  const localOnly = mode === 'localonly'
+  const agents = KNOWN_AGENTS.map((entry): AgentDetection => {
+    const path = nothing ? undefined : PATHS[entry.id]
+    if (!path) return { id: entry.id, found: false, account: { state: 'unknown' }, probed: false }
+    if (localOnly) return { id: entry.id, found: true, path, account: { state: 'unknown' }, probed: false }
+    // Only Codex can be signed out here, and only an agent Cubex can read the account of changes when it is signed in.
+    const account: AgentAccount = signedIn.has(entry.id) && entry.account ? { state: 'signed-in', label: 'ChatGPT account', email: 'dev@example.com' } : ACCOUNTS[entry.id] ?? { state: 'unknown' }
+    return { id: entry.id, found: true, path, version: VERSIONS[entry.id]!, account, probed: true }
+  })
+  const node = nothing || mode === 'nonode' ? { found: false } : { found: true, ...(localOnly ? {} : { version: '22.11.0' }) }
+  return { agents, node, localOnly, checkedAt: Date.now() }
+}
+
+function detectionApi(flags: URLSearchParams): Partial<CubexAPI> {
+  const mode = flags.get('detect') ?? 'mixed'
+  const signedIn = new Set<string>()
+  return {
+    detectAgents: async (refresh) => {
+      await wait(mode === 'slow' ? 3_000 : refresh ? 800 : 120)
+      if (mode === 'error') throw new Error('The check could not start. Close and reopen Cubex, then try again.')
+      return detection(mode, signedIn)
+    },
+    signInAgent: async (id) => {
+      await wait(500)
+      if (flags.get('signin') === 'fail') {
+        return { ok: false, message: 'The sign-in window could not be opened: access is denied. Run "codex login" in a terminal instead.' }
+      }
+      signedIn.add(id)
+      return { ok: true, message: 'A terminal window opened. Finish signing in there, then come back to this window. Cubex checks again when you do.' }
+    }
+  }
+}
 
 function canned(peer: PeerConfig, mode: string | null): PeerTestResult {
   if (mode === 'fail') {
@@ -49,10 +141,14 @@ function canned(peer: PeerConfig, mode: string | null): PeerTestResult {
       output: 'Claude Code 2.1.4\nNot logged in.'
     }
   }
-  if (peer.kind === 'cli' && !INSTALLED[peer.command]) {
+  if (peer.kind !== 'model' && !INSTALLED[peer.command]) {
     return { ok: false, durationMs: 14, error: `The command "${peer.command}" was not found. Install it, add it to PATH, or give the full path to the program.` }
   }
-  return { ok: true, durationMs: peer.kind === 'model' ? 1_400 : 4_800, reply: 'OK' }
+  // Only an agent that may take tasks is told whether it can.
+  const note = peer.kind !== 'acp' || peer.canDelegate !== true ? undefined
+    : mode === 'notasks' ? 'Can take research and review tasks, but not tasks that change the project: it has no mode in which it asks before it changes things (it offers: Build, Plan).'
+      : 'Can take any kind of task. It works in its "Default" mode, which asks before it changes things.'
+  return { ok: true, durationMs: peer.kind === 'model' ? 1_400 : 4_800, reply: 'OK', ...(note ? { note } : {}) }
 }
 
 // --- A chat in which the model asked another agent ----------------------------------------------
@@ -108,7 +204,8 @@ export const seed: PreviewSeed = {
   },
   api: (flags) => {
     const mode = flags.get('agents')
-    if (mode === null) return {}
+    const finds = flags.get('detect') !== null || mode !== null ? detectionApi(flags) : {}
+    if (mode === null) return finds
     let settings: AppSettings | undefined
     const current = async (): Promise<AppSettings> => {
       if (settings) return settings
@@ -116,11 +213,12 @@ export const seed: PreviewSeed = {
       settings = {
         ...DEFAULT_SETTINGS,
         general: { ...DEFAULT_SETTINGS.general, workspacePath: SEED_WORKSPACE ?? WORKSPACE, recentWorkspaces: [SEED_WORKSPACE ?? WORKSPACE] },
-        peers: mode === 'none' ? { list: [], maxRounds: 3 } : { list: [claude, antigravity, codex, reviewer], maxRounds: 3 }
+        peers: mode === 'none' ? { list: [], maxRounds: 3 } : { list: [claude, antigravity, codex, gemini, reviewer], maxRounds: 3 }
       }
       return settings
     }
     return {
+      ...finds,
       getSettings: async () => current(),
       updateSettings: async (patch) => {
         settings = { ...(await current()), ...patch } as AppSettings
@@ -128,7 +226,7 @@ export const seed: PreviewSeed = {
       },
       getPeersStatus: async (): Promise<PeersOverview> => {
         const list = (await current()).peers?.list ?? []
-        return { peers: list.map(statusOf), presets: presetStatuses(), localOnly: false }
+        return { peers: list.map(statusOf), presets: presetStatuses(), acpPresets: acpStatuses(), localOnly: false }
       },
       testPeer: async (peer) => {
         const test = flags.get('agentstest')

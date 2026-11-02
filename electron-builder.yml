@@ -21,6 +21,12 @@ files:
 asarUnpack:
   - "**/*.node"
 npmRebuild: true
+# The licences that travel with the program sit beside it, in resources: Cubex's own and the notices for code adapted from other projects.
+extraResources:
+  - from: LICENSE
+    to: LICENSE
+  - from: THIRD_PARTY_NOTICES.md
+    to: THIRD_PARTY_NOTICES.md
 # resources/icon.png is the 1254x1254 Cubex mark. resources/icon.ico is the multi-size Windows icon cut from it.
 # Builds are unsigned: with no certificate configured electron-builder skips signing and still stamps the icon and
 # version info onto the executable.

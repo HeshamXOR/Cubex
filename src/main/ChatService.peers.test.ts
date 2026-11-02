@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { DEFAULT_RETRY_POLICY } from '@core/types'
 import type { AIProvider, AIRequest, AIResponse, AIStreamEvent, ToolCall } from '@core/types'
 import type { ChatEvent, ChatStartRequest, PermissionAsk, PermissionDecision, PermissionMode, ToolActivity } from '@shared/ipc'
 import type { PeerConfig } from '@shared/peers'
 import type { ProviderManager } from './ProviderManager'
+import { removeFolder } from './testing/removeFolder'
 
 const mocks = vi.hoisted(() => ({
   dataRoot: '', workspace: '', peers: undefined as unknown, localOnly: false, usage: [] as unknown[]
@@ -54,10 +56,10 @@ beforeEach(() => {
   writeFileSync(script, FAKE_PROGRAM)
   mocks.peers = { list: [peer()], maxRounds: 3 }
 })
-afterEach(() => {
+afterEach(async () => {
   for (const service of services) { service.cancelAll(); service.dispose() }
   services = []
-  rmSync(root, { recursive: true, force: true })
+  await removeFolder(root)
 })
 
 const policy = { primary: { providerId: 'p', model: 'm' }, fallbacks: [], fallbackEnabled: false, retry: { ...DEFAULT_RETRY_POLICY, enabled: false }, timeout: {} }
@@ -284,5 +286,84 @@ describe('a model as the other agent', () => {
     expect(JSON.stringify(h.modelAsks[0]!.messages)).toContain('Which index should I add?')
     expect(finalTool(events, 'k1').peer).toMatchObject({ name: 'GPT', round: 1, verdict: 'agree' })
     expect(mocks.usage).toHaveLength(1)
+  })
+})
+
+describe('an agent that speaks ACP as the other agent', () => {
+  // A scripted agent that speaks the protocol, started as a real program, through the whole chat service.
+  const MOCK = fileURLToPath(new URL('./peers/acp/testing/mockAgent.cjs', import.meta.url))
+  const acp = (over: Partial<PeerConfig> = {}): PeerConfig => ({ kind: 'acp', id: 'mock', name: 'Mock Agent', enabled: true, preset: 'custom', command: process.execPath, args: [MOCK], ...over } as PeerConfig)
+  const pidOf = (events: ChatEvent[], id: string): number => Number(/\d+/.exec(finalTool(events, id).detail ?? '')?.[0])
+
+  beforeEach(() => { mocks.peers = { list: [acp()], maxRounds: 3 } })
+  afterEach(() => { delete process.env.MOCK_RECORD; delete process.env.MOCK_EXIT_AT_START; delete process.env.MOCK_STDERR })
+
+  it('is offered, asked about once with the command that will run, and answers', async () => {
+    const h = harness()
+    const events = await h.turn([[consult('k1', 'Is the lock order safe?', 'mock')], 'finished'], { peers: ['mock'], answers: ['allow'] })
+    expect(JSON.stringify(h.requests[0]!.tools)).toContain('mock: Mock Agent (a program on this computer; it sees only your message)')
+    const [ask] = asks(events)
+    expect(ask).toMatchObject({ toolName: 'consult_agent', title: 'Ask Mock Agent' })
+    expect(ask!.risks?.[0]).toContain('Starts "')
+    expect(ask!.risks?.[0]).toContain('mockAgent.cjs')
+    expect(ask!.rule).toBeUndefined()
+    const done = finalTool(events, 'k1')
+    expect(done).toMatchObject({ phase: 'done', title: 'Ask Mock Agent' })
+    expect(done.peer).toMatchObject({ name: 'Mock Agent', round: 1, of: 3, verdict: 'agree' })
+    expect(done.detail).toBe('OK.')
+  })
+
+  it('does not start the program when the person says no', async () => {
+    process.env.MOCK_RECORD = join(root, 'record.jsonl')
+    const h = harness()
+    const events = await h.turn([[consult('k1', 'secret plans', 'mock')], 'ok'], { peers: ['mock'], answers: ['deny'] })
+    expect(finalTool(events, 'k1')).toMatchObject({ phase: 'error', detail: 'Denied by user' })
+    expect(existsSync(process.env.MOCK_RECORD)).toBe(false)
+  })
+
+  it('keeps one session for the whole talk, across turns, and starts a new one when the task is deleted', async () => {
+    const h = harness()
+    const first = await h.turn([[consult('k1', 'one\n@mock pid', 'mock')], [consult('k2', 'two\n@mock pid', 'mock')], 'done'], { peers: ['mock'], answers: ['allow'] })
+    expect(pidOf(first, 'k1')).toBeGreaterThan(0)
+    expect(pidOf(first, 'k2')).toBe(pidOf(first, 'k1'))
+    expect(asks(first)).toHaveLength(1)
+    // The next turn asks the person again, and reaches the same agent, which has been running all along.
+    const second = await h.turn([[consult('k3', 'three\n@mock pid', 'mock')], 'done'], { peers: ['mock'], answers: ['allow'] })
+    expect(pidOf(second, 'k3')).toBe(pidOf(first, 'k1'))
+    expect(asks(second)).toHaveLength(1)
+    h.service.forgetConversation('c1')
+    const third = await h.turn([[consult('k4', 'four\n@mock pid', 'mock')], 'done'], { peers: ['mock'], answers: ['allow'] })
+    expect(pidOf(third, 'k4')).not.toBe(pidOf(first, 'k1'))
+  })
+
+  it('stops the agent when the app quits', async () => {
+    const h = harness()
+    const events = await h.turn([[consult('k1', 'q\n@mock pid', 'mock')], 'done'], { peers: ['mock'], answers: ['allow'] })
+    const pid = pidOf(events, 'k1')
+    h.service.dispose()
+    await vi.waitFor(() => {
+      let running = true
+      try { process.kill(pid, 0) } catch { running = false }
+      expect(running).toBe(false)
+    }, { timeout: 5_000 })
+  })
+
+  it('leaves it out in local-only mode, like any program', async () => {
+    mocks.localOnly = true
+    const h = harness()
+    await h.turn(['hello'], { peers: ['mock'] })
+    expect(toolNames(h.requests[0])).not.toContain('consult_agent')
+  })
+
+  it('tells the model what went wrong when the agent will not start, with what it printed', async () => {
+    process.env.MOCK_EXIT_AT_START = '3'
+    process.env.MOCK_STDERR = 'Error: Invalid API key. Please run /login\n'
+    const h = harness()
+    const events = await h.turn([[consult('k1', 'q', 'mock')], 'done'], { peers: ['mock'], answers: ['allow'] })
+    const done = finalTool(events, 'k1')
+    expect(done.phase).toBe('error')
+    expect(done.detail).toContain('Mock Agent did not answer: Mock Agent stopped unexpectedly with exit code 3.')
+    expect(done.detail).toContain('Sign in to the program first')
+    expect(done.detail).toContain('Invalid API key')
   })
 })

@@ -168,8 +168,8 @@
 .fx-no:hover { color: var(--color-foreground-subtle); }
 .fx-src { padding: 0 24px 0 4px; }
 .fx-cut { color: var(--color-foreground-subtlest); font-style: italic; }
-.fx-line[data-hit] { background: color-mix(in srgb, var(--color-brand) 13%, transparent); }
-.fx-line[data-hit] .fx-no { background: color-mix(in srgb, var(--color-brand) 13%, var(--well)); color: var(--color-accent-foreground); box-shadow: inset 2px 0 0 var(--color-brand); }
+.fx-line[data-hit] { background: var(--color-selected); }
+.fx-line[data-hit] .fx-no { background: var(--color-selected); color: var(--color-foreground); box-shadow: inset 2px 0 0 var(--color-foreground-subtle); }
 
 .fx-scroll { flex: 1; min-height: 0; overflow: auto; padding: 2px 8px 32px 10px; }
 .fx-prose.prose { font-size: 13.5px; line-height: 1.7; }

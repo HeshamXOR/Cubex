@@ -1,3 +1,4 @@
+import { isRailCollapsed } from './runRail'
 import { createContext, createElement, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api } from './api'
 import { useStore } from '../state/store'
@@ -146,8 +147,9 @@ export function ChangesProvider({ children }: { children: ReactNode }): JSX.Elem
       seen.current.empty = true
       return
     }
-    // Only the move from nothing to something, observed live, opens the panel.
-    if (seen.current.empty && !opened.current.has(conversationId) && window.innerWidth >= AUTO_OPEN_MIN_WIDTH) {
+    // Only the move from nothing to something, observed live, opens the panel. The run rail lists the changed files
+    // with a way into the review, so the panel opens by itself only when the person has put the rail away.
+    if (seen.current.empty && !opened.current.has(conversationId) && window.innerWidth >= AUTO_OPEN_MIN_WIDTH && isRailCollapsed()) {
       opened.current.add(conversationId)
       const state = useStore.getState()
       if (!state.panelOpen) state.openReview(changes.files[0]?.path)

@@ -1,3 +1,4 @@
+import { formatSeconds } from './format'
 import { useEffect, useState } from 'react'
 
 /**
@@ -17,8 +18,5 @@ export function useElapsed(startedAt: number | undefined, active: boolean, inter
 }
 
 export function formatElapsed(seconds: number): string {
-  if (seconds < 60) return `${seconds.toFixed(1)}s`
-  const m = Math.floor(seconds / 60)
-  const s = Math.floor(seconds % 60)
-  return `${m}m ${s}s`
+  return formatSeconds(seconds * 1000)
 }

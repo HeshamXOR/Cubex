@@ -1,11 +1,13 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
-import { delimiter, join, resolve, sep } from 'node:path'
+import { tmpdir } from 'node:os'
+import { join, resolve, sep } from 'node:path'
 import { peerCommandLine, type CliPeer } from '@shared/peers'
 import { childEnvironment } from '../childEnv'
-import { LaunchError, locateCommand, resolveLaunch, type LaunchInput, type LaunchPlan } from '../mcp/resolveLaunch'
+import { LaunchError, resolveLaunch, type LaunchInput, type LaunchPlan } from '../mcp/resolveLaunch'
 import { terminateShellTree } from '../tools/shellProcess'
+import { launchProgram, locateProgram } from './appPrograms'
+import { freshPathEntries, toolDirectories, withExtraPath } from './environment'
 import { cleanOutput, failureHint, parsePeerOutput, PEER_STDERR_TAIL, PEER_STDOUT_CAP, tail } from './output'
 
 /** How long a program may take to answer one message. Agents that read a project and think can take minutes. */
@@ -39,26 +41,19 @@ export interface PeerRun {
   hint?: string
   /** What the program wrote to its error output, cleaned and cut to its end. */
   output?: string
+  /** What a test learned about the agent besides its reply, in a sentence. Not an error. */
+  note?: string
   durationMs: number
 }
 
 // --- Where a program is found ------------------------------------------------
 
-/** Where installers put command line tools that a desktop app launched from a menu often does not have on its PATH. */
-function fallbackDirectories(): string[] {
-  const home = homedir()
-  return [
-    join(home, '.local', 'bin'),
-    join(home, '.claude', 'local'),
-    join(home, '.npm-global', 'bin'),
-    ...(process.platform === 'win32' ? [join(process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'npm')] : ['/usr/local/bin', '/opt/homebrew/bin'])
-  ]
-}
-
-const samePath = (a: string, b: string): boolean => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b)
-
-/** What a program is started with: the environment Cubex hands to any child, plus the variables the person chose to pass, and the usual tool folders at the end of PATH. */
-export function peerEnvironment(peer: CliPeer, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+/**
+ * What a program is started with: the environment Cubex hands to any child, plus the variables the person chose to pass.
+ * A desktop app launched from a menu often lacks tools on its PATH that a terminal has, so the PATH a new terminal would
+ * get (from the registry, on Windows) and the usual tool folders are added at the end, never ahead of the person's own.
+ */
+export function peerEnvironment(peer: { passEnv?: string[] }, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const env = childEnvironment(base)
   for (const name of peer.passEnv ?? []) {
     // Names are not case sensitive on Windows, and are everywhere else.
@@ -67,15 +62,14 @@ export function peerEnvironment(peer: CliPeer, base: NodeJS.ProcessEnv = process
     if (key !== undefined && value !== undefined) env[key] = value
   }
   const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? 'PATH'
-  const entries = (env[pathKey] ?? '').split(delimiter).filter(Boolean)
-  for (const directory of fallbackDirectories()) if (!entries.some((entry) => samePath(entry, directory))) entries.push(directory)
-  env[pathKey] = entries.join(delimiter)
+  // The registry is read for the real environment only: a caller that names its own gets exactly what it named.
+  env[pathKey] = withExtraPath(env[pathKey] ?? '', [...(base === process.env ? freshPathEntries() : []), ...toolDirectories(base)])
   return env
 }
 
-/** The file a program peer would run, or undefined when it is not installed. */
-export function locatePeer(peer: CliPeer, base: NodeJS.ProcessEnv = process.env): string | undefined {
-  return locateCommand({ command: peer.command, env: peerEnvironment(peer, base) })
+/** The file a program peer would run, or undefined when it is not installed. Found on PATH, or where the Claude desktop app keeps its own copy. */
+export function locatePeer(peer: { command: string; passEnv?: string[] }, base: NodeJS.ProcessEnv = process.env): string | undefined {
+  return locateProgram(peer.command, peerEnvironment(peer, base))?.path
 }
 
 // --- The empty folder a program starts in -------------------------------------
@@ -145,7 +139,7 @@ export async function runCliPeer(peer: CliPeer, options: PeerRunOptions): Promis
   const env = peerEnvironment(peer, options.env)
   let plan: LaunchPlan
   try {
-    plan = (options.launch ?? resolveLaunch)({
+    plan = launchProgram(options.launch ?? resolveLaunch, {
       command: line.command,
       args: line.input === 'argument' ? [...line.args, options.prompt] : line.args,
       cwd: options.cwd,

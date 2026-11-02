@@ -24,7 +24,7 @@ export interface McpServerConfig {
 /** A lifecycle hook: a shell command run on a harness event. */
 export interface HookConfig {
   id: string
-  event: 'PreToolUse' | 'PostToolUse' | 'UserPromptSubmit' | 'Stop'
+  event: 'PreToolUse' | 'PostToolUse' | 'UserPromptSubmit' | 'Stop' | 'SessionStart' | 'PreCompact' | 'PostCompact' | 'SubagentStop' | 'Notification'
   /** Tool-name substring to match (empty = all tools / events). */
   matcher?: string
   command: string
@@ -36,6 +36,11 @@ export interface AppSettings {
     theme: ThemeMode
     language: string
     startMaximized: boolean
+    /**
+     * Keep the computer from going to sleep while a reply is generating or a background task is running. Only the
+     * computer: the screen may still turn off. A missing value means on (see `main/power/PowerKeeper.ts`).
+     */
+    keepAwake?: boolean
     /** The folder/project Cubex is scoped to (shown to the model as context). */
     workspacePath?: string
     /** Recently opened project folders (most-recent first), for the switcher. */
@@ -174,7 +179,7 @@ export const DEFAULT_NOTIFICATIONS: NotificationSettings = {
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  general: { theme: 'dark', language: 'en', startMaximized: false },
+  general: { theme: 'dark', language: 'en', startMaximized: false, keepAwake: true },
   appearance: { accent: '#4f6cff', font: 'system', density: 'comfortable', radius: 'default' },
   ai: {
     maxOutputTokens: 0,

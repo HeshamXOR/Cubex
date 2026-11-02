@@ -9,6 +9,7 @@ import { useSmoothText } from '../lib/useSmoothText'
 import { useElapsed } from '../lib/useElapsed'
 import { formatSeconds } from '../lib/format'
 import { groupTranscript, type Segment } from '../lib/transcriptGroups'
+import { latestReasoningStep } from '../lib/reasoningStep'
 import { useStore } from '../state/store'
 import { Markdown } from './Markdown'
 import { ToolCard } from './ToolCard'
@@ -66,14 +67,23 @@ function ReasoningText({ text, live }: { text: string; live: boolean }): JSX.Ele
 
 function Reasoning({ segment, live, startedAt }: { segment: Extract<Segment, { kind: 'reasoning' }>; live: boolean; startedAt?: number }): JSX.Element {
   const elapsed = useElapsed(startedAt, live, 1000)
-  const took = segment.durationMs === undefined ? undefined : formatSeconds(segment.durationMs)
-  // Auto-open while the model is reasoning so its thinking is readable live; it folds
-  // back to "Thought for Ns" once the turn moves on.
+  // Under a second reads as plain "Thought": "Thought for 0s" says nothing.
+  const took = segment.durationMs === undefined || segment.durationMs < 1000 ? undefined : formatSeconds(segment.durationMs)
+  const step = live ? latestReasoningStep(segment.text) : ''
+  // While live, the bar steps through each new thought inline; clicking opens the full reasoning log at any time.
   return (
-    <details open={live ? true : undefined} className={`reasoning transcript-block transcript-block--reasoning ${live ? 'is-live' : ''}`} data-transcript="reasoning">
+    <details className={`reasoning transcript-block transcript-block--reasoning ${live ? 'is-live' : ''}`} data-transcript="reasoning">
       <summary>
         <CubexThinking size={14} className="reasoning__icon" active={live} />
         <span className={`reasoning__label ${live ? 'is-shimmer' : ''}`}>{live ? 'Thinking' : took ? `Thought for ${took}` : 'Thought'}</span>
+        {live && step ? (
+          <>
+            <span className="reasoning__sep" aria-hidden="true" />
+            <span className="reasoning__ticker" aria-hidden="true">
+              <span className="reasoning__step" key={step}>{step}</span>
+            </span>
+          </>
+        ) : null}
         {live && startedAt !== undefined && <span className="reasoning__time">{formatSeconds(elapsed * 1000)}</span>}
         <ChevronRight size={13} className="reasoning__chev" aria-hidden="true" />
       </summary>

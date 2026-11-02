@@ -152,6 +152,45 @@ describe('reasoning models behind a generic OpenAI-compatible endpoint', () => {
     expect(infersReasoning('mixtral-8x7b-instruct-v0.1')).toBe(false)
   })
 
+  it('recognises newly added proxy and gateway reasoning model families', () => {
+    const reasoningIds = [
+      'deepseek-ai/deepseek-v3.1',
+      'deepseek-ai/deepseek-v3-thinking',
+      'deepseek-ai/deepseek-v4',
+      'anthropic/claude-3-7-sonnet',
+      'anthropic/claude-sonnet-4-5',
+      'anthropic/claude-opus-4',
+      'anthropic/claude-fable-3',
+      'google/gemini-2.5-pro',
+      'google/gemini-3-flash',
+      'x-ai/grok-3-mini',
+      'x-ai/grok-4',
+      'cogito-70b',
+      'openthinker-32b',
+      'olympiccoder-7b',
+      'marco-o1',
+      'skywork-o1',
+      'step-r1',
+      'reka-flash-3'
+    ]
+    for (const id of reasoningIds) {
+      expect(infersReasoning(id), id).toBe(true)
+      expect(compat(id).length, id).toBeGreaterThan(0)
+    }
+
+    const nonReasoningIds = [
+      'deepseek-ai/deepseek-v3',
+      'anthropic/claude-3-5-haiku',
+      'google/gemini-2.0-flash',
+      'x-ai/grok-2',
+      'x-ai/grok-3'
+    ]
+    for (const id of nonReasoningIds) {
+      expect(infersReasoning(id), id).toBe(false)
+      expect(compat(id), id).toEqual([])
+    }
+  })
+
   it('leaves a native provider that truly reports no reasoning hidden', () => {
     expect(effortOptionsFor('anthropic', { id: 'claude-opus-5-5', supportsReasoning: false })).toEqual([])
   })

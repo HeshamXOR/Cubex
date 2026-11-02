@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
-  ANTIGRAVITY_ARGUMENTS, CONSULT_TOOL, PEER_ASKED_CHARS, PEER_LIMITS, claudeCodeArguments, cleanPeerIds, clampRounds, describePeer, enabledPeers,
-  newCliPeer, newModelPeer, normalizePeerSettings, peerCommandLine, peerSlug, sanitizePeerActivity, uniquePeerId, validatePeer,
-  type CliPeer, type ModelPeer, type PeerConfig
+  ACP_PRESETS, ANTIGRAVITY_ARGUMENTS, CONSULT_TOOL, PEER_ASKED_CHARS, PEER_LIMITS, acpPreset, claudeCodeArguments, cleanPeerIds, clampRounds,
+  commandLineText, describePeer, enabledPeers, isAcpPresetId, newAcpPeer, newCliPeer, newModelPeer, normalizePeerSettings, peerCommandLine,
+  peerSlug, sanitizePeerActivity, uniquePeerId, validatePeer,
+  type AcpPeer, type CliPeer, type ModelPeer, type PeerConfig
 } from './peers'
 
 const claude: CliPeer = { kind: 'cli', id: 'claude-code', name: 'Claude Code', enabled: true, preset: 'claude-code', command: 'claude' }
 const custom: CliPeer = { kind: 'cli', id: 'codex', name: 'Codex', enabled: true, preset: 'custom', command: 'codex', args: ['exec', '-'], input: 'stdin' }
 const model: ModelPeer = { kind: 'model', id: 'gpt', name: 'GPT', enabled: true, providerId: 'openai', model: 'gpt-5' }
+const gemini: AcpPeer = { kind: 'acp', id: 'gemini', name: 'Gemini', enabled: true, preset: 'gemini', command: 'gemini', args: ['--acp'] }
 
 describe('how each kind of agent is started', () => {
   it('never gives Claude Code more than reading, and no permission bypass', () => {
@@ -63,7 +65,7 @@ describe('validatePeer', () => {
     [{ ...claude, command: '' }, 'program'],
     [{ ...claude, command: 'a\nb' }, 'control'],
     [{ ...claude, preset: 'other' }, 'kind'],
-    [{ ...claude, kind: 'service' }, 'neither'],
+    [{ ...claude, kind: 'service' }, 'kind of agent'],
     [{ ...claude, readProject: 'yes' }, 'project'],
     [{ ...custom, args: ['ok', 1] }, 'Arguments'],
     [{ ...custom, args: Array.from({ length: PEER_LIMITS.args + 1 }, () => 'a') }, 'arguments or fewer'],
@@ -194,9 +196,79 @@ describe('the card in the thread', () => {
   })
 })
 
+describe('agents that speak ACP', () => {
+  it('are accepted with only the fields they have', () => {
+    expect(validatePeer({ ...gemini, input: 'argument', extra: 1 })).toEqual({ ok: true, value: gemini })
+    const full = validatePeer({ ...gemini, readProject: true, passEnv: ['GEMINI_API_KEY'], authMethod: ' oauth-personal ' })
+    expect(full).toEqual({ ok: true, value: { ...gemini, readProject: true, passEnv: ['GEMINI_API_KEY'], authMethod: 'oauth-personal' } })
+  })
+
+  it('lose what is off, empty or blank', () => {
+    const checked = validatePeer({ ...gemini, args: [], readProject: false, passEnv: [], authMethod: '   ' })
+    const { args: _args, ...bare } = gemini
+    expect(checked).toEqual({ ok: true, value: bare })
+    expect(checked.ok && Object.keys(checked.value).sort()).toEqual(['command', 'enabled', 'id', 'kind', 'name', 'preset'])
+  })
+
+  it.each([
+    [{ ...gemini, preset: 'claude-code' }, 'kind of agent'],
+    [{ ...gemini, preset: undefined }, 'kind of agent'],
+    [{ ...gemini, command: '  ' }, 'program'],
+    [{ ...gemini, command: 'a\nb' }, 'control'],
+    [{ ...gemini, args: '--acp' }, 'Arguments'],
+    [{ ...gemini, args: ['a\0b'] }, 'null'],
+    [{ ...gemini, readProject: 'yes' }, 'project'],
+    [{ ...gemini, authMethod: 5 }, 'sign-in method'],
+    [{ ...gemini, authMethod: 'x'.repeat(PEER_LIMITS.authMethod + 1) }, 'sign-in method'],
+    [{ ...gemini, authMethod: 'two\nlines' }, 'sign-in method'],
+    [{ ...gemini, passEnv: ['1BAD'] }, 'valid variable name']
+  ])('refuse %j', (value, fragment) => {
+    const checked = validatePeer(value)
+    expect(checked.ok).toBe(false)
+    if (!checked.ok) expect(checked.error.toLowerCase()).toContain(fragment.toLowerCase())
+  })
+
+  it('come from presets with the launch command the registry publishes, which a person can edit', () => {
+    expect(newAcpPeer('gemini', [])).toEqual(gemini)
+    expect(newAcpPeer('opencode', [])).toMatchObject({ id: 'opencode', command: 'opencode', args: ['acp'] })
+    const second = newAcpPeer('gemini', [gemini])
+    expect(second).toMatchObject({ id: 'gemini-2', name: 'Gemini 2' })
+    expect(newAcpPeer('custom', [])).toEqual({ kind: 'acp', id: 'acp', name: '', enabled: true, preset: 'custom', command: '' })
+    // A copy of a preset's arguments, never the preset's own list.
+    expect(newAcpPeer('gemini', []).args).not.toBe(acpPreset('gemini').args)
+  })
+
+  it('have presets that are valid, distinct and, when they run through npx, pinned to a version', () => {
+    expect(new Set(ACP_PRESETS.map((preset) => preset.id)).size).toBe(ACP_PRESETS.length)
+    for (const preset of ACP_PRESETS.filter((entry) => entry.id !== 'custom')) {
+      expect(validatePeer(newAcpPeer(preset.id, [])).ok).toBe(true)
+      expect(isAcpPresetId(preset.id)).toBe(true)
+      if (preset.npm) {
+        expect(preset.command).toBe('npx')
+        expect(preset.args[0]).toBe('--yes')
+        expect(preset.args[preset.args.length - 1]).toMatch(/^@[\w-]+\/[\w-]+@\d+\.\d+\.\d+$/)
+      }
+    }
+    expect(isAcpPresetId('claude-code')).toBe(false)
+    expect(isAcpPresetId(undefined)).toBe(false)
+  })
+
+  it('are described by what runs', () => {
+    expect(describePeer(gemini)).toBe('gemini --acp')
+    expect(describePeer({ ...gemini, readProject: true })).toBe('gemini --acp, can read this project')
+    expect(commandLineText('agent', ['--name', 'two words', 'say "hi"', ''])).toBe('agent --name "two words" "say \\"hi\\"" ""')
+  })
+
+  it('are kept in settings with the others', () => {
+    const settings = normalizePeerSettings({ list: [claude, gemini, model, { ...gemini, preset: 'nope', id: 'bad' }] })
+    expect(settings.list.map((peer) => peer.id)).toEqual(['claude-code', 'gemini', 'gpt'])
+    expect(enabledPeers(settings, ['gemini', 'gpt']).map((peer) => peer.kind)).toEqual(['acp', 'model'])
+  })
+})
+
 describe('typing', () => {
-  it('lets a list of peers be a list of either kind', () => {
-    const list: PeerConfig[] = [claude, model]
-    expect(list.map((peer) => peer.kind)).toEqual(['cli', 'model'])
+  it('lets a list of peers be a list of any kind', () => {
+    const list: PeerConfig[] = [claude, model, gemini]
+    expect(list.map((peer) => peer.kind)).toEqual(['cli', 'model', 'acp'])
   })
 })

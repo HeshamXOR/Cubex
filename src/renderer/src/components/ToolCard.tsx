@@ -1,11 +1,14 @@
-import { useId, useState } from 'react'
-import { BookOpen, Boxes, Check, ChevronRight, Contrast, FileText, FolderTree, Globe, MessagesSquare, Search, Telescope, Terminal, Wrench, X } from 'lucide-react'
+import { useId, useRef, useState } from 'react'
+import { BookOpen, Boxes, Check, ChevronRight, Contrast, FileText, Flag, FolderTree, Globe, Handshake, MessagesSquare, Search, Telescope, Terminal, Wrench, X } from 'lucide-react'
 import type { ToolActivity } from '../../../shared/ipc'
 import { PEER_VERDICT_LABEL, type PeerVerdict } from '../../../shared/peers'
+import { delegateRow } from '../lib/delegateText'
 import { formatSeconds } from '../lib/format'
 import { fromSubagent as isFromSubagent, toolKind, toolTarget } from '../lib/transcriptGroups'
+import { useElapsed } from '../lib/useElapsed'
 import { ActivityGlyph, type ActivityGlyphKind } from '../theme/StateIcons'
 import { CommandOutputPanel } from './CommandOutputPanel'
+import { DelegatePanel } from './DelegatePanel'
 import { Markdown } from './Markdown'
 import { PathLink } from './PathLink'
 import './toolcard.css'
@@ -20,8 +23,10 @@ const ICON: Record<string, JSX.Element> = {
   web_fetch: <Globe size={15} strokeWidth={1.65} />,
   web_search: <Telescope size={15} strokeWidth={1.65} />,
   skill: <BookOpen size={15} strokeWidth={1.65} />,
+  goal_update: <Flag size={15} strokeWidth={1.65} />,
   delegate_to_subagent: <Boxes size={15} strokeWidth={1.65} />,
-  consult_agent: <MessagesSquare size={15} strokeWidth={1.65} />
+  consult_agent: <MessagesSquare size={15} strokeWidth={1.65} />,
+  delegate_task: <Handshake size={15} strokeWidth={1.65} />
 }
 const GLYPH: Record<string, ActivityGlyphKind> = {
   write_file: 'editing', edit_file: 'editing', remove_file: 'removing', delete_file: 'removing',
@@ -54,8 +59,14 @@ export function ToolCard({ tool, waitingForInput = false }: { tool: ToolActivity
   const fromSubagent = isFromSubagent(tool)
   const target = toolTarget(tool)
   const hasOutput = !!(tool.outputId && tool.outputConversationId)
-  const hasDetails = !!(tool.diff || tool.detail || hasOutput)
-  const phase = tool.interrupted ? 'Interrupted' : error ? 'Failed' : waiting ? 'Waiting for you' : running ? 'Running' : queued ? 'Queued' : 'Completed'
+  // A task handed to another agent shows its steps and files, so there is always something to open.
+  const delegate = tool.delegate
+  const delegation = delegate ? delegateRow(delegate) : undefined
+  const started = useRef(Date.now())
+  const elapsed = useElapsed(started.current, !!delegate && tool.phase === 'running', 1000)
+  const cancelled = delegation?.ended === 'Cancelled'
+  const hasDetails = !!(tool.diff || tool.detail || hasOutput || delegate)
+  const phase = tool.interrupted ? 'Interrupted' : delegation?.ended ?? (error ? 'Failed' : waiting ? 'Waiting for you' : running ? 'Running' : queued ? 'Queued' : 'Completed')
   const removing = glyph === 'removing'
   // A row with nothing to expand is plain text, so the file or folder it names can be a link. A button cannot hold one.
   const linkable = !hasDetails && !!target && LINKED_TOOLS.has(tool.name)
@@ -77,23 +88,30 @@ export function ToolCard({ tool, waitingForInput = false }: { tool: ToolActivity
           {tool.peer.verdict && <span className={`toolrow__verdict toolrow__verdict--${tool.peer.verdict}`}>{VERDICT_ICON[tool.peer.verdict]}{PEER_VERDICT_LABEL[tool.peer.verdict]}</span>}
         </span>
       )}
+      {delegation && (
+        <>
+          {delegation.step && <span className="toolrow__step" title={delegation.step}>{delegation.step}</span>}
+          <span className="toolrow__peer"><span className="toolrow__meta">{tool.phase === 'running' ? [delegation.meta, formatSeconds(elapsed * 1000)].join(', ') : delegation.meta}</span></span>
+        </>
+      )}
       {(!!tool.added || !!tool.removed) && <span className="toolrow__diff" aria-label={`${tool.added ?? 0} lines added, ${tool.removed ?? 0} removed`}>
         {!!tool.added && <span className="diff-add">+{tool.added}</span>}
         {!!tool.removed && <span className="diff-del">−{tool.removed}</span>}
       </span>}
       {(running || waiting || error || queued)
-        ? <span className={`toolrow__phase ${error && !tool.interrupted ? 'toolrow__phase--error' : ''} ${waiting ? 'toolrow__phase--waiting' : ''}`}>{phase}</span>
+        ? <span className={`toolrow__phase ${error && !tool.interrupted && !cancelled ? 'toolrow__phase--error' : ''} ${waiting ? 'toolrow__phase--waiting' : ''}`}>{phase}</span>
         : <span className="sr-only">{phase}</span>}
       {hasDetails && <ChevronRight size={14} className={`toolrow__chev ${open ? 'is-open' : ''}`} aria-hidden="true" />}
     </>
   )
 
   return (
-    <div className={`toolrow ${removing ? 'toolrow--removing' : ''}`} data-phase={tool.interrupted ? 'interrupted' : waiting ? 'waiting' : tool.phase} data-tool={tool.name}>
+    <div className={`toolrow ${removing ? 'toolrow--removing' : ''}`} data-phase={tool.interrupted || cancelled ? 'interrupted' : waiting ? 'waiting' : tool.phase} data-tool={tool.name}>
       {linkable
         ? <div className="toolrow__summary toolrow__summary--static">{summary}</div>
         : <button className="toolrow__summary" onClick={() => hasDetails && setOpen(value => !value)} disabled={!hasDetails} aria-expanded={hasDetails ? open : undefined} aria-controls={hasDetails ? id : undefined}>{summary}</button>}
-      {open && tool.diff ? <div id={id} className="toolrow__diffview" role="region" aria-label={`${kind} changes`}>
+      {open && delegate ? <DelegatePanel id={id} tool={tool} activity={delegate} />
+        : open && tool.diff ? <div id={id} className="toolrow__diffview" role="region" aria-label={`${kind} changes`}>
         {tool.diff.split('\n').map((line, index) => {
           const tag = line[0]
           const change = tag === '+' || tag === '-'

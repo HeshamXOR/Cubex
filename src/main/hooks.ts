@@ -18,12 +18,31 @@ export interface HookPayload {
   tool_result?: string
   prompt?: string
   cwd?: string
+  /** Stop only: true when the agent is already working because an earlier Stop hook of this turn asked it to. */
+  stop_hook_active?: boolean
+  /** SessionStart, PreCompact, PostCompact, Notification: the conversation the event belongs to. */
+  session_id?: string
+  /** PreCompact and PostCompact: what started the summary. */
+  trigger?: 'auto' | 'manual' | 'overflow'
+  /** PostCompact: the summary that was saved, shortened. Absent when the summary failed. */
+  summary?: string
+  /** Notification: what Cubex is waiting for. */
+  notification_type?: 'permission' | 'question'
+  /** Notification: a sentence saying what it is waiting for. */
+  message?: string
 }
 
 export interface HookOutcome {
   block: boolean
   reason?: string
+  /** UserPromptSubmit: text for the model only, added to the person's message (at most 4,000 characters). */
+  additionalContext?: string
+  /** PreToolUse: the tool runs with this input instead. */
+  updatedInput?: Record<string, unknown>
 }
+
+/** What a UserPromptSubmit hook may add to the message, in characters. */
+export const MAX_ADDITIONAL_CONTEXT = 4_000
 
 /** A hook is a guard, not a data channel: cap what we buffer from it. */
 const MAX_HOOK_OUTPUT = 64 * 1024
@@ -42,6 +61,8 @@ interface RunResult {
   startError?: string
   blocked: boolean
   reason?: string
+  additionalContext?: string
+  updatedInput?: Record<string, unknown>
 }
 
 function runOne(command: string, payload: HookPayload, cwd: string | undefined, timeoutMs = HOOK_TIMEOUT_MS): Promise<RunResult> {
@@ -85,16 +106,22 @@ function runOne(command: string, payload: HookPayload, cwd: string | undefined, 
       // {"decision":"block","reason":"..."}. A hook that was killed for taking too long never blocks.
       let blocked = !timedOut && code === 2
       let reason: string | undefined = err.trim() || undefined
+      let additionalContext: string | undefined
+      let updatedInput: Record<string, unknown> | undefined
       try {
-        const j = JSON.parse(out.trim()) as { decision?: string; reason?: unknown }
-        if (j && j.decision === 'block' && !timedOut) {
-          blocked = true
-          reason = typeof j.reason === 'string' ? j.reason : reason
+        const j = JSON.parse(out.trim()) as { decision?: string; reason?: unknown; additionalContext?: unknown; updatedInput?: unknown }
+        if (j && !timedOut) {
+          if (j.decision === 'block') {
+            blocked = true
+            reason = typeof j.reason === 'string' ? j.reason : reason
+          }
+          if (typeof j.additionalContext === 'string' && j.additionalContext.trim()) additionalContext = j.additionalContext.trim()
+          if (j.updatedInput && typeof j.updatedInput === 'object' && !Array.isArray(j.updatedInput)) updatedInput = j.updatedInput as Record<string, unknown>
         }
       } catch {
         /* stdout isn't control JSON — that's fine */
       }
-      finish({ exitCode: code, blocked, reason })
+      finish({ exitCode: code, blocked, reason, ...(additionalContext ? { additionalContext } : {}), ...(updatedInput ? { updatedInput } : {}) })
     })
     try {
       // The hook can exit before the payload is written; without a listener the
@@ -110,23 +137,39 @@ function runOne(command: string, payload: HookPayload, cwd: string | undefined, 
 
 /**
  * Run the hooks matching an event, in order. A hook receives the payload as JSON
- * on stdin. Only PreToolUse can veto (exit 2 or a block decision); every other
- * event is fire-and-forget. A hook that errors or times out never breaks the
- * agent loop — it's treated as "no objection".
+ * on stdin. PreToolUse can veto a tool (or replace its input with `updatedInput`),
+ * UserPromptSubmit can stop the turn or add `additionalContext` for the model, and
+ * Stop can ask the agent to keep working (exit 2 or a block decision, with the
+ * reason as the message); every other event is fire-and-forget. A hook that errors
+ * or times out never breaks the agent loop — it's treated as "no objection".
  */
 export async function runHooks(hooks: HookConfig[] | undefined, payload: HookPayload, cwd?: string): Promise<HookOutcome> {
   const matching = (hooks ?? []).filter(
     (h) => h.enabled && h.event === payload.event && hookMatches(h.matcher, payload.tool_name ?? payload.event)
   )
+  let current = payload
+  let updatedInput: Record<string, unknown> | undefined
+  const context: string[] = []
   for (const h of matching) {
     try {
-      const r = await runOne(h.command, payload, cwd)
-      if (payload.event === 'PreToolUse' && r.blocked) return { block: true, reason: r.reason }
+      const r = await runOne(h.command, current, cwd)
+      if (HOOK_EVENT_INFO[payload.event].canBlock && r.blocked) return { block: true, reason: r.reason }
+      if (payload.event === 'PreToolUse' && r.updatedInput) {
+        updatedInput = r.updatedInput
+        // The next hook of the event sees the input the tool would now run with.
+        current = { ...current, tool_input: r.updatedInput }
+      }
+      if (payload.event === 'UserPromptSubmit' && r.additionalContext) context.push(r.additionalContext)
     } catch {
       /* never let a hook failure break the turn */
     }
   }
-  return { block: false }
+  const additionalContext = context.join('\n\n').slice(0, MAX_ADDITIONAL_CONTEXT)
+  return {
+    block: false,
+    ...(updatedInput ? { updatedInput } : {}),
+    ...(additionalContext ? { additionalContext } : {})
+  }
 }
 
 // --- Testing one hook -----------------------------------------------------------
@@ -166,7 +209,20 @@ export function sampleHookPayload(request: HookTestRequest, cwd: string): HookPa
     case 'UserPromptSubmit':
       return { event: 'UserPromptSubmit', prompt: 'Add a retry to the upload helper.', cwd }
     case 'Stop':
-      return { event: 'Stop', cwd }
+      return { event: 'Stop', cwd, stop_hook_active: false }
+    case 'SessionStart':
+      return { event: 'SessionStart', session_id: 'sample-conversation', cwd }
+    case 'PreCompact':
+      return { event: 'PreCompact', session_id: 'sample-conversation', trigger: 'auto', cwd }
+    case 'PostCompact':
+      return { event: 'PostCompact', session_id: 'sample-conversation', trigger: 'auto', summary: 'Goal: add a retry to the upload helper.', cwd }
+    case 'SubagentStop':
+      return {
+        event: 'SubagentStop', tool_name: 'subagent', cwd,
+        tool_input: { task: 'Find where uploads are retried.' }, tool_result: 'Sample report from a subagent.'
+      }
+    case 'Notification':
+      return { event: 'Notification', session_id: 'sample-conversation', notification_type: 'permission', message: 'Cubex is waiting for you to approve run_command.', cwd }
   }
 }
 

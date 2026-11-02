@@ -1,0 +1,39 @@
+/* The goal above the composer, and the divider where Cubex sent the agent back to work. Neutral surface and hairlines,
+   like the queue; amber marks a goal that is waiting for the person. */
+
+.goalbar {
+  margin-bottom: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  overflow: hidden;
+  animation: goalbar-in 150ms ease-out;
+}
+.goalbar--attention { border-left: 2px solid var(--color-warning); }
+@keyframes goalbar-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+.goalbar__head { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 4px 6px 4px 12px; font-size: 13px; }
+.goalbar__title { flex: none; display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--color-foreground); }
+.goalbar__icon { flex: none; color: var(--color-foreground-subtlest); }
+.goalbar__icon--attention { color: var(--color-warning); }
+.goalbar__text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-foreground-subtle); }
+.goalbar__actions { flex: none; display: inline-flex; align-items: center; gap: 4px; }
+.goalbar__x { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: var(--color-foreground-subtlest); transition: background 0.12s, color 0.12s; }
+.goalbar__x:hover { background: var(--color-hover); color: var(--color-foreground); }
+.goalbar__x:focus-visible { outline: 2px solid var(--color-input-border-focused); outline-offset: 1px; }
+
+.goalbar__state { margin: 0; padding: 0 12px 8px; font-size: 12px; line-height: 1.5; color: var(--color-foreground-subtle); }
+.goalbar__detail { color: var(--color-foreground-subtlest); }
+.goalbar__budget { margin: 0; padding: 6px 12px 8px; border-top: 1px solid var(--color-border); font-size: 12px; color: var(--color-foreground-subtlest); font-variant-numeric: tabular-nums; }
+.goalbar__budget span { margin-right: 4px; }
+.goalbar__check { margin: 0; padding: 6px 12px 8px; border-top: 1px solid var(--color-border); font-size: 12px; color: var(--color-foreground-subtlest); }
+.goalbar__check code { font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; color: var(--color-foreground-subtle); overflow-wrap: anywhere; }
+
+/* In the thread: where the goal sent the agent back to work. */
+.goalcheck { width: 100%; margin: 6px 0 22px; padding-top: 12px; border-top: 1px solid var(--color-border); color: var(--color-foreground-subtle); font-size: 12.5px; line-height: 1.5; }
+.goalcheck__row { display: flex; align-items: center; gap: 8px; min-height: 22px; }
+.goalcheck__row > svg { flex: none; color: var(--color-foreground-subtlest); }
+.goalcheck__label { min-width: 0; font-weight: 500; color: var(--color-foreground); }
+.goalcheck__note { margin: 1px 0 0 22px; font-size: 12px; color: var(--color-foreground-subtlest); overflow-wrap: anywhere; }
+
+@media (prefers-reduced-motion: reduce) { .goalbar { animation: none; } .goalbar__x { transition: none; } }

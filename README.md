@@ -70,7 +70,8 @@ macOS and Linux targets are configured in the repository but have not been teste
 1. Open **Providers**, choose **Add provider**, pick a preset and paste your API key. Select **Test connection**
    to confirm it works.
    - Cubex talks to provider APIs with your own key. A ChatGPT or Claude chat subscription does not include API
-     access, so it cannot be used here.
+     access, so it cannot be used for a provider here. To work with a subscription you already have, add the vendor's
+     own program, such as Claude Code or Codex, under **Other agents**: it uses the account it is signed in with.
    - No key yet? Add **Offline demo**. It gives simulated replies, so you can try the whole flow without a model.
    - Want everything on your PC? Install [Ollama](https://ollama.com), then open **Local models** and download a
      model that fits your hardware.
@@ -118,14 +119,29 @@ Cubex ships 17 provider presets:
 - **Safe file edits.** An edit is rejected when the file changed since Cubex last read it. Paths outside the
   project folder, including through symlinks, are refused.
 - **Research subagents.** Cubex can hand a bounded, read-only subtask to a subagent and show what it did.
-- **Second opinions.** Add Claude Code, Antigravity, any command line program or a model from one of your providers as
-  another agent, and turn it on for a chat. Cubex can then talk a question through with it, for as many messages as you
-  allow, until the two agree or the limit is reached. You read and approve what is sent, and the conversation shows who
-  answered and whether they agreed. A program starts in an empty folder, so it sees only the message, unless you let
-  Claude Code read the project, and Claude Code is never allowed to change a file. [Other agents](docs/OTHER_AGENTS.md)
-  has the details.
+- **Other agents.** Settings finds the coding agents installed on this PC (Claude Code, Codex, Gemini CLI, OpenCode,
+  Cursor, GitHub Copilot, Goose, Qwen Code and Antigravity) and shows who is signed in to each. An agent is the
+  vendor's own program, so it works with the login it already has, such as a Claude or ChatGPT subscription, and
+  needs no API key. Cubex never reads or copies that login. Claude Code can come from the Claude desktop app, which
+  brings its own copy, so no command line install and no Node.js are needed. Antigravity works through Google's agent
+  runtime, which Cubex installs from Google when you ask, and you sign in to it once with your Google account. Add
+  one, or any agent that speaks the Agent Client Protocol, any command line program or a model from one of your
+  providers, and turn it on for a chat. The model can then ask it for a second opinion and talk a question through
+  with it, for as many messages as you allow, until the two agree or the limit is reached. An ACP agent that you allow
+  to take on tasks can also be handed a whole task, such as fixing a bug or writing tests. It works in the project,
+  each change it asks to make and each command it asks to run is answered by your permission mode, and what changed
+  is listed afterwards for Changes and Rewind. You read and approve what is sent, and the conversation shows who
+  answered. A program asked for an opinion starts in an empty folder, so it sees only the message, unless you let
+  Claude Code or an ACP agent read the project, and neither is then allowed to change a file or run a command.
+  [Other agents](docs/OTHER_AGENTS.md) has the details.
 - **Queue messages.** Keep typing while Cubex works. Messages wait in a queue and send when the turn ends.
   `Esc` stops the running turn.
+- **Goals.** `/goal all tests pass --check npm test` gives the task a goal, and the agent keeps working until it is
+  met. Cubex runs the check command after every turn, and the goal is met when it exits with 0. Without a command, the
+  agent says the goal is met and a model reads what happened in the turn before Cubex believes it. A bar above the
+  composer shows where the goal stands, with Pause and Resume. A goal also stops when the agent says it needs you,
+  after 15 turns, at a spending cap, or after two turns that did nothing. [Harness workflow](docs/HARNESS_WORKFLOW.md#goals)
+  has the details.
 - **Go back.** Restore code and conversation, only the conversation, or only the code, to any earlier message.
   Files you edited yourself are left alone, and a restore can be undone.
 - **Type checking after edits.** After Cubex edits a TypeScript or JavaScript file, the model is told about any
@@ -165,8 +181,10 @@ stay inspectable. Cubex can read a task's output and send it input.
   full history stays saved. Output from earlier tool calls is trimmed first, and the model can run a tool
   again if it needs the output back.
 - **Spending caps.** Set a limit per turn, per session and per day, and choose what happens at the limit:
-  stop, or warn. Cubex counts the cost that a provider reports with each answer (OpenRouter does). Usage from
-  a model with no price shows as "No price" and is not counted toward the caps. Local models cost nothing.
+  stop, or warn. Cubex counts the cost that a provider reports with each answer (OpenRouter does). When the provider
+  reports none, it multiplies the tokens used by the model's price from the public [models.dev](https://models.dev)
+  list and marks the amount as an estimate. Usage from a model with no price in either place shows as "No price" and is
+  not counted toward the caps. Local models cost nothing.
 
 ### Local models
 
@@ -177,8 +195,8 @@ offload, may be slow, not enough memory), a memory range and a speed range. Ever
 range and labeled with what it is based on, never as a promise.
 
 **Local models** detects a running Ollama, lists what is installed and downloads new models with progress you
-can cancel. **Local-only mode** in Settings sends requests to local providers only. It does not block tools or
-downloads.
+can cancel. **Local-only mode** in Settings sends requests to local providers only, and turns off update checks, the
+download of model prices and the agent programs under Other agents. It does not block tools or model downloads.
 
 <table>
   <tr>
@@ -193,7 +211,8 @@ downloads.
   spaces survive. Environment variables can be marked secret and are kept in the OS credential store. Their
   tools appear next to the built-in ones and go through the same permission checks.
 - **Hooks.** Run your own commands on `PreToolUse`, `PostToolUse`, `UserPromptSubmit` and `Stop`. A
-  `PreToolUse` hook can stop a tool call. Match tools by name, and test a hook from Settings before relying on it.
+  `PreToolUse` hook can stop a tool call, and a `Stop` hook can send the agent back to work when it says it is done.
+  Match tools by name, and test a hook from Settings before relying on it.
 - **Skills.** 18 skills ship with Cubex (software engineering workflow, debugging, testing, code review,
   security review, TypeScript and Python, frontend and backend, system design, research, technical writing and
   more). Cubex sees only their short descriptions until a task needs one, then loads the full instructions.
@@ -211,6 +230,8 @@ downloads.
   JSON or text.
 - Notifications tell you when a session needs you, finishes or fails, and stay quiet while Cubex is in front.
   The taskbar button flashes and shows a badge until you are back.
+- Windows does not put the PC to sleep while a reply is generating, a goal is being checked or a background task is
+  running. A switch under **General** turns that off.
 - Text and source files can be attached to a message. Unsupported formats say so instead of failing quietly.
 - Light and dark themes, with reduced motion respected.
 - Settings has a page for each topic, listed on the left, and the command palette finds a page by what is on it.
@@ -224,13 +245,20 @@ downloads.
   OS cannot encrypt, Cubex refuses to save a key and reads it from an environment variable instead.
 - **No telemetry.** Cubex sends nothing about you or your usage anywhere.
 - **Where requests go.** Only to the providers you configure, and wherever the tools you allow reach: web
-  search through DuckDuckGo, page fetches, MCP servers you add and Ollama downloads. Cubex also looks at GitHub's
-  releases for a newer version about every six hours, with a request that carries only the app's name and version
-  and that you can switch off, and it sends messages to the other agents you turn on.
+  search through DuckDuckGo, page fetches, MCP servers you add and Ollama downloads. Cubex also makes two requests
+  that carry nothing about you: one to GitHub's releases for a newer version, about every six hours, with only the
+  app's name and version, which you can switch off, and one to models.dev for the public list of model prices and
+  context sizes, at most every six hours. Local-only mode makes neither. Cubex sends messages to the other agents you
+  turn on.
 - **Updates.** The installer comes from GitHub, and Cubex runs it only after its size and SHA-256 match what GitHub
   recorded for the release, checked again right before it runs. The installer is not code-signed yet.
-- **Other agents.** The messages you approve go to the agent you chose, and most programs pass them on to their own
-  cloud service. A program runs in an empty folder, so it sees only the message. Local-only mode turns programs off.
+- **Other agents.** The messages and tasks you approve go to the agent you chose, and most programs pass them on to
+  their own cloud service. A program asked for an opinion runs in an empty folder, so it sees only the message,
+  unless you let Claude Code or an ACP agent read the project, and neither can then change a file or run a command.
+  An agent given a task works in the project, and your permission mode decides what it may change and run. Cubex
+  never reads or copies an agent's saved login, and keeps keys and tokens out of the programs it starts. Antigravity's
+  runtime is downloaded from Google only when you choose to install it, and is checked against a fixed size and
+  checksum before it runs. Local-only mode turns programs off, and blocks that download.
 - **Local data.** Conversations, plans and command output are kept in a local SQLite database and files in
   `cubex-data`, inside Cubex's application data folder. They are not encrypted by Cubex, and command output can
   contain anything a command printed. Set `CUBEX_DATA_DIR` to keep the data somewhere else.
@@ -297,14 +325,22 @@ rely on it:
   sessions that change the same files at the same time.
 - File restore points live in memory. After Cubex restarts you can still restore the conversation, but not the
   files.
-- Costs are counted only when the provider reports them, as OpenRouter does. Cubex has no built-in price list
-  yet, so for other cloud models the usage shows as "No price" and the spending caps do not cover it.
+- Costs come from what the provider reports, as OpenRouter does, or from the public models.dev price list, which is
+  an estimate. A model that neither covers shows as "No price" and the spending caps do not count it. You cannot enter
+  a price yourself yet.
 - MCP supports stdio servers. HTTP and SSE servers are not supported yet, and secret values are scrubbed from
   output by exact match only.
 - Local benchmarks have an engine in `packages/local` but no interface in this release.
 - Desktop notifications, taskbar flashing and the badge are covered by unit tests, but have not been checked by
   hand in a packaged build.
-- Other agents were tested with stand-in programs, not yet with the real Claude Code and Antigravity.
+- Other agents were tested with stand-in programs. Claude Code was also tried against the real program, with a
+  stand-in for the model service, but not signed in to a real account. Antigravity was tested in the packaged app with
+  a stand-in for Google's runtime, and not yet with the runtime itself: your first install and Google sign-in are that
+  test. ACP agents, tasks included, were tested with a stand-in ACP agent only. A task is handed over one at a time,
+  the model waits for its report, and the agent starts fresh for each one. An agent that offers modes and none that
+  asks before it changes things is given only tasks that read.
+- A goal keeps going only while its task is on screen, and it is forgotten when Cubex closes. Goals were tested with
+  stand-in models and commands, not yet over a long run with a real model.
 
 Found something wrong? Please [open an issue](https://github.com/HeshamXOR/Cubex/issues) with what you did and
 what you saw.
@@ -315,7 +351,6 @@ Ideas that are being considered, with no dates attached:
 
 - Git worktrees per session, so sessions can run side by side on one project.
 - Restore points that survive a restart.
-- Built-in prices for cloud models, so the spending caps work with every provider.
 - MCP over HTTP and SSE.
 - A benchmark page for local models, and signed installers.
 
@@ -325,14 +360,14 @@ Ideas that are being considered, with no dates attached:
 |---|---|
 | [Architecture](docs/ARCHITECTURE.md) | Layers, data flow and extension points |
 | [Providers](docs/PROVIDERS.md) | Adding a provider or an OpenAI-compatible endpoint |
-| [Harness workflow](docs/HARNESS_WORKFLOW.md) | Plans, permissions, review and workspace tools |
+| [Harness workflow](docs/HARNESS_WORKFLOW.md) | Plans, permissions, review, goals and workspace tools |
 | [Skills](docs/SKILLS.md) | The bundled skills, on-demand loading and project overrides |
 | [Local models](docs/LOCAL_MODELS.md) | Runtimes, downloads and the model catalog |
 | [Hardware analyzer](docs/HARDWARE_ANALYZER.md) | How hardware is detected and estimates are made |
 | [Benchmarks](docs/BENCHMARKS.md) | How the benchmark engine measures |
 | [Security](docs/SECURITY.md) | Credentials, sandboxing, the permission model, updates and other agents |
 | [Updates](docs/UPDATES.md) | What the update window shows, what Cubex checks before it installs, and how to try it without publishing |
-| [Other agents](docs/OTHER_AGENTS.md) | Setting up Claude Code, Antigravity, a program or a model, what each can see, and what leaves your PC |
+| [Other agents](docs/OTHER_AGENTS.md) | Finding agents on this PC, setting up Claude Code, Antigravity, an ACP agent, a program or a model, handing over tasks, what each can see, and what leaves your PC |
 | [Releasing](docs/RELEASING.md) | Cutting a release, what the workflow does, and what to do when it fails |
 | [Development](docs/DEVELOPMENT.md) | Setup, scripts and project layout |
 | [Testing](docs/TESTING.md) | The test suite and how to extend it |
@@ -346,6 +381,8 @@ Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) fi
 ## License
 
 [MIT](LICENSE). Open-source model licenses are shown in the app as their authors declare them, so check a
-model's license before you use it commercially.
+model's license before you use it commercially. Some of the code that sets up Google's Antigravity runtime was
+ported from [T3 Code](https://github.com/pingdotgg/t3code), which is MIT licensed too, and the programs Cubex starts
+or downloads stay under their own terms. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) has the notices.
 
 Icons are from [Lucide](https://lucide.dev).

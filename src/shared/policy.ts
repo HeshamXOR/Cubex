@@ -297,7 +297,9 @@ export function validateMcpSecretForget(value: unknown): Validated<McpSecretForg
 
 export type HookEvent = HookConfig['event']
 
-export const HOOK_EVENTS: readonly HookEvent[] = ['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'Stop']
+export const HOOK_EVENTS: readonly HookEvent[] = [
+  'PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'Stop', 'SessionStart', 'PreCompact', 'PostCompact', 'SubagentStop', 'Notification'
+]
 
 export const HOOK_LIMITS = { command: 4_000, matcher: 200 } as const
 
@@ -307,7 +309,7 @@ export const HOOK_TIMEOUT_MS = 10_000
 interface HookEventInfo {
   /** When it runs, in a sentence for the event picker. */
   when: string
-  /** Whether an exit code 2 or a block decision stops anything. Only a tool that has not run yet can be stopped. */
+  /** Whether an exit code 2 or a block decision does anything: stops a tool that has not run yet, stops a turn before it starts, or keeps the agent working at the end of a turn. */
   canBlock: boolean
   /** Whether the matcher applies. The other events have no tool to match. */
   matchesTools: boolean
@@ -316,8 +318,13 @@ interface HookEventInfo {
 export const HOOK_EVENT_INFO: Record<HookEvent, HookEventInfo> = {
   PreToolUse: { when: 'Before a tool runs, after you approve it. Can stop the tool.', canBlock: true, matchesTools: true },
   PostToolUse: { when: 'After a tool finishes. Cannot undo it.', canBlock: false, matchesTools: true },
-  UserPromptSubmit: { when: 'When you send a message. Cannot stop it.', canBlock: false, matchesTools: false },
-  Stop: { when: 'When a turn ends. Cannot stop anything.', canBlock: false, matchesTools: false }
+  UserPromptSubmit: { when: 'When you send a message. Can stop the turn, or add context for the model.', canBlock: true, matchesTools: false },
+  Stop: { when: 'When a turn ends. Can ask the agent to keep working.', canBlock: true, matchesTools: false },
+  SessionStart: { when: 'On the first turn of a conversation in this run of Cubex. Cannot stop it.', canBlock: false, matchesTools: false },
+  PreCompact: { when: 'Before a summary of older turns (automatic, /compact, or after a context overflow). Cannot stop it.', canBlock: false, matchesTools: false },
+  PostCompact: { when: 'After a summary of older turns, whether it worked or not. Cannot undo it.', canBlock: false, matchesTools: false },
+  SubagentStop: { when: 'After a subagent finishes and returns its report. Cannot undo it.', canBlock: false, matchesTools: false },
+  Notification: { when: 'When Cubex starts waiting for you: a permission prompt or a question. Cannot answer it.', canBlock: false, matchesTools: false }
 }
 
 /** Tools a hook matcher is most often aimed at; the matcher help names them. */
@@ -389,7 +396,7 @@ export interface HookTestResult {
 export function validateHookTestRequest(value: unknown): Validated<HookTestRequest> {
   if (!isRecord(value)) return { ok: false, error: 'Expected a hook.' }
   const { event, matcher, command } = value
-  if (typeof event !== 'string' || !HOOK_EVENTS.includes(event as HookEvent)) return { ok: false, error: 'Choose one of the four hook events.' }
+  if (typeof event !== 'string' || !HOOK_EVENTS.includes(event as HookEvent)) return { ok: false, error: 'Choose one of the hook events.' }
   if (typeof command !== 'string' || !command.trim()) return { ok: false, error: 'Enter the command to run.' }
   if (command.length > HOOK_LIMITS.command) return { ok: false, error: `The command must be ${HOOK_LIMITS.command.toLocaleString('en-US')} characters or fewer.` }
   if (command.includes('\0')) return { ok: false, error: 'The command contains a null character.' }

@@ -1,4 +1,5 @@
 import type { ChatEvent, CubexAPI, PullProgress } from '../../../shared/ipc'
+import { IDLE_SIGN_IN, type AntigravityStatus } from '../../../shared/antigravity'
 import type { UpdateState } from '../../../shared/updates'
 import { seededApi } from './seeds'
 
@@ -23,6 +24,17 @@ function browserStub(): CubexAPI {
   const noop = async (): Promise<void> => undefined
   const unavailable = { ok: false, message: 'Not available in browser preview (run the Electron app).' }
   const idleUpdates: UpdateState = { currentVersion: '0.0.0', canInstall: false, check: { status: 'idle' } }
+  const noAntigravity: AntigravityStatus = {
+    supported: false,
+    desktopApp: false,
+    runtime: { operationId: null, phase: 'idle', downloadedBytes: 0, totalBytes: null, version: null, installedVersion: null, canRemove: false, message: null },
+    signedIn: false,
+    signIn: IDLE_SIGN_IN,
+    downloadBytes: null,
+    diskBytes: null,
+    termsUrl: 'https://antigravity.google/terms',
+    localOnly: false
+  }
   return {
     listProviders: empty,
     saveProvider: async (cfg) => cfg,
@@ -138,8 +150,19 @@ function browserStub(): CubexAPI {
     openAppFolder: async () => unavailable.message,
     saveMcpSecret: async () => ({ ok: false, message: unavailable.message }),
     forgetMcpSecrets: noop,
-    getPeersStatus: async () => ({ peers: [], presets: [], localOnly: false }),
+    getPeersStatus: async () => ({ peers: [], presets: [], acpPresets: [], localOnly: false }),
+    detectAgents: async () => ({ agents: [], node: { found: false }, localOnly: false, checkedAt: Date.now() }),
+    signInAgent: async () => ({ ok: false, message: unavailable.message }),
     testPeer: async () => ({ ok: false, durationMs: 0, error: unavailable.message }),
+    getAntigravityStatus: async () => noAntigravity,
+    installAntigravity: async () => unavailable,
+    cancelAntigravityInstall: async () => unavailable,
+    removeAntigravity: async () => unavailable,
+    signInAntigravity: async () => unavailable,
+    cancelAntigravitySignIn: async () => unavailable,
+    openAntigravitySignIn: async () => unavailable,
+    signOutAntigravity: async () => unavailable,
+    onAntigravityState: () => () => undefined,
     getUpdateState: async () => idleUpdates,
     checkForUpdates: async () => ({ ...idleUpdates, check: { status: 'failed' as const, error: unavailable.message } }),
     downloadUpdate: async () => idleUpdates,
@@ -147,7 +170,11 @@ function browserStub(): CubexAPI {
     installUpdate: async () => ({ ok: false as const, reason: 'failed' as const, message: unavailable.message }),
     skipUpdate: async () => idleUpdates,
     openUpdatePage: noop,
-    onUpdateState: () => () => undefined
+    onUpdateState: () => () => undefined,
+    evaluateGoal: async () => ({ kind: 'error' as const, reason: unavailable.message }),
+    cancelGoalCheck: noop,
+    getGoal: async () => null,
+    setGoal: noop
   }
 }
 

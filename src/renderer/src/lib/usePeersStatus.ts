@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { PeerPresetId, PeerPresetStatus, PeerStatus } from '../../../shared/peers'
+import type { AcpPresetId, AcpPresetStatus, PeerPresetId, PeerPresetStatus, PeerStatus } from '../../../shared/peers'
 import { api } from './api'
 
 interface PeersStatusState {
   byId: ReadonlyMap<string, PeerStatus>
   presets: ReadonlyMap<PeerPresetId, PeerPresetStatus>
+  acpPresets: ReadonlyMap<AcpPresetId, AcpPresetStatus>
   /** Local-only mode is on: programs are not started. */
   localOnly: boolean
   /** True until the first answer. */
@@ -21,6 +22,7 @@ interface PeersStatusState {
 export function usePeersStatus(signature: string): PeersStatusState {
   const [byId, setById] = useState<ReadonlyMap<string, PeerStatus>>(new Map())
   const [presets, setPresets] = useState<ReadonlyMap<PeerPresetId, PeerPresetStatus>>(new Map())
+  const [acpPresets, setAcpPresets] = useState<ReadonlyMap<AcpPresetId, AcpPresetStatus>>(new Map())
   const [localOnly, setLocalOnly] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
@@ -34,6 +36,7 @@ export function usePeersStatus(signature: string): PeersStatusState {
           if (!current) return
           setById(new Map(overview.peers.map((status) => [status.id, status])))
           setPresets(new Map(overview.presets.map((status) => [status.preset, status])))
+          setAcpPresets(new Map(overview.acpPresets.map((status) => [status.preset, status])))
           setLocalOnly(overview.localOnly)
           setError(undefined)
           setLoading(false)
@@ -54,5 +57,5 @@ export function usePeersStatus(signature: string): PeersStatusState {
   }, [signature, revision])
 
   const reload = useCallback(() => setRevision((value) => value + 1), [])
-  return { byId, presets, localOnly, loading, error, reload }
+  return { byId, presets, acpPresets, localOnly, loading, error, reload }
 }

@@ -14,7 +14,7 @@ export interface SlashCommand {
 }
 
 export const SLASH_COMMANDS: SlashCommand[] = [
-  { name: 'goal', args: '<objective>', description: 'Set a goal the assistant keeps working toward' },
+  { name: 'goal', args: '<what done means> [--budget <tokens>] [--check <command>]', description: 'Keep working turn after turn until the goal is met' },
   { name: 'new', description: 'Start a new conversation' },
   { name: 'system', args: '<prompt>', description: 'Set a system prompt for this chat' },
   { name: 'workspace', description: 'Choose the working folder for this session' },

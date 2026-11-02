@@ -281,9 +281,9 @@ describe('acting on a queued message', () => {
 
   it('runs a queued command the way typing it would, instead of sending it to the model', async () => {
     const streamId = await startRunningTurn()
-    useQueue.getState().add('a', { text: '/goal ship the fix', attachments: [] })
+    useQueue.getState().add('a', { text: '/system answer in one line', attachments: [] })
     completed(streamId)
-    await vi.waitFor(() => expect(useStore.getState().sessionGoal).toBe('ship the fix'))
+    await vi.waitFor(() => expect(useStore.getState().sessionSystem).toBe('answer in one line'))
     expect(sent()).toEqual(['first'])
     expect(queued()).toEqual([])
   })

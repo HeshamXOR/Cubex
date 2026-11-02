@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import type { ToolExecutionContext } from '@core/types'
-import type { CliPeer, ModelPeer } from '@shared/peers'
+import type { AcpPeer, CliPeer, ModelPeer } from '@shared/peers'
+import type { AcpAsk } from './acp/sessions'
 import { consultApprovalText, consultDisplay, consultPeerId, consultRisk, consultTitle, createConsultTool, type ConsultHost } from './consultTool'
 import type { PeerRun, PeerRunOptions } from './peerRunner'
 import { PeerTranscripts } from './transcript'
@@ -10,14 +11,20 @@ const claude: CliPeer = { kind: 'cli', id: 'claude-code', name: 'Claude Code', e
 const readingClaude: CliPeer = { ...claude, readProject: true }
 const agy: CliPeer = { kind: 'cli', id: 'antigravity', name: 'Antigravity', enabled: true, preset: 'antigravity', command: 'agy' }
 const gpt: ModelPeer = { kind: 'model', id: 'gpt', name: 'GPT', enabled: true, providerId: 'openai', model: 'gpt-5' }
+const gemini: AcpPeer = { kind: 'acp', id: 'gemini', name: 'Gemini', enabled: true, preset: 'gemini', command: 'gemini', args: ['--acp'] }
+const codex: AcpPeer = { kind: 'acp', id: 'codex', name: 'Codex', enabled: true, preset: 'codex', command: 'npx', args: ['--yes', '@agentclientprotocol/codex-acp@2.1.1'], readProject: true }
 
 const ctx: ToolExecutionContext = { requestPermission: async () => ({ decision: 'allow' }) }
 const ok = (reply: string, durationMs = 2_000): PeerRun => ({ ok: true, reply, durationMs })
 
-interface Calls { program: Array<{ peer: CliPeer; options: PeerRunOptions; folderExisted: boolean }>; model: Array<{ system: string; history: unknown; message: string }> }
+interface Calls {
+  program: Array<{ peer: CliPeer; options: PeerRunOptions; folderExisted: boolean }>
+  model: Array<{ system: string; history: unknown; message: string }>
+  agent: Array<{ peer: AcpPeer; ask: AcpAsk; signal: AbortSignal | undefined }>
+}
 
 function setup(over: Partial<ConsultHost> = {}, program: (peer: CliPeer, options: PeerRunOptions) => PeerRun = () => ok('Looks fine.\nVerdict: agree')): { tool: ReturnType<typeof createConsultTool>; host: ConsultHost; calls: Calls } {
-  const calls: Calls = { program: [], model: [] }
+  const calls: Calls = { program: [], model: [], agent: [] }
   const host: ConsultHost = {
     conversationId: 'task-1',
     peers: [claude, agy, gpt],
@@ -26,6 +33,10 @@ function setup(over: Partial<ConsultHost> = {}, program: (peer: CliPeer, options
     runProgram: async (peer, options) => {
       calls.program.push({ peer, options, folderExisted: existsSync(options.cwd) })
       return program(peer, options)
+    },
+    askAgent: async (peer, ask, signal) => {
+      calls.agent.push({ peer, ask, signal })
+      return ok('Agent reply.\nVerdict: agree')
     },
     askModel: async (_peer, ask) => {
       calls.model.push(ask)
@@ -218,6 +229,83 @@ describe('asking a model', () => {
   })
 })
 
+describe('asking an agent that speaks ACP', () => {
+  it('is described with what it can see', () => {
+    const { tool } = setup({ workspace: 'C:\\project', peers: [gemini, codex] })
+    const description = tool.definition.description ?? ''
+    expect(description).toContain('- gemini: Gemini (a program on this computer; it sees only your message)')
+    expect(description).toContain('- codex: Codex (a program on this computer; it can read the project)')
+    const { tool: bare } = setup({ peers: [codex] })
+    expect(bare.definition.description).toContain('- codex: Codex (a program on this computer; it sees only your message)')
+  })
+
+  it('sends the message, the task, its project and the talk so far to the pool, and shows the reply like any other', async () => {
+    const { tool, calls } = setup({ workspace: 'C:\\project', peers: [gemini, codex] })
+    const result = await tool.execute({ agent: 'gemini', message: 'Is the migration safe?' }, ctx)
+    expect(result.isError).toBeUndefined()
+    expect(calls.agent).toHaveLength(1)
+    expect(calls.agent[0]!.peer).toBe(gemini)
+    expect(calls.agent[0]!.ask).toEqual({ conversationId: 'task-1', workspace: 'C:\\project', history: [], message: 'Is the migration safe?' })
+    const out = text(result)
+    expect(out).toContain('Round 1 of 3 with Gemini, 2 seconds.')
+    expect(out).toContain('<agent_reply agent="gemini">\nAgent reply.\n</agent_reply>')
+    expect(out).toContain('Its verdict: agrees.')
+    expect(result.metadata).toEqual({ peer: { name: 'Gemini', round: 1, of: 3, seconds: 2, verdict: 'agree', asked: 'Is the migration safe?' }, peerReply: 'Agent reply.' })
+    // It is not a program run once: no empty folder, no command line.
+    expect(calls.program).toHaveLength(0)
+    expect(calls.model).toHaveLength(0)
+  })
+
+  it('leaves the project out when the task has none', async () => {
+    const { tool, calls } = setup({ peers: [codex] })
+    await tool.execute({ agent: 'codex', message: 'x' }, ctx)
+    expect(calls.agent[0]!.ask).not.toHaveProperty('workspace')
+  })
+
+  it('hands over the talk so far, for a session that has to be started again', async () => {
+    const { tool, calls } = setup({ peers: [gemini] })
+    await tool.execute({ agent: 'gemini', message: 'First question' }, ctx)
+    await tool.execute({ agent: 'gemini', message: 'Second question' }, ctx)
+    expect(calls.agent[1]!.ask.history).toEqual([{ message: 'First question', reply: 'Agent reply.\nVerdict: agree' }])
+    expect(text(await tool.execute({ agent: 'gemini', message: 'Third' }, ctx))).toContain('Round 3 of 3')
+  })
+
+  it('counts its rounds apart from the others', async () => {
+    const { tool } = setup({ maxRounds: 1, peers: [gemini, claude] })
+    await tool.execute({ agent: 'gemini', message: 'a' }, ctx)
+    expect((await tool.execute({ agent: 'gemini', message: 'b' }, ctx)).isError).toBe(true)
+    expect((await tool.execute({ agent: 'claude-code', message: 'c' }, ctx)).isError).toBeUndefined()
+  })
+
+  it('passes the cancel signal on, and does not start when the turn is already cancelled', async () => {
+    const controller = new AbortController()
+    const { tool, calls } = setup({ peers: [gemini] })
+    await tool.execute({ agent: 'gemini', message: 'x' }, { ...ctx, signal: controller.signal })
+    expect(calls.agent[0]!.signal).toBe(controller.signal)
+    controller.abort()
+    const result = await tool.execute({ agent: 'gemini', message: 'y' }, { ...ctx, signal: controller.signal })
+    expect(result).toMatchObject({ isError: true, content: 'Cancelled.' })
+    expect(calls.agent).toHaveLength(1)
+  })
+
+  it('explains a failure with the program\'s own words, and does not count a round', async () => {
+    const { tool, host } = setup({
+      peers: [gemini],
+      askAgent: async () => ({ ok: false, reply: '', error: 'Gemini stopped unexpectedly with exit code 1.', hint: 'Sign in first.', output: 'stderr words', durationMs: 5 })
+    })
+    const result = await tool.execute({ agent: 'gemini', message: 'x' }, ctx)
+    expect(result.isError).toBe(true)
+    const out = text(result)
+    expect(out).toContain('Gemini did not answer: Gemini stopped unexpectedly with exit code 1. Sign in first.')
+    expect(out).toContain('stderr words')
+    expect(out).toContain('did not count as a round')
+    expect(host.transcripts.history('task-1', 'gemini')).toHaveLength(0)
+    // After two failures it is not asked again in the reply.
+    await tool.execute({ agent: 'gemini', message: 'y' }, ctx)
+    expect(text(await tool.execute({ agent: 'gemini', message: 'z' }, ctx))).toContain('failed 2 times')
+  })
+})
+
 describe('when it fails', () => {
   const failing = (): PeerRun => ({ ok: false, reply: '', error: 'Claude Code stopped with exit code 1.', hint: 'Sign in first.', output: 'stderr words', durationMs: 5 })
 
@@ -309,6 +397,16 @@ describe('what the person is shown when asked', () => {
     expect(consultRisk({ agent: 'antigravity' }, peers, 'C:\\project')).not.toContain('can read files')
     expect(consultRisk({ agent: 'gpt' }, peers)).toBe('Sends your message to gpt-5. Anything in it leaves this computer unless that model runs on it.')
     expect(consultRisk({ agent: 'nope' }, peers)).toContain('not set up')
+  })
+
+  it('says what runs, and what it may do, for an agent that speaks ACP', () => {
+    const acp = [gemini, codex]
+    expect(consultRisk({ agent: 'gemini' }, acp, 'C:\\project')).toBe('Starts "gemini --acp" on this computer and sends it your message. Gemini may pass it on to its own service.')
+    const reading = consultRisk({ agent: 'codex' }, acp, 'C:\\project')
+    expect(reading).toContain('Starts "npx --yes @agentclientprotocol/codex-acp@2.1.1" on this computer')
+    expect(reading).toContain('it can read files in this project, but not change them')
+    expect(reading).toContain('The first time, npx downloads the package from npm.')
+    expect(consultRisk({ agent: 'codex' }, acp)).not.toContain('can read files')
   })
 
   it('reads the id of the agent a call names', () => {

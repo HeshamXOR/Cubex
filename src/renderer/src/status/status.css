@@ -8,7 +8,7 @@
 .status__detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; color: var(--color-foreground-subtlest); }
 .status__time { flex: none; font-size: 12px; font-weight: 400; color: var(--color-foreground-subtlest); }
 .status--accent,
-.activity--accent { --activity-tone: var(--color-accent-foreground); }
+.activity--accent { --activity-tone: var(--color-foreground); }
 .status--warn,
 .activity--warn { --activity-tone: var(--color-warning); }
 .status--ok,
@@ -18,7 +18,7 @@
 
 .activity { height: 30px; margin-top: 4px; font-size: 13px; }
 .activity__label { flex: none; font-weight: 500; color: var(--color-foreground-subtle); }
-.activity--warn .activity__label { color: var(--color-warning); }
+.activity--warn .activity__label { color: var(--color-foreground-subtle); }
 .activity__detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--color-foreground-subtlest); }
 .activity__time { flex: none; font-size: 12px; color: var(--color-foreground-subtlest); }
 /* Compatibility for older callers: live text remains readable and still. */

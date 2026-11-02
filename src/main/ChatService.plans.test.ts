@@ -217,7 +217,7 @@ describe('ChatService plan transitions', () => {
     expect(readFileSync(join(mocks.workspace, 'parser.ts'), 'utf8')).toContain('task workspace')
     expect(events.some((event) => event.kind === 'tool' && event.tool.id === 'parent-write' && event.tool.phase === 'error')).toBe(true)
     expect(events.filter((event) => event.kind === 'stream' && event.event.type === 'completed')).toHaveLength(1)
-    expect(events.some((event) => event.kind === 'tool' && event.tool.id.startsWith('subagent-') && event.tool.title === 'Subagent · Read parser.ts' && event.tool.phase === 'done')).toBe(true)
+    expect(events.some((event) => event.kind === 'tool' && event.tool.id.startsWith('subagent-') && event.tool.title === 'Subagent: Read parser.ts' && event.tool.phase === 'done')).toBe(true)
     expect(mocks.usage).toHaveBeenCalledOnce()
   })
 

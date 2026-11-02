@@ -4,7 +4,15 @@ import type { ProviderConfig } from '@core/types'
 import { useStore } from '../../state/store'
 
 /** One provider's models in the model menu, with a way to load or refresh the list. */
-export function ProviderModelChoices({ provider, onSelect }: { provider: ProviderConfig; onSelect: () => void }): JSX.Element {
+export function ProviderModelChoices({
+  provider,
+  query,
+  onSelect
+}: {
+  provider: ProviderConfig
+  query?: string
+  onSelect: () => void
+}): JSX.Element {
   const models = useStore((state) => state.models[provider.id])
   const activeProviderId = useStore((state) => state.activeProviderId)
   const activeModel = useStore((state) => state.activeModel)
@@ -41,6 +49,11 @@ export function ProviderModelChoices({ provider, onSelect }: { provider: Provide
   const choices: { id: string; displayName: string }[] = models ?? []
   const available = provider.defaultModel && !choices.some((model) => model.id === provider.defaultModel)
     ? [...choices, { id: provider.defaultModel, displayName: provider.defaultModel }] : choices
+  const trimmed = query?.trim()
+  const q = trimmed?.toLowerCase()
+  const filtered = q
+    ? available.filter((model) => model.displayName.toLowerCase().includes(q) || model.id.toLowerCase().includes(q))
+    : available
   const retry = !!error || (models !== undefined && available.length === 0)
   return (
     <div className="menu__provider" data-provider-id={provider.id}>
@@ -52,9 +65,9 @@ export function ProviderModelChoices({ provider, onSelect }: { provider: Provide
             ? <span className="menu__provider-mode" title="Local server" role="img" aria-label="Local server"><Server size={13} aria-hidden="true" /></span>
             : <span className="menu__provider-mode" title="Cloud API" role="img" aria-label="Cloud API"><Cloud size={13} aria-hidden="true" /></span>}
       </div>
-      {available.length > 0 && (
+      {filtered.length > 0 && (
         <div role="radiogroup" aria-label={`${provider.name} models`}>
-          {available.map((model) => {
+          {filtered.map((model) => {
             const chosen = activeProviderId === provider.id && activeModel === model.id
             return (
               <button key={model.id} role="radio" aria-checked={chosen} className={`menu__item ${chosen ? 'menu__item--sel' : ''}`}
@@ -65,6 +78,9 @@ export function ProviderModelChoices({ provider, onSelect }: { provider: Provide
             )
           })}
         </div>
+      )}
+      {trimmed && available.length > 0 && filtered.length === 0 && (
+        <div className="menu__model-note">{`No models match "${trimmed}".`}</div>
       )}
       {error && <div className="menu__model-note" role="alert">{error}</div>}
       {!loading && !error && models && available.length === 0 && <div className="menu__model-note">No models returned. Load a model on the server or set a default in Providers.</div>}

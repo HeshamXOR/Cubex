@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, it, expect } from 'vitest'
-import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runHooks, sampleHookPayload, sampleToolName, testHook } from './hooks'
+import { removeFolder } from './testing/removeFolder'
 import { hookMatches, type HookTestRequest } from '@shared/policy'
 import type { HookConfig } from '@shared/settings'
 
@@ -33,12 +34,33 @@ describe('runHooks', () => {
     expect(r.block).toBe(false)
   })
 
-  it('never blocks on non-PreToolUse events', async () => {
-    const r = await runHooks(
-      [hook({ event: 'PostToolUse', command: 'node -e "process.exit(2)"' })],
-      { event: 'PostToolUse', tool_name: 'write_file' }
+  it('never blocks on events that have nothing to stop', async () => {
+    for (const event of ['PostToolUse', 'SessionStart', 'PreCompact', 'PostCompact', 'SubagentStop', 'Notification'] as const) {
+      const r = await runHooks([hook({ event, command: 'node -e "process.exit(2)"' })], { event, tool_name: 'write_file' })
+      expect(r.block, event).toBe(false)
+    }
+  })
+
+  it('lets a Stop hook ask for more work with exit 2 or a block decision, and passes its reason on', async () => {
+    const byExit = await runHooks(
+      [hook({ event: 'Stop', command: 'node -e "console.error(\'Run the tests first.\'); process.exit(2)"' })],
+      { event: 'Stop', stop_hook_active: false }
     )
-    expect(r.block).toBe(false)
+    expect(byExit).toEqual({ block: true, reason: 'Run the tests first.' })
+    const byJson = await runHooks(
+      [hook({ event: 'Stop', command: 'node -e "console.log(JSON.stringify({ decision: \'block\', reason: \'Lint is failing.\' }))"' })],
+      { event: 'Stop' }
+    )
+    expect(byJson).toEqual({ block: true, reason: 'Lint is failing.' })
+    const allowed = await runHooks([hook({ event: 'Stop', command: 'node -e "process.exit(0)"' })], { event: 'Stop' })
+    expect(allowed.block).toBe(false)
+  })
+
+  it('tells a Stop hook whether it is already continuing', async () => {
+    // The payload reaches the hook as JSON on stdin. This hook exits 2 only when it is NOT continuing, so the flag must arrive.
+    const guard = 'node -e "let s=\'\';process.stdin.on(\'data\',d=>s+=d).on(\'end\',()=>process.exit(JSON.parse(s).stop_hook_active?0:2))"'
+    expect((await runHooks([hook({ event: 'Stop', command: guard })], { event: 'Stop', stop_hook_active: false })).block).toBe(true)
+    expect((await runHooks([hook({ event: 'Stop', command: guard })], { event: 'Stop', stop_hook_active: true })).block).toBe(false)
   })
 
   it('ignores disabled hooks and empty lists', async () => {
@@ -68,7 +90,7 @@ describe('runHooks', () => {
 describe('testHook', () => {
   let root: string
   beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'cubex-hook-')) })
-  afterEach(() => rmSync(root, { recursive: true, force: true }))
+  afterEach(() => removeFolder(root))
 
   const request = (over: Partial<HookTestRequest>): HookTestRequest => ({ event: 'PreToolUse', command: 'node -e "process.exit(0)"', ...over })
 
@@ -111,7 +133,7 @@ describe('testHook', () => {
     expect(post).toMatchObject({ event: 'PostToolUse', tool_name: 'write_file', tool_result: 'Sample result from Cubex.' })
     expect(JSON.parse((await testHook(request({ event: 'UserPromptSubmit', command: echo }), { workspace: root })).stdout))
       .toMatchObject({ event: 'UserPromptSubmit', prompt: 'Add a retry to the upload helper.' })
-    expect(JSON.parse((await testHook(request({ event: 'Stop', command: echo }), { workspace: root })).stdout)).toEqual({ event: 'Stop', cwd: root })
+    expect(JSON.parse((await testHook(request({ event: 'Stop', command: echo }), { workspace: root })).stdout)).toEqual({ event: 'Stop', cwd: root, stop_hook_active: false })
   })
 
   it('runs in the project folder, and in an empty temporary folder that it removes when there is no project', async () => {
@@ -176,7 +198,71 @@ describe('sample payloads', () => {
   })
 
   it('has no tool for events that do not run for one', () => {
-    expect(sampleHookPayload({ event: 'Stop', command: 'x' }, 'C:\\p')).toEqual({ event: 'Stop', cwd: 'C:\\p' })
+    expect(sampleHookPayload({ event: 'Stop', command: 'x' }, 'C:\\p')).toEqual({ event: 'Stop', cwd: 'C:\\p', stop_hook_active: false })
     expect(sampleHookPayload({ event: 'UserPromptSubmit', matcher: 'ignored', command: 'x' }, 'C:\\p')).not.toHaveProperty('tool_name')
+  })
+})
+
+describe('hooks v2 results', () => {
+  const printing = (json: string): string => `node -e "console.log(JSON.stringify(${json}))"`
+
+  it('lets a UserPromptSubmit hook block with exit 2 or a block decision', async () => {
+    const byExit = await runHooks(
+      [hook({ event: 'UserPromptSubmit', command: 'node -e "console.error(\'No secrets.\'); process.exit(2)"' })],
+      { event: 'UserPromptSubmit', prompt: 'hi' }
+    )
+    expect(byExit).toEqual({ block: true, reason: 'No secrets.' })
+    const byJson = await runHooks(
+      [hook({ event: 'UserPromptSubmit', command: printing("{ decision: 'block', reason: 'Not now.' }") })],
+      { event: 'UserPromptSubmit', prompt: 'hi' }
+    )
+    expect(byJson).toEqual({ block: true, reason: 'Not now.' })
+  })
+
+  it('collects additionalContext from UserPromptSubmit hooks, capped at 4,000 characters', async () => {
+    const some = await runHooks(
+      [hook({ event: 'UserPromptSubmit', command: printing("{ additionalContext: 'Use tabs.' }") }),
+        hook({ event: 'UserPromptSubmit', command: printing("{ additionalContext: 'Prefer vitest.' }") })],
+      { event: 'UserPromptSubmit', prompt: 'hi' }
+    )
+    expect(some).toEqual({ block: false, additionalContext: 'Use tabs.\n\nPrefer vitest.' })
+    const long = await runHooks(
+      [hook({ event: 'UserPromptSubmit', command: printing("{ additionalContext: 'x'.repeat(9000) }") })],
+      { event: 'UserPromptSubmit', prompt: 'hi' }
+    )
+    expect(long.additionalContext).toHaveLength(4000)
+  })
+
+  it('ignores additionalContext and updatedInput on events that do not use them', async () => {
+    const r = await runHooks([hook({ event: 'PostToolUse', command: printing("{ additionalContext: 'x', updatedInput: { a: 1 } }") })], { event: 'PostToolUse', tool_name: 'write_file' })
+    expect(r).toEqual({ block: false })
+  })
+
+  it('returns the updatedInput a PreToolUse hook prints, and the next hook sees it', async () => {
+    const r = await runHooks(
+      [hook({ command: printing("{ updatedInput: { path: 'safe.txt' } }") }),
+        // exits 2 only when it received the replaced input
+        hook({ id: 'h2', command: 'node -e "let d=\'\';process.stdin.on(\'data\',c=>d+=c).on(\'end\',()=>process.exit(JSON.parse(d).tool_input.path===\'safe.txt\'?2:0))"' })],
+      { event: 'PreToolUse', tool_name: 'write_file', tool_input: { path: 'unsafe.txt' } }
+    )
+    expect(r.block).toBe(true)
+    const only = await runHooks([hook({ command: printing("{ updatedInput: { path: 'safe.txt' } }") })], { event: 'PreToolUse', tool_name: 'write_file', tool_input: { path: 'x' } })
+    expect(only).toEqual({ block: false, updatedInput: { path: 'safe.txt' } })
+    const notAnObject = await runHooks([hook({ command: printing("{ updatedInput: 'nope' }") })], { event: 'PreToolUse', tool_name: 'write_file' })
+    expect(notAnObject).toEqual({ block: false })
+  })
+
+  it('a hook that times out never blocks or changes anything', async () => {
+    const r = await testHook({ event: 'UserPromptSubmit', command: 'node -e "setTimeout(()=>{}, 60000)"' }, { timeoutMs: 300 })
+    expect(r.outcome).toBe('timed-out')
+    expect(r.decision).toBe('allowed')
+  })
+
+  it('has a sample payload for every new event', () => {
+    expect(sampleHookPayload({ event: 'SessionStart', command: 'x' }, 'C:\p')).toMatchObject({ event: 'SessionStart', session_id: expect.any(String), cwd: 'C:\p' })
+    expect(sampleHookPayload({ event: 'PreCompact', command: 'x' }, 'C:\p')).toMatchObject({ event: 'PreCompact', trigger: 'auto' })
+    expect(sampleHookPayload({ event: 'PostCompact', command: 'x' }, 'C:\p')).toMatchObject({ event: 'PostCompact', trigger: 'auto', summary: expect.any(String) })
+    expect(sampleHookPayload({ event: 'SubagentStop', command: 'x' }, 'C:\p')).toMatchObject({ event: 'SubagentStop', tool_name: 'subagent', tool_result: expect.any(String) })
+    expect(sampleHookPayload({ event: 'Notification', command: 'x' }, 'C:\p')).toMatchObject({ event: 'Notification', notification_type: 'permission', message: expect.any(String) })
   })
 })

@@ -51,3 +51,8 @@
 .usagepop__link:hover { color: var(--color-foreground-subtle); }
 @keyframes usage-reveal { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
 @media (prefers-reduced-motion: reduce) { .usagepop { animation: none; } .usage-btn { transition: none; } }
+
+/* In the status strip the spend reads as one more fact: label and amount side by side, no row padding. */
+.usage-btn--strip { width: auto; margin: 0; padding: 0 6px; height: 22px; gap: 5px; font-size: inherit; }
+.usage-btn--strip > span:first-child { flex: none; }
+.usage-btn--strip b { font-weight: 500; }

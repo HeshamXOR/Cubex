@@ -191,7 +191,7 @@ function AddHook({ onAdd }: { onAdd: (hook: HookConfig) => void }): JSX.Element 
           />
           <div className="pform__help" id={`${id}-matcher-help`}>
             {!info.matchesTools
-              ? `${event} hooks run once per ${event === 'Stop' ? 'turn' : 'message'}, so there is no tool to match.`
+              ? `${event} hooks have no tool to match.`
               : problem
                 ? <span className="pol-field-error" role="alert">{problem}</span>
                 : matches.length > 0

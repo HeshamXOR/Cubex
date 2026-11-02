@@ -18,8 +18,11 @@ import type {
 import type { AppSettings } from './settings'
 import type { HookTestRequest, HookTestResult, McpSecretForgetRequest, McpSecretSaveRequest, McpSecretSaveResult, McpServerStatus, McpTestRequest, McpTestResult } from './policy'
 import type { ReadFileOptions, WorkspaceBrowseOptions, WorkspaceFileResult, WorkspaceListing, WorkspacePathStat } from './workspaceFile'
-import type { PeerActivity, PeerConfig, PeerTestResult, PeersOverview } from './peers'
+import type { PeerActivity, PeerConfig, PeerTestResult, PeersOverview, DelegateActivity } from './peers'
+import type { AgentSignInResult, AgentsDetection } from './agentCatalog'
+import type { AntigravityActionResult, AntigravityStatus } from './antigravity'
 import type { UpdateInstallRequest, UpdateInstallResult, UpdateState } from './updates'
+import type { Goal, GoalClaim, GoalEvaluateRequest, GoalVerdict } from './goal'
 
 // ---------------------------------------------------------------------------
 // Persisted domain objects (stored in SQLite, main process)
@@ -331,6 +334,11 @@ export interface ChatStartRequest {
    * the model does not have to decide to load it. The name is looked up in the task's skills, never read from a path.
    */
   skill?: string
+  /**
+   * The goal this chat is working toward, while it is active. The agent is told about it and offered `goal_update`, the
+   * tool that says where it stands. The window judges each turn through `evaluateGoal` and sends the next one.
+   */
+  goal?: { text: string; check?: string }
 }
 
 /** Lifecycle of a single tool invocation, for the in-thread activity cards. */
@@ -419,6 +427,8 @@ export interface ToolActivity {
   taskId?: string
   /** Set on a finished consult_agent call: who was asked, which message of the talk it was, and the verdict. */
   peer?: PeerActivity
+  /** Set on a delegate_task call, while the task runs and afterwards: who has it, what it did, which files it changed. */
+  delegate?: DelegateActivity
 }
 
 export interface CommandOutputArtifact {
@@ -494,6 +504,19 @@ export interface PermissionAsk {
   risks?: string[]
   /** Suggested project-scoped rule for "Always allow"; absent when the call cannot be generalized safely. */
   rule?: Pick<PermissionRule, 'tool' | 'pattern' | 'label'>
+  /** Set when another agent, working on a task Cubex handed it, is the one asking, rather than the chat's own model. */
+  delegate?: PermissionDelegate
+}
+
+/** What an agent working on a delegated task asks to do. Shown to the person, who decides. */
+export interface PermissionDelegate {
+  /** The agent's name. */
+  agent: string
+  action: 'edit' | 'delete' | 'move' | 'run' | 'fetch' | 'other'
+  /** The file or folder an edit, delete or move is about. */
+  target?: string
+  /** The command, for a run. */
+  command?: string
 }
 
 /** A workspace file a conversation changed, net of all its turns (for the review panel). */
@@ -838,6 +861,8 @@ export type ChatEvent = {
   | { streamId: string; kind: 'compaction'; compaction: CompactionEvent }
   /** Spend reached 80 or 100 percent of a budget cap; with action `stop` the turn ends before its next request. */
   | { streamId: string; kind: 'budget'; budget: BudgetNotice }
+  /** The agent said where the goal stands (complete or blocked) with `goal_update`. */
+  | { streamId: string; kind: 'goal'; claim: GoalClaim }
 )
 
 export interface PullRequest {
@@ -1080,10 +1105,38 @@ export interface CubexAPI {
   /** Which of the saved agents can be used on this computer, and whether the programs the Add menu offers are installed. */
   getPeersStatus(): Promise<PeersOverview>
   /**
+   * Look on this computer for the coding agents Cubex knows (Claude Code, Codex, Gemini and others): where each is,
+   * which version, and who it is signed in as. Starts each program that is there, briefly. The answer is kept for a
+   * short while; `refresh` looks again.
+   */
+  detectAgents(refresh?: boolean): Promise<AgentsDetection>
+  /** Open a terminal window running the agent's own sign-in command. Cubex never sees what is typed there. */
+  signInAgent(id: string): Promise<AgentSignInResult>
+  /**
    * Send an agent a short test message the way a chat would and report what came back. The agent is the one on the
    * page, saved or not. A failure is a result with a reason; the promise rejects only for a malformed request.
    */
   testPeer(peer: PeerConfig): Promise<PeerTestResult>
+
+  // Antigravity
+  /** What is installed of Google's Antigravity runtime, who is signed in, and what an install would download. */
+  getAntigravityStatus(): Promise<AntigravityStatus>
+  /** Download Google's runtime and check it. Returns at once; progress arrives through `onAntigravityState`. A refusal is a result with a reason. */
+  installAntigravity(): Promise<AntigravityActionResult>
+  /** Stop the install with this id. An install that already ended is a refusal, not a rejection. */
+  cancelAntigravityInstall(operationId: string): Promise<AntigravityActionResult>
+  /** Delete the runtime Cubex installed and the Google sign-in it kept for it. Refused while an agent or a sign-in is using them. */
+  removeAntigravity(): Promise<AntigravityActionResult>
+  /** Start signing in with Google. Google's page opens in the browser; Cubex never sees what is typed there. */
+  signInAntigravity(): Promise<AntigravityActionResult>
+  /** Stop the sign-in with this id. */
+  cancelAntigravitySignIn(flowId: string): Promise<AntigravityActionResult>
+  /** Open the sign-in page again, for a sign-in that is waiting. */
+  openAntigravitySignIn(): Promise<AntigravityActionResult>
+  /** Ask the runtime to forget the Google sign-in. */
+  signOutAntigravity(): Promise<AntigravityActionResult>
+  /** The install or the sign-in moved on. Returns the unsubscribe function. */
+  onAntigravityState(cb: (status: AntigravityStatus) => void): () => void
 
   // Updates
   /** What is known about newer versions of Cubex. The first call also starts the periodic checks of a running copy. */
@@ -1100,6 +1153,17 @@ export interface CubexAPI {
   skipUpdate(version: string): Promise<UpdateState>
   /** Open the page of the release on offer, in the browser. */
   openUpdatePage(): Promise<void>
+  /**
+   * Judge the turn that just ended against the chat's goal: run its check command, or ask a model whether what the agent
+   * reported meets the goal. Resolves with what to do next; a failure to judge is a verdict of its own, not a rejection.
+   */
+  evaluateGoal(request: GoalEvaluateRequest): Promise<GoalVerdict>
+  /** Stop judging a task's goal (its check command or the model reading the turn): the person paused or cleared it. */
+  cancelGoalCheck(conversationId: string): Promise<void>
+  /** The goal kept with a task, or null when it has none. Read once when the task is opened. */
+  getGoal(conversationId: string): Promise<Goal | null>
+  /** Keep the goal of a task, or forget it when null. */
+  setGoal(conversationId: string, goal: Goal | null): Promise<void>
   /** The update state changed: a look ended, a download moved on. Returns the unsubscribe function. */
   onUpdateState(cb: (state: UpdateState) => void): () => void
 }
@@ -1228,7 +1292,19 @@ export const IPC = {
   mcpForgetSecrets: 'mcp:forget-secrets',
   // other agents
   peersStatus: 'peers:status',
+  peersDetect: 'peers:detect',
+  peersSignIn: 'peers:sign-in',
   peersTest: 'peers:test',
+  // antigravity
+  antigravityStatus: 'antigravity:status',
+  antigravityInstall: 'antigravity:install',
+  antigravityCancelInstall: 'antigravity:cancel-install',
+  antigravityRemove: 'antigravity:remove',
+  antigravitySignIn: 'antigravity:sign-in',
+  antigravityCancelSignIn: 'antigravity:cancel-sign-in',
+  antigravityOpenSignIn: 'antigravity:open-sign-in',
+  antigravitySignOut: 'antigravity:sign-out',
+  antigravityState: 'antigravity:state',
   // updates
   updatesGet: 'updates:get',
   updatesCheck: 'updates:check',
@@ -1237,5 +1313,10 @@ export const IPC = {
   updatesInstall: 'updates:install',
   updatesSkip: 'updates:skip',
   updatesOpenPage: 'updates:open-page',
-  updatesState: 'updates:state'
+  updatesState: 'updates:state',
+  // goals
+  goalEvaluate: 'goal:evaluate',
+  goalCancel: 'goal:cancel',
+  goalGet: 'goal:get',
+  goalSet: 'goal:set'
 } as const

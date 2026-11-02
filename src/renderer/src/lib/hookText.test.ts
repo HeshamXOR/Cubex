@@ -35,7 +35,7 @@ describe('explainHookTest', () => {
       title: 'The hook timed out',
       body: 'It was stopped after 10 seconds. A hook that times out never blocks anything, so the tool would still run.'
     })
-    expect(explainHookTest(result({ event: 'Stop', outcome: 'timed-out', exitCode: null })).body).toContain('the session would carry on')
+    expect(explainHookTest(result({ event: 'Stop', outcome: 'timed-out', exitCode: null })).body).toContain('the turn would end')
   })
 
   it('reports a command that never started as an error', () => {
@@ -52,8 +52,8 @@ describe('explainHookTest', () => {
     expect(explainHookTest(result({ event: 'PostToolUse', exitCode: 2, blockIgnored: true }))).toEqual({
       tone: 'warn', title: 'Ran, and asked to block', body: 'PostToolUse hooks cannot block anything, so Cubex ignores the request.'
     })
-    expect(explainHookTest(result({ event: 'UserPromptSubmit', exitCode: 1 }))).toEqual({
-      tone: 'warn', title: 'The hook failed', body: 'It ended with exit code 1. Cubex ignores the result of UserPromptSubmit hooks.'
+    expect(explainHookTest(result({ event: 'SessionStart', exitCode: 1 }))).toEqual({
+      tone: 'warn', title: 'The hook failed', body: 'It ended with exit code 1. Cubex ignores the result of SessionStart hooks.'
     })
   })
 })
@@ -86,5 +86,26 @@ describe('describeHookTrigger', () => {
   it('ignores a matcher on an event that has no tool', () => {
     expect(text('Stop', 'write_file')).toBe('When a turn ends')
     expect(text('UserPromptSubmit', 'write_file')).toBe('When you send a message')
+  })
+})
+
+describe('hooks v2 wording', () => {
+  it('says when each new event runs', () => {
+    const text = (event: Parameters<typeof describeHookTrigger>[0]): string => describeHookTrigger(event, undefined).map((part) => part.text).join('')
+    expect(text('SessionStart')).toContain('first turn')
+    expect(text('PreCompact')).toBe('Before older turns are summarized')
+    expect(text('PostCompact')).toBe('After older turns are summarized')
+    expect(text('SubagentStop')).toBe('After a subagent finishes')
+    expect(text('Notification')).toContain('waits')
+  })
+
+  it('treats a UserPromptSubmit block as stopping the message', () => {
+    expect(explainHookTest(result({ event: 'UserPromptSubmit', decision: 'blocked', exitCode: 2 })).body).toContain('stop the turn')
+    expect(explainHookTest(result({ event: 'UserPromptSubmit' }))).toEqual({ tone: 'ok', title: 'Allowed', body: 'The hook exited with code 0, so the message would be sent.' })
+    expect(explainHookTest(result({ event: 'UserPromptSubmit', exitCode: 1 })).body).toContain('stops the message')
+  })
+
+  it('still says the other new events cannot block', () => {
+    expect(explainHookTest(result({ event: 'Notification' })).title).toBe('Ran without errors')
   })
 })

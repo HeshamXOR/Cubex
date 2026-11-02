@@ -12,6 +12,12 @@ function GeneralSettings(): JSX.Element | null {
   return (
     <>
       <ToggleRow label="Start maximized" on={settings.general.startMaximized} onChange={(v) => patch('general', { startMaximized: v })} />
+      <ToggleRow
+        label="Keep this PC awake while Cubex works"
+        hint="Stops the computer from going to sleep during a reply or a background task, which sleep would cut off. The screen can still turn off."
+        on={settings.general.keepAwake !== false}
+        onChange={(v) => patch('general', { keepAwake: v })}
+      />
       <RowShell label="Working folder" hint={settings.general.workspacePath ?? 'No folder selected. Choose one so the model knows where your project is.'}>
         <div className="row" style={{ gap: 8 }}>
           <button className="btn" onClick={() => void pickWorkspace()}>Choose folder</button>

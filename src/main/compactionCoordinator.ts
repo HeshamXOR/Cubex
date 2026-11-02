@@ -28,6 +28,8 @@ export interface CompactionHost {
   settings(): { ai?: { autoCompact?: unknown; compaction?: unknown; retry?: RetryPolicy; timeout?: TimeoutConfig } } | undefined
   /** The task's stored history as model messages, as the next request would carry it. */
   loadHistory(conversationId: string): AIMessage[]
+  /** A short note on what the agent was doing (todos, files, plan), added to every summary. */
+  workingSet?(conversationId: string): string | undefined
   warn(message: string): void
 }
 
@@ -100,7 +102,7 @@ export class CompactionCoordinator {
   }
 
   /** The /compact command: summarize older turns now. A failed summary changes nothing. */
-  async compact(conversationId: string): Promise<CompactionResult> {
+  async compact(conversationId: string, onStart?: () => void): Promise<CompactionResult> {
     if (this.host.isRunning(conversationId)) return fail('Stop the running turn before compacting this task.')
     if (this.compacting.has(conversationId)) return fail('This task is already being compacted.')
     const conversation = this.host.repo.get(conversationId)
@@ -114,7 +116,10 @@ export class CompactionCoordinator {
     try {
       const contextWindow = effectiveContextWindow(this.host.modelInfo(policy.primary.providerId, policy.primary.model), false)
       const { threshold } = resolveCompactionPolicy(this.host.settings()?.ai)
-      return await compactConversation(this.host, conversationId, { policy, threshold, ...(contextWindow !== undefined ? { contextWindow } : {}) })
+      return await compactConversation(this.host, conversationId, {
+        policy, threshold, ...(contextWindow !== undefined ? { contextWindow } : {}), ...this.noteOption(conversationId),
+        ...(onStart ? { onPlan: () => onStart() } : {})
+      })
     } finally {
       this.compacting.delete(conversationId)
     }
@@ -162,31 +167,106 @@ export class CompactionCoordinator {
 
       const result = await compactConversation(this.host, conversationId, {
         policy, contextWindow: contextWindow!, estimatedTokens, threshold, signal, ...(headers ? { headers } : {}),
+        ...this.noteOption(conversationId),
         onPlan: ({ messagesSummarized }) => {
           started = true
           onProgress?.({ step: 'summarize', phase: 'started', messagesSummarized })
         }
       })
       if (!result.ok) return failed(result.error)
-      // The anchored report describes a conversation that no longer exists.
-      this.anchor.forget(conversationId)
-      onProgress?.({
-        step: 'summarize', phase: 'completed', summary: result.summary, boundaryMessageId: result.boundaryMessageId,
-        ...(result.messagesSummarized !== undefined ? { messagesSummarized: result.messagesSummarized } : {}),
-        ...(result.tokensBefore !== undefined ? { tokensBefore: result.tokensBefore } : {}),
-        ...(result.tokensAfter !== undefined ? { tokensAfter: result.tokensAfter } : {})
-      })
-      let history: AIMessage[] | undefined
-      try {
-        history = this.host.loadHistory(conversationId)
-      } catch (error) {
-        // The summary is saved; this request just keeps the messages it already has.
-        this.host.warn(`Could not reload history after compaction: ${describe(error)}`)
-      }
-      return { attempted: true, compacted: { summary: result.summary, boundaryMessageId: result.boundaryMessageId, ...(history ? { history } : {}) } }
+      return this.finish(conversationId, result, onProgress)
     } catch (error) {
       // Housekeeping must never end the user's turn.
       return failed(describe(error))
+    }
+  }
+
+  private noteOption(conversationId: string): { note?: string } {
+    try {
+      const note = this.host.workingSet?.(conversationId)
+      return note ? { note } : {}
+    } catch (error) {
+      this.host.warn(`Could not build the working-set note: ${describe(error)}`)
+      return {}
+    }
+  }
+
+  /** Announce a saved summary and reload the stored part of the request around its boundary. */
+  private finish(
+    conversationId: string,
+    result: Extract<CompactionResult, { ok: true }>,
+    onProgress?: (event: CompactionEvent) => void
+  ): AutoCompaction {
+    // The anchored report describes a conversation that no longer exists.
+    this.anchor.forget(conversationId)
+    onProgress?.({
+      step: 'summarize', phase: 'completed', summary: result.summary, boundaryMessageId: result.boundaryMessageId,
+      ...(result.messagesSummarized !== undefined ? { messagesSummarized: result.messagesSummarized } : {}),
+      ...(result.tokensBefore !== undefined ? { tokensBefore: result.tokensBefore } : {}),
+      ...(result.tokensAfter !== undefined ? { tokensAfter: result.tokensAfter } : {})
+    })
+    let history: AIMessage[] | undefined
+    try {
+      history = this.host.loadHistory(conversationId)
+    } catch (error) {
+      // The summary is saved; this request just keeps the messages it already has.
+      this.host.warn(`Could not reload history after compaction: ${describe(error)}`)
+    }
+    return { attempted: true, compacted: { summary: result.summary, boundaryMessageId: result.boundaryMessageId, ...(history ? { history } : {}) } }
+  }
+
+  /**
+   * The provider said the request does not fit. Shrink it as far as it goes: stub old tool output (even
+   * the smaller gains the ordinary pass skips), then summarize older turns whatever the threshold says.
+   * `changed` is false when neither was possible, so the caller ends the turn with the original error.
+   */
+  async recoverFromOverflow(
+    conversationId: string,
+    request: AIRequest,
+    policy: RoutingPolicy,
+    headers: Record<string, string> | undefined,
+    signal: AbortSignal,
+    onProgress?: (event: CompactionEvent) => void
+  ): Promise<{ changed: boolean; messages: AIMessage[]; compacted?: NonNullable<AutoCompaction['compacted']> }> {
+    let messages = request.messages
+    let changed = false
+    try {
+      const pruned = pruneToolResults(messages, { protectTokens: 8_000, minReclaimTokens: 1_000 })
+      if (pruned.prunedToolUseIds.length) {
+        messages = pruned.messages
+        changed = true
+        onProgress?.({ step: 'prune', phase: 'completed', resultsTrimmed: pruned.prunedToolUseIds.length, tokensFreed: pruned.reclaimedTokens })
+      }
+    } catch (error) {
+      this.host.warn(`Pruning after a context overflow failed: ${describe(error)}`)
+    }
+    if (this.compacting.has(conversationId) || signal.aborted) return { changed, messages }
+    const blocked = this.host.budgetBlock?.(conversationId, policy.primary)
+    if (blocked) return { changed, messages }
+    let started = false
+    try {
+      const contextWindow = effectiveContextWindow(
+        this.host.modelInfo(policy.primary.providerId, policy.primary.model), headers?.[LONG_CONTEXT_HEADER] === '1'
+      )
+      const result = await compactConversation(this.host, conversationId, {
+        policy, signal, keepRecentTurns: 1, ...(contextWindow !== undefined ? { contextWindow } : {}),
+        ...(headers ? { headers } : {}), ...this.noteOption(conversationId),
+        onPlan: ({ messagesSummarized }) => {
+          started = true
+          onProgress?.({ step: 'summarize', phase: 'started', messagesSummarized })
+        }
+      })
+      if (!result.ok) {
+        this.host.warn(`Compaction after a context overflow ${started ? 'failed' : 'skipped'}: ${result.error}`)
+        if (started) onProgress?.({ step: 'summarize', phase: 'failed', error: result.error })
+        return { changed, messages }
+      }
+      const done = this.finish(conversationId, result, onProgress)
+      return { changed: true, messages, ...(done.compacted ? { compacted: done.compacted } : {}) }
+    } catch (error) {
+      this.host.warn(`Compaction after a context overflow failed: ${describe(error)}`)
+      if (started) onProgress?.({ step: 'summarize', phase: 'failed', error: describe(error) })
+      return { changed, messages }
     }
   }
 

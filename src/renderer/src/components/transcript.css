@@ -88,24 +88,93 @@
 .reasoning summary {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: 24px;
+  gap: 7px;
+  max-width: 100%;
+  height: 26px;
+  padding: 0 8px;
+  margin-left: -8px;
+  border-radius: 7px;
   cursor: pointer;
   list-style: none;
   font-size: 13px;
-  line-height: 1;
+  line-height: 1.35;
   color: var(--color-foreground-subtlest);
   user-select: none;
-  transition: color 0.12s;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
 }
 .reasoning summary::-webkit-details-marker { display: none; }
-.reasoning summary:hover { color: var(--color-foreground-subtle); }
+.reasoning summary:hover {
+  background: var(--color-hover);
+  color: var(--color-foreground-subtle);
+}
+.reasoning summary:focus,
+.reasoning summary:focus-visible {
+  outline: none;
+  background: var(--color-hover);
+  color: var(--color-foreground);
+}
+.reasoning.is-live summary {
+  display: flex;
+  width: 100%;
+  height: 32px;
+  margin-left: 0;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-foreground-subtle);
+}
+.reasoning.is-live summary:hover,
+.reasoning.is-live summary:focus-visible {
+  background: var(--color-surface-hover);
+  border-color: var(--color-border-hover);
+  color: var(--color-foreground);
+}
 .reasoning__icon { flex: none; color: inherit; }
-.reasoning__time { font-variant-numeric: tabular-nums; }
+.reasoning.is-live summary .reasoning__icon.cxmark { color: var(--color-foreground); }
+.reasoning__label { flex: none; font-weight: 500; line-height: 1.35; }
+.reasoning.is-live .reasoning__label { color: var(--color-foreground); }
+.reasoning__sep {
+  flex: none;
+  width: 1px;
+  height: 11px;
+  background: var(--color-border-hover);
+}
+.reasoning__ticker {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+}
+.reasoning__step {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--color-foreground-subtlest);
+  animation: reasoning-step-slide 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes reasoning-step-slide {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.reasoning__time {
+  flex: none;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--color-foreground-subtlest);
+}
 .reasoning__chev { flex: none; opacity: 0; transition: opacity 0.12s, transform 0.15s; }
+.reasoning.is-live .reasoning__chev { opacity: 0.65; }
 .reasoning summary:hover .reasoning__chev,
 .reasoning summary:focus-visible .reasoning__chev { opacity: 1; }
 .reasoning[open] .reasoning__chev { opacity: 1; transform: rotate(90deg); }
+
 .reasoning__body {
   max-height: 240px;
   margin: 6px 0 12px 7px;
@@ -118,19 +187,14 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.reasoning.is-live .reasoning__icon { color: var(--color-accent-foreground); }
 
-/* The live label gets a quick bright sweep while the model is thinking. */
+/* The live label fades out and back in while the model is thinking. */
 .reasoning__label.is-shimmer,
 .activity__label.is-shimmer {
-  background: linear-gradient(100deg, var(--color-foreground-subtle) 38%, var(--color-foreground) 50%, var(--color-foreground-subtle) 62%);
-  background-size: 220% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: label-sweep 1.4s linear infinite;
+  color: var(--color-foreground-subtle);
+  animation: label-breathe 1.8s ease-in-out infinite;
 }
-@keyframes label-sweep { 0% { background-position: 160% 0; } 100% { background-position: -160% 0; } }
+@keyframes label-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
 /* ---------- Work rows ---------- */
 
@@ -150,7 +214,7 @@
 button.wrow:hover { color: var(--color-foreground); }
 .wrow > svg,
 .wrow__lead { flex: none; color: var(--color-foreground-subtlest); }
-.wrow__lead.is-active { color: var(--color-accent-foreground); }
+.wrow__lead.is-active { color: var(--color-foreground); }
 .wrow b { flex: none; font-weight: 600; color: var(--color-foreground); }
 .wrow .sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-foreground-subtlest); }
 .wrow .stat { margin-left: auto; }
@@ -159,7 +223,7 @@ button.wrow:hover { color: var(--color-foreground); }
 .wrow__chev.is-open { opacity: 1; transform: rotate(90deg); }
 .wrow__state { flex: none; margin-left: auto; font-size: 12.5px; }
 .wrow__state--error { color: var(--color-destructive); }
-.wrow__state--wait { color: var(--color-warning); }
+.wrow__state--wait { color: var(--color-foreground-subtle); }
 .wrow__wait { flex: none; color: var(--color-warning); }
 .wrow__state + .stat,
 .wrow__state + .wrow__chev { margin-left: 8px; }
@@ -221,11 +285,12 @@ button.wrow:hover { color: var(--color-foreground); }
 .plan li.done code { background: var(--color-surface); color: var(--color-foreground-subtlest); }
 .li-mark { position: absolute; left: 3px; top: 5px; }
 .li-mark--done { color: var(--color-success); top: 5px; }
-.li-mark--cur { color: var(--color-accent-foreground); left: 2px; top: 5px; }
+.li-mark--cur { color: var(--color-foreground); left: 2px; top: 5px; }
 .li-mark--wait { color: var(--color-warning); left: 2px; top: 4px; }
 
 @media (prefers-reduced-motion: reduce) {
   .ink { animation: none; }
   .reasoning__label.is-shimmer,
-  .activity__label.is-shimmer { animation: none; -webkit-text-fill-color: var(--color-foreground-subtle); }
+  .activity__label.is-shimmer { animation: none; }
+  .reasoning__step { animation: none; }
 }

@@ -30,6 +30,7 @@ import type {
   ToolActivity
 } from '../../../shared/ipc'
 import type { AppSettings } from '../../../shared/settings'
+import { addGoalTokens, restoreGoal, usageTokens, type Goal } from '../../../shared/goal'
 import { hydrateMessageTranscript, messageDisplayBlocks, serializeMessageTranscript, type MessageTranscriptBlock } from '../../../shared/messageTranscript'
 import { api } from '../lib/api'
 import { applyTaskEvent } from './tasks'
@@ -210,9 +211,10 @@ interface CubexState {
 
   /** Per-conversation system prompt override set via /system. */
   sessionSystem?: string
-  /** Per-conversation goal set via /goal (kept in the system context each turn). */
-  sessionGoal?: string
-  setGoal: (goal: string | undefined) => void
+  /** The goal this task works toward, set with /goal. state/goal.ts judges each turn and sends the next one. */
+  goal?: Goal
+  /** Replace the goal of the task on screen, or of the task given when it is not on screen; undefined clears it. */
+  setGoal: (goal: Goal | undefined, conversationId?: string) => void
 
   /** Resolves true once the message went out (a failure after that shows in the thread) and false when it was not sent. `options.attachments` sends a queued message and leaves the composer alone. */
   sendMessage: (text: string, options?: SendOptions) => Promise<boolean>
@@ -243,7 +245,7 @@ interface CubexState {
 type ConversationRun = Pick<CubexState,
   'activeConversation' | 'liveMessages' | 'status' | 'statusDetail' | 'streamId' |
   'genStartedAt' | 'debug' | 'contextUsage' | 'todos' | 'pendingPermission' | 'pendingQuestion' |
-  'pendingPlan' | 'permissionMode' | 'sessionSystem' | 'sessionGoal' | 'attachments' |
+  'pendingPlan' | 'permissionMode' | 'sessionSystem' | 'goal' | 'attachments' |
   'composerText' | 'composerRevision' | 'composerInsert' | 'startingRequest'>
 
 function captureRun(s: CubexState): ConversationRun {
@@ -253,7 +255,7 @@ function captureRun(s: CubexState): ConversationRun {
     genStartedAt: s.genStartedAt, debug: s.debug, contextUsage: s.contextUsage, todos: s.todos,
     pendingPermission: s.pendingPermission, pendingQuestion: s.pendingQuestion,
     pendingPlan: s.pendingPlan, permissionMode: s.permissionMode,
-    sessionSystem: s.sessionSystem, sessionGoal: s.sessionGoal, attachments: s.attachments,
+    sessionSystem: s.sessionSystem, goal: s.goal, attachments: s.attachments,
     composerText: s.composerText, composerRevision: s.composerRevision,
     composerInsert: s.composerInsert, startingRequest: s.startingRequest
   }
@@ -288,15 +290,20 @@ function hydrateMessage(m: StoredMessage, conversationId: string): LiveMessage {
   return restored
 }
 
-/** Compose the effective system prompt from base + workspace + goal context. */
+/** The goal once a turn for it has started: that turn is judged when it ends, and a judging already running is moot. */
+function withTurnInFlight(goal: Goal): Goal {
+  const { checking: _checking, ...rest } = goal
+  return { ...rest, turning: true }
+}
+
+/** Compose the effective system prompt from base + workspace context. The goal is added by the main process. */
 function composeSystem(
   base: string | undefined,
-  ctx: { workspace?: string; goal?: string }
+  ctx: { workspace?: string }
 ): string | undefined {
   const parts: string[] = []
   if (base) parts.push(base)
   if (ctx.workspace) parts.push(`The user's active workspace folder is: ${ctx.workspace}`)
-  if (ctx.goal) parts.push(`Current goal for this session. Keep working toward it:\n${ctx.goal}`)
   return parts.length ? parts.join('\n\n') : undefined
 }
 
@@ -578,8 +585,8 @@ export const useStore = create<CubexState>((set, get) => ({
       reviewFile: undefined,
       compactError: undefined,
       view: 'chat',
-      sessionSystem: undefined,
-      sessionGoal: undefined,
+      sessionSystem: carryDraft && options?.forSend ? current.sessionSystem : undefined,
+      goal: undefined,
       tabs: [...get().tabs, { id: conv.id, title: conv.title }],
       activeTabId: conv.id
     })
@@ -591,6 +598,9 @@ export const useStore = create<CubexState>((set, get) => ({
     const navigation = ++navigationVersion
     const conv = await api.getConversation(id)
     if (!conv || navigation !== navigationVersion) return
+    // The goal kept with this task, for a task that has not run in this window. Reading it starts nothing.
+    const keptGoal = get().conversationRuns[id] || get().activeConversation?.id === id ? undefined : await storedGoal(id)
+    if (navigation !== navigationVersion) return
     const tabs = get().tabs.some((t) => t.id === id)
       ? get().tabs
       : [...get().tabs, { id: conv.id, title: conv.title }]
@@ -610,7 +620,7 @@ export const useStore = create<CubexState>((set, get) => ({
       todos: [],
       streamId: undefined,
       pendingPlan: undefined, pendingQuestion: undefined, pendingPermission: undefined,
-      sessionSystem: undefined, sessionGoal: undefined,
+      sessionSystem: undefined, goal: keptGoal,
       ...run,
       ...selection,
       // A chat that has not run in this session starts in the default mode, not in the previous chat's.
@@ -873,6 +883,7 @@ export const useStore = create<CubexState>((set, get) => ({
       createdAt: Date.now(),
       streaming: true
     }
+    const goalNow = getOwner().goal
     updateOwner({
       liveMessages: [...getOwner().liveMessages, userMsg, assistantMsg],
       status: 'thinking',
@@ -880,7 +891,10 @@ export const useStore = create<CubexState>((set, get) => ({
       genStartedAt: Date.now(),
       contextUsage: undefined,
       streamId,
-      debug: { ...emptyDebug(), startedAt: Date.now(), model: state.activeModel, provider: state.activeProviderId }
+      debug: { ...emptyDebug(), startedAt: Date.now(), model: state.activeModel, provider: state.activeProviderId },
+      // The goal has a turn in flight that has not been judged, and any judging in progress is moot. A request the
+      // provider then refuses ends this turn as failed, which pauses the goal instead of leaving it waiting.
+      ...(goalNow?.status === 'active' ? { goal: withTurnInFlight(goalNow) } : {})
     })
     set((current) => ({ streamOwners: { ...current.streamOwners, [streamId]: owner } }))
 
@@ -907,10 +921,11 @@ export const useStore = create<CubexState>((set, get) => ({
     }
 
     const preset = s.presets.find((p) => p.id === s.activePresetId)
-    const systemPrompt = composeSystem(s.sessionSystem ?? preset?.systemPrompt, {
-      workspace: conv.workspacePath,
-      goal: s.sessionGoal
-    })
+    const systemPrompt = composeSystem(s.sessionSystem ?? preset?.systemPrompt, { workspace: conv.workspacePath })
+    // While a goal is active every turn works toward it: the agent is told, and the turn is judged when it ends (state/goal.ts).
+    const activeGoal = s.goal?.status === 'active' ? s.goal : undefined
+    // A message from the person ends any judging in progress: they are steering, so that answer would be about old work.
+    if (s.goal?.checking) void api.cancelGoalCheck(conv.id).catch(() => undefined)
     try {
       await api.startChat({
         streamId,
@@ -928,7 +943,8 @@ export const useStore = create<CubexState>((set, get) => ({
         ...(s.peers.length > 0 ? { peers: s.peers } : {}),
         ...(attachments.length ? { attachments } : {}),
         ...(systemPrompt ? { systemPrompt } : {}),
-        ...(invoked ? { skill: invoked.skill } : {})
+        ...(invoked ? { skill: invoked.skill } : {}),
+        ...(activeGoal ? { goal: { text: activeGoal.text, ...(activeGoal.check ? { check: activeGoal.check } : {}) } } : {})
       })
       updateOwner((current) => ({
         startingRequest: false,
@@ -1042,9 +1058,11 @@ export const useStore = create<CubexState>((set, get) => ({
       case 'system':
         set({ sessionSystem: parsed.rest || undefined })
         return true
-      case 'goal':
-        set({ sessionGoal: parsed.rest || undefined })
+      case 'goal': {
+        const { handleGoalCommand } = await import('./goal')
+        await handleGoalCommand(parsed.rest)
         return true
+      }
       case 'workspace':
         await s.pickWorkspace()
         return true
@@ -1074,7 +1092,16 @@ export const useStore = create<CubexState>((set, get) => ({
     }
   },
 
-  setGoal: (goal) => set({ sessionGoal: goal }),
+  setGoal: (goal, conversationId) => {
+    const state = get()
+    if (conversationId && state.activeConversation?.id !== conversationId) {
+      // A task that is not on screen keeps its goal in its cached run.
+      const run = state.conversationRuns[conversationId]
+      if (run) set({ conversationRuns: { ...state.conversationRuns, [conversationId]: { ...run, goal } } })
+      return
+    }
+    set({ goal })
+  },
 
   cancel: () => {
     const id = get().streamId
@@ -1165,6 +1192,10 @@ export const useStore = create<CubexState>((set, get) => ({
         if (last !== undefined && e.sequence <= last) return
         updateAssistant(setRun, (message) => ({ ...message, lastEventSequence: e.sequence }))
       }
+      // The goal counts the tokens of each request of its turns, from the provider's own numbers.
+      if (e.kind === 'iteration') goalRequestTokens.delete(e.streamId)
+      else if (e.kind === 'stream' && e.event.type === 'usage') countGoalTokens(setRun, e.streamId, e.event.usage)
+      else if (e.kind === 'stream' && e.event.type === 'completed') countGoalTokens(setRun, e.streamId, e.event.response.usage)
       if (e.kind === 'gateway') applyGatewayEvent(setRun, getRun, e.event)
       else if (e.kind === 'stream') applyStreamEvent(setRun, getRun, e.event)
       else if (e.kind === 'tool') applyToolEvent(setRun, e.tool)
@@ -1189,6 +1220,8 @@ export const useStore = create<CubexState>((set, get) => ({
         }
       }
       else if (e.kind === 'mode') setRun({ permissionMode: e.mode })
+      // What the agent said about the goal is kept until the turn ends and is judged.
+      else if (e.kind === 'goal') setRun((s) => (s.goal?.status === 'active' ? { goal: { ...s.goal, claim: e.claim } } : {}))
       else if (e.kind === 'compacted') setRun((s) => ({
         activeConversation: s.activeConversation
           ? { ...s.activeConversation, contextStartMessageId: e.boundaryMessageId, contextSummary: e.summary, contextSummaryAt: Date.now() }
@@ -1196,6 +1229,7 @@ export const useStore = create<CubexState>((set, get) => ({
       }))
       else if (e.kind === 'compaction' || e.kind === 'budget') applyContextCostEvent(e, owner, setRun)
       if (e.kind === 'stream' && (e.event.type === 'completed' || e.event.type === 'error')) {
+        goalRequestTokens.delete(e.streamId)
         const unresolvedPlan = getRun().pendingPlan
         setRun({ streamId: undefined, pendingPlan: undefined, pendingPermission: undefined, pendingQuestion: undefined })
         set((s) => ({
@@ -1209,6 +1243,30 @@ export const useStore = create<CubexState>((set, get) => ({
     })
   }
 }))
+
+/** The goal kept with a task, as it comes back after Cubex was closed. Undefined when there is none or it cannot be read. */
+async function storedGoal(id: string): Promise<Goal | undefined> {
+  try {
+    const stored = await api.getGoal(id)
+    if (!stored) return undefined
+    // The runner must be listening before a goal can be resumed, and it saves every change to the goal.
+    void import('./goal').then((module) => module.installGoalRunner()).catch(() => undefined)
+    return restoreGoal(stored)
+  } catch {
+    return undefined
+  }
+}
+
+/** Tokens already counted for the request in flight, per stream: a provider may report usage more than once per request. */
+const goalRequestTokens = new Map<string, number>()
+
+function countGoalTokens(setRun: SetFn, streamId: string, usage: Parameters<typeof usageTokens>[0]): void {
+  const total = usageTokens(usage)
+  const counted = goalRequestTokens.get(streamId) ?? 0
+  if (total <= counted) return
+  goalRequestTokens.set(streamId, total)
+  setRun((s) => (s.goal?.status === 'active' ? { goal: addGoalTokens(s.goal, total - counted) } : {}))
+}
 
 let unsubscribeChatEvents: (() => void) | undefined
 let navigationVersion = 0

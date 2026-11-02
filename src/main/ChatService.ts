@@ -38,11 +38,22 @@ import { loadSkills, skillsCatalog, createSkillTool } from './skills'
 import { invokeSkill } from './skillInvocation'
 import { SKILL_SOURCE_LABEL, skillTurnText } from '@shared/skillInvocation'
 import { loadAgentProfiles } from './agents'
-import { CONSULT_TOOL, cleanPeerIds, enabledPeers, type ModelPeer, type PeerConfig } from '@shared/peers'
+import { CONSULT_TOOL, DELEGATE_TOOL, cleanPeerIds, delegatePeers, enabledPeers, roleIsReadOnly, type AcpPeer, type ModelPeer, type PeerConfig } from '@shared/peers'
 import { consultApprovalText, consultDisplay, consultPeerId, consultRisk, consultTitle, createConsultTool, type ModelAsk } from './peers/consultTool'
+import { createDelegateTool, delegateApprovalText, delegateDisplay, delegateRisk, delegateRoleOf, delegateTitle, type DelegateTurn } from './peers/delegateTool'
+import type { DelegateQuestion } from './peers/acp/delegatePolicy'
 import { PEER_TIMEOUT_MS, type PeerRun } from './peers/peerRunner'
+import { AcpSessions, type AcpRunOptions } from './peers/acp/sessions'
 import { PeerTranscripts } from './peers/transcript'
-import { runHooks } from './hooks'
+import { runHooks, type HookPayload } from './hooks'
+import { RepeatGuard } from './repeatGuard'
+import { WorkingSetTracker } from './workingSet'
+import { isContextOverflow } from '@core/errors/overflow'
+import { createGoalTool } from './tools/goalTool'
+import { evaluateGoal } from './goal/evaluator'
+import { runCheckCommand } from './goal/checkRunner'
+import { digestTurn } from './goal/digest'
+import { normalizeGoalRequest, type GoalEvaluateRequest, type GoalVerdict } from '@shared/goal'
 import { McpManager } from './mcp/McpManager'
 import { enabledMcpSpecs } from './mcp/specs'
 import type { ProviderManager } from './ProviderManager'
@@ -56,7 +67,7 @@ import { ContextAnchorStore } from './contextAnchor'
 import { formatSummaryMessage, selectContext } from './contextHistory'
 import { CompactionCoordinator } from './compactionCoordinator'
 import { BudgetGuard, type SpendSnapshot } from './budget'
-import type { CompactionResult } from '@shared/ipc'
+import type { CompactionEvent, CompactionResult } from '@shared/ipc'
 import type { HunkRevertResult, ReviewComment, ReviewFile, ReviewScope } from '@shared/ipc'
 import { formatReviewComments } from '@shared/reviewComments'
 import { normalizeUserAttachments } from './attachments'
@@ -81,17 +92,36 @@ import { MAX_PARALLEL_TOOLS, createLimiter, mayOverlap, notRunResult, toolFailur
  * reaching the cap is reported to the user instead of ending silently.
  */
 const MAX_TOOL_ITERATIONS = 50
+/** How many times Stop hooks may send the agent back to work in one turn. After that the turn ends, whatever they say. */
+const STOP_HOOK_MAX_CONTINUATIONS = 3
+const STOP_HOOK_CAP_NOTICE = `\n\n_A Stop hook asked for more work ${STOP_HOOK_MAX_CONTINUATIONS} times, so Cubex ended the turn here. Check what the hook's command does when it runs again._`
 const ITERATION_LIMIT_NOTICE = `\n\n_Cubex paused this turn at the ${MAX_TOOL_ITERATIONS}-request tool-iteration limit. Reply "continue" to keep going._`
 /** Writes here can change how git, Cubex or other agents execute: never auto-approved. */
 const PROTECTED_PATH = /(?:^|[\\/])(?:\.git|\.cubex|\.claude|\.agents|\.codex|\.vscode|\.husky)(?:[\\/]|$)/i
 /** Tool calls recovered from model text (not native tool_use) carry this id prefix. */
 const XML_CALL_PREFIX = 'xmlcall_'
+/** The tool that hands a subtask to a subagent (see createSubagentTool). */
+const SUBAGENT_TOOL = 'delegate_to_subagent'
 const FILE_MUTATION_TOOLS = new Set(['write_file', 'edit_file', 'multi_edit', 'apply_patch', 'remove_file'])
 
 /** Max bytes of project instruction files to inject (Claude Code-style). */
 const INSTRUCTIONS_BUDGET = 48 * 1024
 
 /** One model of one provider, as the key of what is remembered about it. */
+/**
+ * Run the Stop hooks for a reply that ends the turn. A hook that blocks (exit code 2, or a printed block decision) asks
+ * the agent to keep working, and its message becomes the next instruction. After STOP_HOOK_MAX_CONTINUATIONS requests
+ * the turn ends anyway, so a hook that always asks cannot hold a turn open.
+ */
+async function askStopHooks(workspace: string | undefined, continuations: number):
+  Promise<{ kind: 'end' } | { kind: 'capped' } | { kind: 'continue'; reason: string; message: string }> {
+  const outcome = await runHooks(getSettings().hooks, { event: 'Stop', cwd: workspace, stop_hook_active: continuations > 0 }, workspace)
+  if (!outcome.block) return { kind: 'end' }
+  if (continuations >= STOP_HOOK_MAX_CONTINUATIONS) return { kind: 'capped' }
+  const reason = (outcome.reason?.trim() || 'A Stop hook asked you to keep working.').slice(0, 2_000)
+  return { kind: 'continue', reason, message: `A Stop hook asked you to keep working before you finish. Its message:\n\n${reason}` }
+}
+
 function outputCapKey(target: RoutingTarget): string {
   return `${target.providerId}\u0000${target.model}`
 }
@@ -117,6 +147,12 @@ function recoveryFilePath(workspace: string | undefined, input: ToolCall['input'
 /** Every file a failed mutation could be retried after reading: all the files of an apply_patch. */
 function recoveryFilePaths(workspace: string | undefined, call: ToolCall): string[] {
   return fileMutationPaths(call.name, call.input).flatMap((path) => recoveryFilePath(workspace, { path }) ?? [])
+}
+
+/** What the row of a finished task shows when opened: the agent's report, or why there is none. */
+function delegateDetail(report: unknown, text: string, failed: boolean): string {
+  const said = typeof report === 'string' ? report.trim() : ''
+  return said ? said.slice(0, 4000) : toolDisplayDetail(text, false, failed)
 }
 
 function toolDisplayDetail(text: string, hasOutput: boolean, failed: boolean): string {
@@ -206,10 +242,22 @@ export class ChatService {
   private readonly approvedFetchHosts = new Map<string, Set<string>>()
   /** Other agents the user approved the model talking to, per stream (turn): the first message asks, the rest of the talk does not. */
   private readonly approvedPeers = new Map<string, Set<string>>()
+  /** The permission mode and the call of the delegated task being run, per stream (turn): the tool reads them when it asks. */
+  private readonly delegateTurns = new Map<string, DelegateTurn>()
+  /** The questions of a delegated task wait in line here, per stream (turn): only one is in front of the person at a time. */
+  private readonly delegateAsks = new Map<string, Promise<unknown>>()
   /** What each task has said to each other agent, so a later message continues the talk. */
   private readonly peerTranscripts = new PeerTranscripts()
+  /** The agents that speak ACP, kept running between messages: one session per task and agent. */
+  private readonly acpSessions = new AcpSessions()
+  /** The judging of a goal's last turn that is running for a task: a check command or a model's answer. */
+  private readonly goalChecks = new Map<string, AbortController>()
   /** Tasks whose older turns are being summarized: the /compact command and the automatic trigger. */
   private readonly compaction: CompactionCoordinator
+  /** The todo list, files and plan of each task, appended to every summary of it (see workingSet.ts). */
+  private readonly workingSets = new WorkingSetTracker()
+  /** Tasks that have had a turn in this run of the app: the first one fires the SessionStart hooks. */
+  private readonly startedSessions = new Set<string>()
   /** `ai.budget`: what the turn, the task and the day have cost, checked before every model request. */
   private readonly budget = new BudgetGuard({
     settings: () => getSettings().ai?.budget,
@@ -268,6 +316,7 @@ export class ChatService {
       budgetBlock: (id, target) => (this.isLocal(target) ? undefined : this.budget.blocker(id)),
       settings: () => getSettings(),
       loadHistory: (id) => this.loadHistory(id),
+      workingSet: (id) => this.workingSets.render(id),
       warn: (message) => logger.warn(message)
     }, this.contextAnchors)
   }
@@ -379,7 +428,7 @@ export class ChatService {
           onToolActivity: (event) => this.emit({
             streamId, kind: 'tool', tool: {
               id: `subagent-${event.id}`, name: event.call.name, phase: event.phase,
-              title: `Subagent · ${describeToolCall(event.call)}`,
+              title: `Subagent: ${describeToolCall(event.call)}`,
               detail: `${event.task.slice(0, 100)}${event.result ? `\n${(typeof event.result.content === 'string' ? event.result.content : JSON.stringify(event.result.content)).slice(0, 400)}` : ''}`
             }
           }),
@@ -396,9 +445,16 @@ export class ChatService {
           peers,
           maxRounds: getSettings().peers?.maxRounds ?? 3,
           transcripts: this.peerTranscripts,
+          askAgent: (peer, ask, signal) => this.acpSessions.ask(peer, ask, signal ? { signal } : {}),
           askModel: (peer, ask, signal) => this.askModelPeer(peer, ask, req.conversationId, signal)
         })
         tools.set(consult.definition.name, consult)
+      }
+      // The goal this chat works toward: the tool that says where it stands, offered only while the goal is active.
+      const goal = normalizeGoalRequest(req.goal)
+      if (goal) {
+        const goalTool = createGoalTool((claim) => this.emit({ streamId, kind: 'goal', claim }))
+        tools.set(goalTool.definition.name, goalTool)
       }
       // Read once per turn: the shell the model is told about is the one run_command uses, and a
       // changed setting applies from the next turn.
@@ -434,6 +490,28 @@ export class ChatService {
         // Structured git: five reads that never prompt, plus commit and branch behind the same
         // ask gate as run_command (so they are blocked in plan mode and never auto-approved by a rule).
         for (const t of createGitTools(workspace)) tools.set(t.definition.name, t)
+        // Agents that may be handed whole tasks. They work in this project, so there has to be one, and what they change is
+        // kept for Changes and Rewind the way the edits of the file tools are.
+        const delegates = delegatePeers(peers)
+        if (delegates.length > 0) {
+          const slot: DelegateTurn = { mode: req.permissionMode ?? 'default', callId: '' }
+          this.delegateTurns.set(streamId, slot)
+          const delegate = createDelegateTool({
+            conversationId: req.conversationId,
+            workspace,
+            agents: delegates,
+            turn: slot,
+            ask: (question, signal) => this.askDelegate(streamId, question, signal),
+            progress: (activity) => this.emit({ streamId, kind: 'tool', tool: { id: slot.callId, name: DELEGATE_TOOL, phase: 'running', delegate: activity } }),
+            recordChange: (path, before, existed) => {
+              this.sessionChanges.record(req.conversationId, path, before, existed)
+              this.checkpoints.record(req.conversationId, turnSeq, path, before, existed)
+            },
+            isProtected: (path) => PROTECTED_PATH.test(path.replace(/^\.[\\/]/, '')),
+            isReadOnlyCommand: (command) => isReadOnlyShellCommand(command, workspace)
+          })
+          tools.set(delegate.definition.name, delegate)
+        }
       }
       // Web fetch is available in any agentic posture (no workspace needed) so the
       // model can consult live docs. Read-only + SSRF-guarded → no prompt.
@@ -447,7 +525,10 @@ export class ChatService {
       // it a task checklist so multi-step work is trackable (surfaced live in the
       // UI, not a file mutation → no permission prompt).
       if (tools.size > 0) {
-        const todo = createTodoTool((todos) => this.emit({ streamId, kind: 'todos', todos }))
+        const todo = createTodoTool((todos) => {
+          this.workingSets.setTodos(req.conversationId, todos)
+          this.emit({ streamId, kind: 'todos', todos })
+        })
         tools.set(todo.definition.name, todo)
         const askUser = createAskUserTool((q, signal) => this.requestQuestion(streamId, q, signal))
         tools.set(askUser.definition.name, askUser)
@@ -486,6 +567,7 @@ export class ChatService {
         projectInstructions,
         skillsCatalog: skillInstructions,
         planContext,
+        ...(goal ? { goal } : {}),
         commandOutputContext: savedOutputs.length ? savedOutputs.slice(0, 10).map((output) => JSON.stringify({
           id: output.id, command: output.command.slice(0, 160), status: output.status, capturedBytes: output.capturedBytes
         })).join('\n') : undefined,
@@ -512,9 +594,8 @@ export class ChatService {
         id: `skill-${streamId}`, name: 'skill', phase: 'done', title: `Skill ${invoked.skill.name}`,
         detail: toolDisplayDetail(`# Skill: ${invoked.skill.name}\nSource: ${SKILL_SOURCE_LABEL[invoked.skill.source]}\n\n${invoked.body}`, false, false)
       } })
-      // A hook on the prompt only observes it; unlike PreToolUse it cannot stop the turn.
-      void runHooks(getSettings().hooks, { event: 'UserPromptSubmit', prompt: req.userText.slice(0, 2_000), cwd: workspace }, workspace)
-      void this.runLoop(streamId, req.conversationId, request, policy, tools, controller, mode, systemForMode, () => systemSources, workspace, headers, autoOutputLimit)
+      // UserPromptSubmit hooks run first thing in the loop: they can stop the turn or add context.
+      void this.runLoop(streamId, req.conversationId, request, policy, tools, controller, mode, systemForMode, () => systemSources, workspace, headers, autoOutputLimit, req.userText)
       return { streamId }
     } catch (error) {
       controller.abort()
@@ -567,6 +648,11 @@ export class ChatService {
     return this.active.size
   }
 
+  /** How many goals are being judged right now: a check command is running, or a model is reading the record of a turn. */
+  get runningGoalChecks(): number {
+    return this.goalChecks.size
+  }
+
   /** True while any stream of this task is generating. */
   private hasRunningTurn(conversationId: string): boolean {
     for (const [streamId, owner] of this.eventStreams) {
@@ -579,8 +665,21 @@ export class ChatService {
    * Summarize a task's older turns instead of silently dropping them (the
    * /compact command). Refused while a turn runs; a failed summary changes nothing.
    */
-  compactConversation(conversationId: string): Promise<CompactionResult> {
-    return this.compaction.compact(conversationId)
+  async compactConversation(conversationId: string): Promise<CompactionResult> {
+    let cwd: string | undefined
+    try { cwd = this.sessionWorkspace(conversationId) } catch { /* an unknown task is reported by the compaction itself */ }
+    let started = false
+    const result = await this.compaction.compact(conversationId, () => {
+      started = true
+      this.fireHooks({ event: 'PreCompact', session_id: conversationId, trigger: 'manual', cwd }, cwd)
+    })
+    if (started) {
+      this.fireHooks({
+        event: 'PostCompact', session_id: conversationId, trigger: 'manual', cwd,
+        ...(result.ok ? { summary: result.summary.slice(0, 2_000) } : {})
+      }, cwd)
+    }
+    return result
   }
 
   /** A local model adds nothing to the bill, so a spending cap never applies to it. */
@@ -678,7 +777,8 @@ export class ChatService {
     getSystemSources: () => readonly ContextSystemSource[],
     workspace?: string,
     headers?: Record<string, string>,
-    autoOutputLimit = false
+    autoOutputLimit = false,
+    userText = ''
   ): Promise<void> {
     let currentRequest = baseRequest
     let currentTarget = policy.primary
@@ -730,17 +830,30 @@ export class ChatService {
     const callCounts = new Map<string, number>()
     const failedCalls = new Map<string, { revision: number; detail: string; filePath?: string; filePaths?: string[] }>()
     let workspaceRevision = 0
+    /** Successful file edits so far in this turn. Repeat checks compare calls made between the same edits. */
+    let fileEdits = 0
     // Soft cap on how many times one read-only research tool may run in a turn,
     // so a model that keeps re-searching (varying the query) can't spin for
     // minutes. Only applied to research tools — edits/reads legitimately repeat.
     const nameCounts = new Map<string, number>()
     let requestIteration = 0
     // Stored-history messages at the head of the request: automatic compaction swaps exactly these.
-    const historyLength = baseRequest.messages.length - 1
+    let historyLength = baseRequest.messages.length - 1
     let autoCompactAttempted = false
+    /** The request that just failed with a context overflow is being retried once. */
+    let overflowRetrying = false
+    const repeatGuard = new RepeatGuard()
+    /** Notes for the result of a call that repeated an identical one, by call id. */
+    const repeatNotes = new Map<string, string>()
     let iterationLimitReached = false
     /** Replies that stopped at the output limit in the middle of a tool call, this turn. */
     let outputCuts = 0
+    /** How many times a Stop hook has sent the agent back to work this turn. */
+    let stopContinuations = 0
+    /** What a Stop hook asked for, from the moment a reply ends until the loop adds it to the turn. */
+    let stopFeedback: string | undefined
+    /** The Stop hooks ran when the last reply ended, so the end of the turn does not run them a second time. */
+    let stopHooksRan = false
     // What the model did this turn, in order, for the record the next turns read (see turnLog.ts).
     const turn: AIMessage[] = []
     let closing: AIMessage | undefined
@@ -754,7 +867,10 @@ export class ChatService {
     const RESEARCH_CAP = 6
     // Fold a finished call into the repeat/failure bookkeeping and build the tool_result the model receives.
     const recordToolResult = (call: ToolCall, sig: string, result: { content: unknown; isError?: boolean }): MessageContentPart => {
-      const text = typeof result.content === 'string' ? result.content : JSON.stringify(result.content)
+      const rawText = typeof result.content === 'string' ? result.content : JSON.stringify(result.content)
+      const repeatNote = repeatNotes.get(call.id)
+      const text = repeatNote ? `${rawText}\n\n${repeatNote}` : rawText
+      if (!result.isError) this.trackWorkingSet(conversationId, call)
       if (result.isError) failedCalls.set(sig, {
         revision: workspaceRevision,
         detail: text.slice(0, 4000),
@@ -771,6 +887,7 @@ export class ChatService {
         }
       } else if (FILE_MUTATION_TOOLS.has(call.name) ||
         (call.name === 'run_command' && !isReadOnlyShellCommand(String((call.input as { command?: string } | null)?.command ?? ''), workspace))) workspaceRevision++
+      if (!result.isError && FILE_MUTATION_TOOLS.has(call.name)) fileEdits++
       return {
         type: 'tool_result',
         toolUseId: call.id,
@@ -781,9 +898,45 @@ export class ChatService {
 
     this.budget.beginTurn(conversationId)
     try {
+      // The first turn of a task in this run of the app.
+      if (!this.startedSessions.has(conversationId)) {
+        this.startedSessions.add(conversationId)
+        this.fireHooks({ event: 'SessionStart', session_id: conversationId, cwd: workspace }, workspace)
+      }
+      // UserPromptSubmit: a hook can stop the turn before any request, or add context the model alone sees.
+      const prompt = await runHooks(getSettings().hooks, { event: 'UserPromptSubmit', prompt: userText.slice(0, 2_000), cwd: workspace }, workspace)
+      if (prompt.block) {
+        const reason = (prompt.reason?.trim() || 'A UserPromptSubmit hook stopped this message.').slice(0, 2_000)
+        stopHooksRan = true
+        uiTerminated = true
+        this.emit({ streamId, kind: 'stream', event: { type: 'error', error: {
+          provider: 'hook', category: 'INVALID_REQUEST', message: `Stopped by a UserPromptSubmit hook: ${reason}`,
+          classification: 'permanent', retryable: false
+        } as unknown as NormalizedAIError } })
+        return
+      }
+      if (prompt.additionalContext) {
+        const last = messages[messages.length - 1]
+        if (last?.role === 'user') messages[messages.length - 1] = {
+          ...last,
+          content: [...last.content, { type: 'text', text: `Context added by a UserPromptSubmit hook:\n${prompt.additionalContext}` }]
+        }
+      }
       for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
         // Before anything that costs money: a budget cap set to stop ends the turn here, and says why.
         if (this.budgetStopsTurn(streamId, conversationId, policy)) break
+        const retrying = overflowRetrying
+        overflowRetrying = false
+        /** Progress of a summary, reported to the thread and to the compaction hooks. */
+        const compactionProgress = (trigger: 'auto' | 'overflow') => (compaction: CompactionEvent): void => {
+          this.emit({ streamId, kind: 'compaction', compaction })
+          if (compaction.step !== 'summarize') return
+          if (compaction.phase === 'started') this.fireHooks({ event: 'PreCompact', session_id: conversationId, trigger, cwd: workspace }, workspace)
+          else this.fireHooks({
+            event: 'PostCompact', session_id: conversationId, trigger, cwd: workspace,
+            ...(compaction.phase === 'completed' && compaction.summary ? { summary: compaction.summary.slice(0, 2_000) } : {})
+          }, workspace)
+        }
         const requestNow = (): AIRequest => ({ ...baseRequest, messages, ...(toolDefs ? { tools: toolDefs } : {}) })
         // Old tool output becomes stubs first, which can make a summary unnecessary.
         const pruned = this.compaction.prune(conversationId, requestNow(), policy, headers)
@@ -793,12 +946,14 @@ export class ChatService {
         }
         // Once per turn, summarize older turns if this request is nearly full; this turn's own messages stay.
         if (!autoCompactAttempted) {
-          const auto = await this.compaction.auto(conversationId, requestNow(), policy, headers, controller.signal,
-            (compaction) => this.emit({ streamId, kind: 'compaction', compaction }))
+          const auto = await this.compaction.auto(conversationId, requestNow(), policy, headers, controller.signal, compactionProgress('auto'))
           autoCompactAttempted = auto.attempted
           if (auto.compacted) {
             this.emit({ streamId, kind: 'compacted', summary: auto.compacted.summary, boundaryMessageId: auto.compacted.boundaryMessageId })
-            if (auto.compacted.history) messages.splice(0, historyLength, ...auto.compacted.history)
+            if (auto.compacted.history) {
+              messages.splice(0, historyLength, ...auto.compacted.history)
+              historyLength = auto.compacted.history.length
+            }
           }
           // The summary was a paid request, so the request after it may no longer fit the budget.
           if (auto.attempted && this.budgetStopsTurn(streamId, conversationId, policy)) break
@@ -816,12 +971,19 @@ export class ChatService {
         const willContinue = (calls: number, includesPlan = false): boolean => calls > 0 && toolDefs !== undefined &&
           (iter < MAX_TOOL_ITERATIONS - 1 || (mode === 'plan' && includesPlan))
 
+        /** The provider said the request does not fit: held back until the loop has tried to shrink it. */
+        let overflow: Extract<AIStreamEvent, { type: 'error' }> | undefined
         for await (const event of this.modelEvents(req, { read: () => policy, write: (next) => { policy = next } }, {
           signal: controller.signal,
           onEvent: onGateway,
           ...(headers ? { headers } : {})
         })) {
           this.captureUsage(event, conversationId)
+          // Once per request, and only before any of the reply reached the thread.
+          if (event.type === 'error' && !retrying && !streamedText && !controller.signal.aborted && isContextOverflow(event.error)) {
+            overflow = event
+            continue
+          }
           if (event.type === 'text_delta') streamedText += event.text
           if (event.type === 'completed') {
             // Anchor on what the provider says this exact request cost, paired
@@ -853,6 +1015,24 @@ export class ChatService {
             // The model still wants tools but the budget is spent: hold the
             // terminal event and report the limit below instead of ending silently.
             if (effectiveCount > 0 && toolDefs) { iterationLimitReached = true; continue }
+            // A reply that ends the turn: Stop hooks may ask for more work. They run before the terminal event goes
+            // out, so the thread does not show the turn as finished while it carries on.
+            if (effectiveCount === 0 && event.response.stopReason !== 'length' && !controller.signal.aborted) {
+              stopHooksRan = true
+              const answer = await askStopHooks(workspace, stopContinuations)
+              if (!controller.signal.aborted) {
+                if (answer.kind === 'continue') {
+                  stopContinuations++
+                  stopFeedback = answer.message
+                  this.emit({ streamId, kind: 'tool', tool: { id: `stop-hook-${stopContinuations}`, name: 'stop_hook', phase: 'done', title: 'Stop hook asked for more work', detail: answer.reason.slice(0, 400) } })
+                  continue
+                }
+                if (answer.kind === 'capped') {
+                  cutNotice = STOP_HOOK_CAP_NOTICE
+                  this.emit({ streamId, kind: 'stream', event: { type: 'text_delta', text: cutNotice } })
+                }
+              }
+            }
             // A reply with no tool call that stopped at the limit ends mid-way: say so, where it ends.
             if (event.response.stopReason === 'length' && effectiveCount === 0) {
               const spentThinking = !event.response.text.trim() && (event.response.usage?.reasoningTokens ?? 0) > 0
@@ -865,10 +1045,33 @@ export class ChatService {
           // response body) before it crosses IPC to the renderer.
           this.emit({
             streamId, kind: 'stream',
-            event: event.type === 'error' ? { type: 'error', error: toWireError(event.error) }
+            event: event.type === 'error' ? { type: 'error', error: isContextOverflow(event.error) ? { ...toWireError(event.error), category: 'CONTEXT_LENGTH' } as NormalizedAIError : toWireError(event.error) }
               : event.type === 'completed' && cutNotice ? { ...event, response: { ...event.response, text: `${event.response.text}${cutNotice}` } }
                 : event
           })
+        }
+
+        if (overflow) {
+          // Stub old tool output, then summarize older turns, and send the same request once more.
+          const recovered = await this.compaction.recoverFromOverflow(conversationId, requestNow(), policy, headers, controller.signal, compactionProgress('overflow'))
+          if (recovered.changed && !controller.signal.aborted) {
+            messages.splice(0, messages.length, ...recovered.messages)
+            if (recovered.compacted) {
+              this.emit({ streamId, kind: 'compacted', summary: recovered.compacted.summary, boundaryMessageId: recovered.compacted.boundaryMessageId })
+              if (recovered.compacted.history) {
+                messages.splice(0, historyLength, ...recovered.compacted.history)
+                historyLength = recovered.compacted.history.length
+              }
+            }
+            autoCompactAttempted = true
+            overflowRetrying = true
+            iter--
+            continue
+          }
+          // Nothing could be shrunk, or the summary failed: the turn ends with the context-length error.
+          uiTerminated = true
+          this.emit({ streamId, kind: 'stream', event: { type: 'error', error: { ...toWireError(overflow.error), category: 'CONTEXT_LENGTH' } as NormalizedAIError } })
+          break
         }
 
         let calls = completed?.toolCalls ?? []
@@ -895,6 +1098,13 @@ export class ChatService {
           addToTurn(...(completed.text.trim() ? [assistantMessage(completed.text)] : []), userMessage(cutOffCallNote(used, raisedTo)))
           continue
         }
+        // A Stop hook asked for more work: the reply so far and the hook's message join the turn, and the model answers again.
+        if (stopFeedback !== undefined && completed) {
+          const feedback = stopFeedback
+          stopFeedback = undefined
+          addToTurn(...(completed.text.trim() ? [assistantMessage(completed.text)] : []), userMessage(feedback))
+          continue
+        }
         // Break unless we're going to loop for tools. `willContinue` already
         // gates on calls>0, tools present, and iterations remaining — so at the
         // iteration cap we stop here instead of executing tools whose results
@@ -915,6 +1125,7 @@ export class ChatService {
         // Calls in this batch were authored under the old mode. Approval takes
         // effect on the next model request, after it receives the review result.
         const toolBatchMode = mode
+        let repeatStop: string | undefined
         // Consecutive auto-allowed read-only calls run side by side (at most MAX_PARALLEL_TOOLS at once).
         // Each reserves its slot in resultParts so results keep the model's call order, and any other
         // call waits for them first, so mutations, prompts and special tools stay strictly sequential.
@@ -967,6 +1178,8 @@ export class ChatService {
                 callCounts.clear()
                 failedCalls.clear()
                 nameCounts.clear()
+                repeatGuard.reset()
+                if (resolution.decision !== 'reject') this.workingSets.setPlan(conversationId, input.plan, input.title)
               }
             } catch (error) {
               const detail = error instanceof Error ? error.message : String(error)
@@ -990,6 +1203,15 @@ export class ChatService {
           // its twin: the guards below must see how every earlier call ended.
           const overlap = this.canOverlap(streamId, tools, call)
           if (!overlap || overlappedSigs.has(sig)) await settleOverlapped()
+          // Repeat guard: the third identical call in a row gets a note; five of the last ten end the turn.
+          const repeat = repeatGuard.record(call.name, call.input, fileEdits)
+          if (repeat.stop) {
+            repeatStop = repeat.stop
+            await settleOverlapped()
+            for (const skipped of calls.slice(calls.indexOf(call))) resultParts.push(notRunResult(skipped.id))
+            break
+          }
+          if (repeat.note) repeatNotes.set(call.id, repeat.note)
           const priorFailure = failedCalls.get(sig)
           if (priorFailure?.revision === workspaceRevision) {
             const detail = 'This exact call already failed. Correct the input or resolve the cause before trying again.'
@@ -997,8 +1219,10 @@ export class ChatService {
             resultParts.push({ type: 'tool_result', toolUseId: call.id, isError: true, content: [{ type: 'text', text: `${detail}\nPrevious failure:\n${priorFailure.detail}` }] })
             continue
           }
-          const count = (callCounts.get(sig) ?? 0) + 1
-          callCounts.set(sig, count)
+          // Counted per state of the files: running the tests again after an edit is not a repeat.
+          const countKey = `${sig}:${fileEdits}`
+          const count = (callCounts.get(countKey) ?? 0) + 1
+          callCounts.set(countKey, count)
           if (count > 3) {
             this.emit({ streamId, kind: 'tool', tool: { id: call.id, name: call.name, phase: 'error', title: describeToolCall(call), detail: 'Repeated identical call — skipped' } })
             resultParts.push({
@@ -1047,6 +1271,10 @@ export class ChatService {
         }
         await settleOverlapped()
         addToTurn({ role: 'tool', content: resultParts })
+        if (repeatStop) {
+          stoppedNotice = `\n\n${repeatStop}`
+          break
+        }
       }
 
       // Safety net: guarantee the UI always gets a terminal event.
@@ -1111,9 +1339,12 @@ export class ChatService {
       this.eventStreams.delete(streamId)
       this.approvedFetchHosts.delete(streamId)
       this.approvedPeers.delete(streamId)
+      this.delegateTurns.delete(streamId)
+      this.delegateAsks.delete(streamId)
       this.budget.endTurn(conversationId)
-      // The turn is over, however it ended. Stop hooks only observe.
-      void runHooks(getSettings().hooks, { event: 'Stop', cwd: workspace }, workspace)
+      // The turn is over, however it ended. A reply that ended it normally already ran the Stop hooks, which could
+      // ask for more work; any other end (a stop, an error, a limit) only tells them.
+      if (!stopHooksRan) void runHooks(getSettings().hooks, { event: 'Stop', cwd: workspace, stop_hook_active: stopContinuations > 0 }, workspace)
     }
   }
 
@@ -1194,6 +1425,62 @@ export class ChatService {
     }
   }
 
+  /** One message to an agent that speaks ACP, in a session that is not kept: the Settings page's test. */
+  testAcpPeer(peer: AcpPeer, message: string, options: AcpRunOptions): Promise<PeerRun> {
+    return this.acpSessions.test(peer, message, options)
+  }
+
+  /** Stop the agents of one kind that are kept running between messages, in every task: what they hold in memory, such as a sign-in, is going. */
+  endAgentSessions(preset: AcpPeer['preset']): void {
+    this.acpSessions.endPreset(preset)
+  }
+
+  /**
+   * Judge the turn that just ended against the task's goal: run its check command, or have a model read the record of
+   * the turn (see goal/evaluator.ts). It never rejects: a turn that could not be judged is a verdict of its own, so the
+   * window can pause the goal and say why. A new request for a task replaces the one still running.
+   */
+  async evaluateGoal(request: GoalEvaluateRequest): Promise<GoalVerdict> {
+    const { conversationId } = request
+    this.cancelGoalCheck(conversationId)
+    const controller = new AbortController()
+    this.goalChecks.set(conversationId, controller)
+    try {
+      return await evaluateGoal(request, {
+        workspace: this.sessionWorkspace(conversationId),
+        runCheck: (command, cwd, signal) => runCheckCommand(command, { cwd, shell: getSettings().shell?.preferred ?? 'auto', ...(signal ? { signal } : {}) }),
+        ask: (system, prompt, signal) => this.askForGoal(conversationId, system, prompt, signal),
+        digest: () => {
+          const turns = [...this.turnLog.load(conversationId).values()]
+          return digestTurn(turns[turns.length - 1] ?? [])
+        },
+        overBudget: () => this.budget.blocker(conversationId)
+      }, controller.signal)
+    } catch (error) {
+      return { kind: 'error', reason: error instanceof Error ? error.message : String(error) }
+    } finally {
+      if (this.goalChecks.get(conversationId) === controller) this.goalChecks.delete(conversationId)
+    }
+  }
+
+  /** Stop judging a task's goal: the person paused or cleared it. */
+  cancelGoalCheck(conversationId: string): void {
+    this.goalChecks.get(conversationId)?.abort()
+    this.goalChecks.delete(conversationId)
+  }
+
+  /** One question to the model the task is using, with no tools and no effort setting. It counts in the usage like any request. */
+  private async askForGoal(conversationId: string, system: string, prompt: string, signal?: AbortSignal): Promise<string> {
+    const policy = this.lastTurn.get(conversationId)?.policy ?? this.storedPolicy(conversationId)
+    if (!policy) throw new Error('Choose a model for this task first.')
+    // A few words are needed, not a long chain of thought, so the effort the task was using is left out.
+    const { reasoningEffort: _effort, ...params } = policy.primary.params ?? {}
+    const target: RoutingTarget = { ...policy.primary, params: { ...params, maxOutputTokens: 1_500 } }
+    const response = await this.gateway.send({ model: target.model, system, messages: [userMessage(prompt)] }, this.withOutputLimits(this.policyFor(target)), { ...(signal ? { signal } : {}) })
+    this.captureUsage({ type: 'completed', response }, conversationId)
+    return response.text
+  }
+
   /** Whether this call may run beside the read-only calls around it: never one that could prompt, mutate or is special. */
   private canOverlap(streamId: string, tools: Map<string, ExecutableTool>, call: ToolCall): boolean {
     return mayOverlap(call.name, tools.get(call.name)?.defaultPermission, this.fetchNeedsApproval(streamId, call))
@@ -1207,7 +1494,9 @@ export class ChatService {
     controller: AbortController,
     mode: PermissionMode,
     workspace?: string,
-    conversationId?: string
+    conversationId?: string,
+    /** The PreToolUse hooks already ran and replaced the input: the call goes through the gate again, without them. */
+    hooksRan = false
   ): Promise<{ content: unknown; isError?: boolean }> {
     const tool = tools.get(call.name)
     const title = describeToolCall(call)
@@ -1231,7 +1520,9 @@ export class ChatService {
     const host = call.name === 'web_fetch' ? fetchHost(call.input) : undefined
     const fetchNeedsApproval = this.fetchNeedsApproval(streamId, call)
     const consultNeedsApproval = this.consultNeedsApproval(streamId, tools, call)
-    const mutating = tool.defaultPermission === 'ask' && !readOnlyExec
+    // A task that only reads (research, review) changes nothing, so plan mode lets it through, after the person has been asked.
+    const readOnlyDelegation = call.name === DELEGATE_TOOL && roleIsReadOnly(delegateRoleOf(call.input))
+    const mutating = tool.defaultPermission === 'ask' && !readOnlyExec && !readOnlyDelegation
 
     // Plan mode: reads/searches/read-only probes are fine, but nothing may mutate.
     if (mode === 'plan' && mutating) {
@@ -1262,7 +1553,8 @@ export class ChatService {
           protectedTarget && 'Protected path: changes here can alter how git, Cubex or other tools execute.',
           fromText && 'This call was parsed from model text, not a native tool call.',
           hostRisk,
-          consultNeedsApproval && consultRisk(call.input, getSettings().peers?.list ?? [], workspace)
+          consultNeedsApproval && consultRisk(call.input, getSettings().peers?.list ?? [], workspace),
+          call.name === DELEGATE_TOOL && delegateRisk(call.input, getSettings().peers?.list ?? [], workspace)
         ].filter((risk): risk is string => typeof risk === 'string')
         // A saved "Always allow" rule approves silently, but never a call that carries risks. The
         // outbound-host notice is the thing a host rule approves, so it alone does not block one.
@@ -1288,7 +1580,7 @@ export class ChatService {
     // PreToolUse hooks may veto the call (guardrails, e.g. block writes to a path).
     const hookSettings = getSettings()
     const hookCwd = workspace
-    const pre = await runHooks(
+    const pre = hooksRan ? { block: false } : await runHooks(
       hookSettings.hooks,
       { event: 'PreToolUse', tool_name: call.name, tool_input: call.input, cwd: hookCwd },
       hookCwd
@@ -1298,8 +1590,18 @@ export class ChatService {
       this.emit({ streamId, kind: 'tool', tool: { id: call.id, name: call.name, phase: 'error', title, detail: `Blocked by hook: ${reason}` } })
       return { content: `Blocked by a project hook: ${reason}`, isError: true }
     }
+    // A hook replaced the input. The tool does not run with what was approved: the new call goes through the
+    // permission gate and the tool's own validation like any other, and its card shows the input that ran.
+    if ('updatedInput' in pre && pre.updatedInput) {
+      return this.runTool(streamId, tools, { ...call, input: pre.updatedInput as ToolCall['input'] }, controller, mode, workspace, conversationId, true)
+    }
 
     try {
+      // The delegated task reads the permission mode now, and shows its progress on this call's row.
+      if (call.name === DELEGATE_TOOL) {
+        const slot = this.delegateTurns.get(streamId)
+        if (slot) { slot.mode = mode; slot.callId = call.id }
+      }
       const result = await tool.execute(call.input, {
         ...(controller.signal ? { signal: controller.signal } : {}),
         requestPermission: async () => ({ decision: 'allow' })
@@ -1313,6 +1615,8 @@ export class ChatService {
       const diagnostics = result.isError ? undefined : sanitizeDiagnosticsSummary(result.metadata?.diagnostics)
       // A finished consultation shows who answered and what they said, not the wrapper the model gets.
       const consulted = call.name === CONSULT_TOOL && !result.isError ? consultDisplay(result.metadata) : undefined
+      // A finished task shows who had it, what it did and which files it changed, with the agent's report as the detail.
+      const delegated = call.name === DELEGATE_TOOL ? delegateDisplay(result.metadata) : undefined
       const outputId = result.metadata?.commandOutputId
       let output: ReturnType<CommandOutputStore['get']> = null
       if (call.name === 'run_command' && conversationId && typeof outputId === 'string') {
@@ -1327,8 +1631,11 @@ export class ChatService {
           name: call.name,
           phase: result.isError ? 'error' : 'done',
           title,
-          detail: consulted ? consulted.reply.slice(0, 4000) : toolDisplayDetail(text, !!output, !!result.isError),
+          detail: consulted ? consulted.reply.slice(0, 4000)
+            : delegated ? delegateDetail(result.metadata?.delegateReport, text, !!result.isError)
+            : toolDisplayDetail(text, !!output, !!result.isError),
           ...(consulted ? { peer: consulted.peer } : {}),
+          ...(delegated ? { delegate: delegated } : {}),
           ...(diff ? { added: diff.added, removed: diff.removed } : {}),
           ...(diffBody ? { diff: diffBody } : {}),
           ...(files ? { files } : {}),
@@ -1342,6 +1649,9 @@ export class ChatService {
         { event: 'PostToolUse', tool_name: call.name, tool_input: call.input, tool_result: text.slice(0, 2000), cwd: hookCwd },
         hookCwd
       )
+      if (call.name === SUBAGENT_TOOL) {
+        this.fireHooks({ event: 'SubagentStop', tool_name: call.name, tool_input: call.input, tool_result: text.slice(0, 2000), cwd: hookCwd }, hookCwd)
+      }
       return { content: text.replace(/«diff[^»]*»/g, '').trim(), ...(result.isError ? { isError: true } : {}) }
     } catch (e) {
       const detail = (e as Error).message
@@ -1379,6 +1689,7 @@ export class ChatService {
         if (decision === 'always') this.saveRule(extra.workspace, extra.rule)
         resolvePromise(decision === 'deny' ? { decision } : { decision: 'allow', ...(decision === 'always' ? { remember: true } : {}) })
       })
+      this.notifyWaiting(streamId, 'permission', `Cubex is waiting for you to approve ${title}.`, extra.workspace)
       this.emit({ streamId, kind: 'permission', ask })
     })
   }
@@ -1388,6 +1699,46 @@ export class ChatService {
     if (!workspace || !rule) return
     try { this.permissionRules.add(workspace, rule) }
     catch (error) { logger.warn(`Could not save permission rule: ${(error as Error).message}`) }
+  }
+
+  /**
+   * What an agent working on a delegated task asks to do, put to the person. The questions of one turn go one at a time,
+   * because the window shows one, and an agent may ask several at once. Resolves to whether they allowed it; a stop, or a
+   * turn that ended, is a no. There is never an "always": nothing here is saved.
+   */
+  private askDelegate(streamId: string, question: DelegateQuestion, signal?: AbortSignal): Promise<boolean> {
+    const ask = (): Promise<boolean> => this.askDelegateOnce(streamId, question, signal)
+    const previous = this.delegateAsks.get(streamId) ?? Promise.resolve()
+    const mine = previous.then(ask, ask)
+    this.delegateAsks.set(streamId, mine.catch(() => undefined))
+    return mine
+  }
+
+  private askDelegateOnce(streamId: string, question: DelegateQuestion, signal?: AbortSignal): Promise<boolean> {
+    if (signal?.aborted) return Promise.resolve(false)
+    const id = nanoid()
+    const { agent, action, target, command, title, detail, risks } = question
+    const ask: PermissionAsk = {
+      id,
+      toolName: DELEGATE_TOOL,
+      title,
+      ...(detail ? { detail } : {}),
+      ...(risks.length > 0 ? { risks } : {}),
+      delegate: { agent, action, ...(target ? { target } : {}), ...(command ? { command } : {}) }
+    }
+    return new Promise<boolean>((resolvePromise) => {
+      const onAbort = (): void => {
+        this.pendingPermissions.delete(id)
+        resolvePromise(false)
+      }
+      signal?.addEventListener('abort', onAbort, { once: true })
+      this.pendingPermissions.set(id, (decision) => {
+        signal?.removeEventListener('abort', onAbort)
+        resolvePromise(decision !== 'deny')
+      })
+      this.notifyWaiting(streamId, 'permission', `A delegated agent is waiting for you: ${title}.`)
+      this.emit({ streamId, kind: 'permission', ask })
+    })
   }
 
   resolvePermission(id: string, decision: PermissionDecision): void {
@@ -1579,8 +1930,35 @@ export class ChatService {
         signal?.removeEventListener('abort', onAbort)
         resolvePromise(answers)
       })
+      this.notifyWaiting(streamId, 'question', `Cubex is waiting for your answer: ${q.question.slice(0, 200)}`)
       this.emit({ streamId, kind: 'question', ask })
     })
+  }
+
+  /** Run the hooks of an event nobody waits for: failures are the hook's own business. */
+  private fireHooks(payload: HookPayload, cwd: string | undefined): void {
+    void runHooks(getSettings().hooks, payload, cwd).catch(() => undefined)
+  }
+
+  /** Notification hooks: a permission prompt or a question just started waiting for the person. */
+  private notifyWaiting(streamId: string, type: 'permission' | 'question', message: string, workspace?: string): void {
+    const owner = this.eventStreams.get(streamId)
+    if (!owner) return
+    let cwd = workspace
+    if (!cwd) {
+      try { cwd = this.sessionWorkspace(owner.conversationId) } catch { /* no folder: the hook runs where Cubex does */ }
+    }
+    this.fireHooks({ event: 'Notification', session_id: owner.conversationId, notification_type: type, message, cwd }, cwd)
+  }
+
+  /** Remember which files the agent read and edited, for the note that follows a summary. */
+  private trackWorkingSet(conversationId: string, call: ToolCall): void {
+    if (call.name === 'read_file') {
+      const path = (call.input as { path?: unknown } | null)?.path
+      if (typeof path === 'string') this.workingSets.noteRead(conversationId, path)
+    } else if (FILE_MUTATION_TOOLS.has(call.name)) {
+      for (const path of fileMutationPaths(call.name, call.input)) this.workingSets.noteEdit(conversationId, path)
+    }
   }
 
   resolveQuestion(id: string, answers: string[]): void {
@@ -1621,6 +1999,10 @@ export class ChatService {
     this.disposed = true
     for (const [, c] of this.active) c.abort()
     this.active.clear()
+    for (const [, c] of this.goalChecks) c.abort()
+    this.goalChecks.clear()
+    // The agents kept running for consultations go with the app, with whatever they started.
+    this.acpSessions.dispose()
     this.pendingPermissions.clear()
     this.pendingQuestions.clear()
     this.mcp.disposeAll()
@@ -1670,9 +2052,13 @@ export class ChatService {
     }
     this.checkpoints.clear(conversationId)
     this.compaction.forget(conversationId)
+    this.workingSets.forget(conversationId)
+    this.startedSessions.delete(conversationId)
     this.budget.forget(conversationId)
     this.lastTurn.delete(conversationId)
+    this.cancelGoalCheck(conversationId)
     this.peerTranscripts.forgetConversation(conversationId)
+    this.acpSessions.forgetConversation(conversationId)
     this.forgotten.add(conversationId)
     for (const [label, drop] of [
       ['plans', () => this.plans.deleteConversation(conversationId)],
@@ -1738,11 +2124,15 @@ function describeToolCall(call: ToolCall): string {
     case 'search_files':
       return `Search "${typeof input.query === 'string' ? input.query : ''}"`
     case 'delegate_to_subagent':
-      return `Subagent · ${typeof input.task === 'string' ? input.task.slice(0, 100) : 'Research'}`
+      return `Subagent ${typeof input.task === 'string' ? input.task.slice(0, 100) : 'research'}`
     case CONSULT_TOOL:
       return consultTitle(call.input, getSettings().peers?.list ?? [])
+    case DELEGATE_TOOL:
+      return delegateTitle(call.input, getSettings().peers?.list ?? [])
+    case 'goal_update':
+      return input.status === 'blocked' ? 'Goal needs you' : 'Goal reported as met'
     case 'skill':
-      return `Skill: ${typeof input.name === 'string' ? input.name : ''}`.trim()
+      return `Skill ${typeof input.name === 'string' ? input.name : ''}`.trim()
     case 'git_status':
       return 'Git status'
     case 'git_diff':
@@ -1797,6 +2187,9 @@ function permissionDetail(call: ToolCall): string {
   } else if (call.name === CONSULT_TOOL) {
     // What is approved is what is sent: the whole message, to the agent named, with real line breaks.
     text = consultApprovalText(call.input, getSettings().peers?.list ?? [])
+  } else if (call.name === DELEGATE_TOOL) {
+    // What is approved is what is handed over: the whole task, to the agent named, in the role named.
+    text = delegateApprovalText(call.input, getSettings().peers?.list ?? [])
   } else {
     try { text = JSON.stringify(input, null, 2) ?? '' } catch { text = String(input) }
   }

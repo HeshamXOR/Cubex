@@ -3,6 +3,7 @@ import { ShieldQuestion } from 'lucide-react'
 import type { PermissionAsk, PermissionDecision } from '../../../../shared/ipc'
 import { toolTarget } from '../../lib/transcriptGroups'
 import { basename } from '../../lib/format'
+import { delegateAgentOf, delegateAsk } from '../../lib/delegateText'
 
 /** A key that arrives sooner than this after the card appears is more likely a leftover keystroke than a decision. */
 const KEY_GRACE_MS = 450
@@ -17,6 +18,8 @@ interface AskView {
   preview?: Array<{ tag: '+' | '-' | ' '; text: string }>
   /** Anything else worth reading, as plain text. */
   body?: string
+  /** What the person can count on once they have answered, said under the question. */
+  note?: string
 }
 
 const PREVIEW_LINES = 12
@@ -40,6 +43,8 @@ function parseInput(detail: string | undefined): Record<string, unknown> | undef
 
 /** The heading and the readable parts of a permission request, from the facts the main process sends. */
 export function describeAsk(ask: PermissionAsk): AskView {
+  const delegated = delegateAsk(ask)
+  if (delegated) return delegated
   const target = toolTarget({ name: ask.toolName, title: ask.title })
   const input = parseInput(ask.detail)
   switch (ask.toolName) {
@@ -120,6 +125,8 @@ export function PermissionCard({ ask, workspace, onDecide }: {
 
   const place = workspace ? basename(workspace) : undefined
   const mayChange = ask.toolName === 'run_command'
+  // A task handed to another agent is about that agent: it is the one that runs, in the project, as the person.
+  const agent = delegateAgentOf(ask)
   return (
     <section className="ask" role="alertdialog" aria-labelledby={`ask-${ask.id}`} aria-describedby={`ask-${ask.id}-why`}>
       <div className="ask-h">
@@ -142,8 +149,10 @@ export function PermissionCard({ ask, workspace, onDecide }: {
       {view.body && view.command !== undefined && <p className="ask-why">{view.body}</p>}
       {ask.risks?.map((risk) => <p className="ask-risk" key={risk}>{risk}</p>)}
       <p className="ask-why" id={`ask-${ask.id}-why`}>
-        {place ? <>Runs in <b>{place}</b> with your permissions.</> : 'Runs with your permissions.'}
-        {mayChange && " Rewind can't undo what a command changes."}
+        {agent
+          ? <>{agent} {place ? <>runs in <b>{place}</b></> : 'runs'} with your permissions.</>
+          : place ? <>Runs in <b>{place}</b> with your permissions.</> : 'Runs with your permissions.'}
+        {view.note ? ` ${view.note}` : mayChange && " Rewind can't undo what a command changes."}
       </p>
       <div className="ask-f">
         <button className="btn pri" onClick={() => onDecide('allow')} autoFocus={false}>Allow once<kbd>Enter</kbd></button>

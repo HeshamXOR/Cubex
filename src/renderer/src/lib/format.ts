@@ -53,11 +53,13 @@ export function formatBytes(bytes: number | undefined): string {
   return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${units[i]}`
 }
 
-/** Seconds as the transcript shows them: 0.8s, 6s, 1m 12s. */
+/** A duration as the transcript shows it, in whole units like a clock: 0s, 6s, 1m 12s, 2h 5m. */
 export function formatSeconds(ms: number): string {
-  const seconds = ms / 1000
-  if (seconds < 10) return `${Number(seconds.toFixed(1))}s`
-  if (seconds < 60) return `${Math.round(seconds)}s`
-  const minutes = Math.floor(seconds / 60)
-  return `${minutes}m ${Math.round(seconds - minutes * 60)}s`
+  const total = Math.max(0, Math.floor(ms / 1000))
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const seconds = total % 60
+  if (hours > 0) return `${hours}h ${minutes}m`
+  if (minutes > 0) return `${minutes}m ${seconds}s`
+  return `${seconds}s`
 }

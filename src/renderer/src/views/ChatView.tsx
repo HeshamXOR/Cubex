@@ -95,6 +95,17 @@ export function ChatView(): JSX.Element {
   }, [])
   const regenerateReply = useCallback((): void => { void regenerate() }, [regenerate])
 
+  // Whatever waits for the person docks as the top section of the composer box, so nothing above it moves.
+  const dockedAsk = (pendingPlan || pendingQuestion || pendingPermission) ? (
+    <>
+      {pendingPlan && <PlanCard ask={pendingPlan} pending onOpen={() => openPlan(pendingPlan)} />}
+      {pendingQuestion && <QuestionCard key={pendingQuestion.id} ask={pendingQuestion} onResolve={(answers) => resolveQuestion(pendingQuestion.id, answers)} />}
+      {pendingPermission && (
+        <PermissionCard key={pendingPermission.id} ask={pendingPermission} workspace={workspace} onDecide={(decision) => resolvePermission(pendingPermission.id, decision)} />
+      )}
+    </>
+  ) : undefined
+
   const workspaceName = workspace ? basename(workspace) : undefined
 
   return (
@@ -188,13 +199,8 @@ export function ChatView(): JSX.Element {
             <button onClick={() => void loadPlans(conversationId)}>Retry</button>
           </div>
         )}
-        {pendingPlan && <PlanCard ask={pendingPlan} pending onOpen={() => openPlan(pendingPlan)} />}
-        {pendingQuestion && <QuestionCard key={pendingQuestion.id} ask={pendingQuestion} onResolve={(answers) => resolveQuestion(pendingQuestion.id, answers)} />}
-        {pendingPermission && (
-          <PermissionCard key={pendingPermission.id} ask={pendingPermission} workspace={workspace} onDecide={(decision) => resolvePermission(pendingPermission.id, decision)} />
-        )}
         {contextShortened && <div className="context-history-note" role="status"><History size={12} aria-hidden="true" /><span>{contextSummary ? 'Using a summary of earlier messages. Full history is saved.' : 'Using recent messages. Full history is saved.'}</span></div>}
-        <Composer modelOpen={modelOpen} setModelOpen={setModelOpen} />
+        <Composer modelOpen={modelOpen} setModelOpen={setModelOpen} ask={dockedAsk} />
       </div>
     </div>
   )

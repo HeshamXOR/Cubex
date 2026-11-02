@@ -1,9 +1,10 @@
 import type { ExecutableTool, JSONValue, ToolResult } from '@core/types'
 import {
-  CONSULT_TOOL, PEER_ASKED_CHARS, PEER_LIMITS, PEER_VERDICT_LABEL, isPeerId, peerCommandLine, sanitizePeerActivity,
-  type CliPeer, type ModelPeer, type PeerActivity, type PeerConfig
+  CONSULT_TOOL, PEER_ASKED_CHARS, PEER_LIMITS, PEER_VERDICT_LABEL, acpPreset, commandLineText, isPeerId, peerCommandLine, sanitizePeerActivity,
+  type AcpPeer, type CliPeer, type ModelPeer, type PeerActivity, type PeerConfig
 } from '@shared/peers'
-import { consultProtocol, consultPrompt } from './framing'
+import type { AcpAsk } from './acp/sessions'
+import { consultProtocol, fitPrompt } from './framing'
 import { cleanOutput, clipReply, escapeReply, splitVerdict, tail } from './output'
 import { ARGUMENT_PROMPT_LIMIT, STDIN_PROMPT_LIMIT, createScratch, removeScratch, runCliPeer, type PeerRun, type PeerRunOptions } from './peerRunner'
 import type { Exchange, PeerTranscripts } from './transcript'
@@ -26,6 +27,8 @@ export interface ConsultHost {
   transcripts: PeerTranscripts
   /** Replaces the real program runner. For tests. */
   runProgram?: (peer: CliPeer, options: PeerRunOptions) => Promise<PeerRun>
+  /** Sends a message to an agent that speaks ACP, in the session kept for this task. */
+  askAgent: (peer: AcpPeer, ask: AcpAsk, signal?: AbortSignal) => Promise<PeerRun>
   askModel: (peer: ModelPeer, ask: ModelAsk, signal?: AbortSignal) => Promise<PeerRun>
 }
 
@@ -36,12 +39,16 @@ const FAILURE_OUTPUT_CHARS = 1_500
 
 function kindOf(peer: PeerConfig, workspace: string | undefined): string {
   if (peer.kind === 'model') return 'a model; it sees only your message'
-  return peerCommandLine(readable(peer, workspace)).readsProject ? 'a program on this computer; it can read the project' : 'a program on this computer; it sees only your message'
+  return readsProject(peer, workspace) ? 'a program on this computer; it can read the project' : 'a program on this computer; it sees only your message'
 }
 
 /** The peer as it will run: project reading only counts when the task has a project to read. */
-function readable(peer: CliPeer, workspace: string | undefined): CliPeer {
+function readable<T extends CliPeer | AcpPeer>(peer: T, workspace: string | undefined): T {
   return peer.readProject && !workspace ? { ...peer, readProject: false } : peer
+}
+
+function readsProject(peer: CliPeer | AcpPeer, workspace: string | undefined): boolean {
+  return peer.kind === 'acp' ? peer.readProject === true && !!workspace : peerCommandLine(readable(peer, workspace)).readsProject
 }
 
 /** The id of the agent a call names, or undefined when it names none. Used to remember an approval for the turn. */
@@ -65,7 +72,11 @@ export function consultRisk(input: unknown, peers: readonly PeerConfig[], worksp
   const peer = peers.find((candidate) => candidate.id === consultPeerId(input))
   if (!peer) return 'This agent is not set up in Settings.'
   if (peer.kind === 'model') return `Sends your message to ${peer.model}. Anything in it leaves this computer unless that model runs on it.`
-  const reads = peerCommandLine(readable(peer, workspace)).readsProject
+  const reads = readsProject(peer, workspace)
+  if (peer.kind === 'acp') {
+    const download = acpPreset(peer.preset).npm === true || peer.command.toLowerCase() === 'npx' ? ' The first time, npx downloads the package from npm.' : ''
+    return `Starts "${commandLineText(peer.command, peer.args ?? [])}" on this computer and sends it your message. ${peer.name} may pass it on to its own service${reads ? ', and it can read files in this project, but not change them' : ''}.${download}`
+  }
   return `Starts "${peer.command}" on this computer and sends it your message. ${peer.name} may pass it on to its own service${reads ? ', and it can read files in this project' : ''}.`
 }
 
@@ -80,17 +91,6 @@ export function consultDisplay(metadata: ToolResult['metadata']): { peer: PeerAc
   const peer = sanitizePeerActivity(metadata?.peer)
   if (!peer) return undefined
   return { peer, reply: typeof metadata?.peerReply === 'string' ? metadata.peerReply : '' }
-}
-
-/** The newest part of the talk that fits, so a long history never pushes the message past what a command line can take. */
-function fitPrompt(history: readonly Exchange[], message: string, readsProject: boolean, limit: number): string | undefined {
-  let kept = [...history]
-  for (;;) {
-    const prompt = consultPrompt(kept, message, readsProject)
-    if (prompt.length <= limit) return prompt
-    if (kept.length === 0) return undefined
-    kept = kept.slice(1)
-  }
 }
 
 function failure(text: string): ToolResult {
@@ -149,6 +149,8 @@ export function createConsultTool(host: ConsultHost): ExecutableTool {
       let outcome: PeerRun
       if (peer.kind === 'model') {
         outcome = await host.askModel(peer, { system: consultProtocol(false), history, message }, ctx?.signal)
+      } else if (peer.kind === 'acp') {
+        outcome = await host.askAgent(peer, { conversationId: host.conversationId, ...(host.workspace ? { workspace: host.workspace } : {}), history, message }, ctx?.signal)
       } else {
         const program = readable(peer, host.workspace)
         const line = peerCommandLine(program)

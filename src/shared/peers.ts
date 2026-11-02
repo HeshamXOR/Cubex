@@ -13,7 +13,13 @@ type Validated<T> = { ok: true; value: T } | { ok: false; error: string }
 /** The name of the tool the model calls. Shared so the permission prompt, the thread and the prompt all agree on it. */
 export const CONSULT_TOOL = 'consult_agent'
 
+/** The tool that hands a whole task to another agent, which works in the project and may change files. */
+export const DELEGATE_TOOL = 'delegate_task'
+
 export type PeerPresetId = 'claude-code' | 'antigravity' | 'custom'
+
+/** The agents Cubex knows how to start over the Agent Client Protocol (ACP), and the one that takes any command. */
+export type AcpPresetId = 'claude-direct' | 'claude' | 'codex' | 'gemini' | 'copilot' | 'opencode' | 'cursor' | 'goose' | 'qwen' | 'agy-acp' | 'custom'
 
 interface PeerBase {
   /** Stable key: the model names it in a call, a chat remembers it, and saved history refers to it. */
@@ -39,6 +45,31 @@ export interface CliPeer extends PeerBase {
   passEnv?: string[]
 }
 
+/**
+ * A program that speaks the Agent Client Protocol on its standard input and output. Cubex starts it once for a chat,
+ * keeps the session for the next messages, answers its permission questions with "read only", and stops it when the
+ * chat has been quiet for a while.
+ */
+export interface AcpPeer extends PeerBase {
+  kind: 'acp'
+  preset: AcpPresetId
+  /** A program name looked up on PATH, or a full path. */
+  command: string
+  /** What makes the program speak the protocol, such as --acp. Kept as the person sees it, so the list shows what runs. */
+  args?: string[]
+  /** Let it read this project's files. It is never allowed to change them or run commands. */
+  readProject?: boolean
+  /**
+   * Let the model hand it whole tasks (`delegate_task`). It then works in the project and may change files and run
+   * commands, each one asked about by the chat's permission mode. Implies it can read the project.
+   */
+  canDelegate?: boolean
+  /** Names of variables from Cubex's own environment, normally kept from programs, to pass to this one. */
+  passEnv?: string[]
+  /** The way to sign in, for an agent that asks to and offers more than one. Its error message lists them. */
+  authMethod?: string
+}
+
 /** A model of one of the providers set up in Cubex, asked a question with nothing but the message. */
 export interface ModelPeer extends PeerBase {
   kind: 'model'
@@ -46,7 +77,7 @@ export interface ModelPeer extends PeerBase {
   model: string
 }
 
-export type PeerConfig = CliPeer | ModelPeer
+export type PeerConfig = CliPeer | ModelPeer | AcpPeer
 
 export interface PeerSettings {
   list: PeerConfig[]
@@ -64,8 +95,11 @@ export const PEER_LIMITS = {
   passEnv: 16,
   providerId: 200,
   model: 300,
+  authMethod: 128,
   /** What the model may say to an agent in one call. Programs that take the message as an argument have to stay under a command line's limit. */
   messageChars: 24_000,
+  /** What the model may hand an agent as one task. */
+  taskChars: 24_000,
   rounds: { min: 1, max: 6, default: 3 }
 } as const
 
@@ -88,11 +122,53 @@ export interface PeerPreset {
 export const PEER_PRESETS: readonly PeerPreset[] = [
   { id: 'claude-code', label: 'Claude Code', name: 'Claude Code', command: 'claude', description: 'Anthropic\'s coding agent, run from its command line.' },
   { id: 'antigravity', label: 'Antigravity', name: 'Antigravity', command: 'agy', description: 'Google\'s agy command line.' },
-  { id: 'custom', label: 'Another program', name: '', command: '', description: 'Any command that reads a message and prints a reply, such as Codex or Gemini.' }
+  { id: 'custom', label: 'Another program', name: '', command: '', description: 'Any command that reads a message and prints a reply.' }
 ]
 
 export function peerPreset(id: PeerPresetId): PeerPreset {
   return PEER_PRESETS.find((preset) => preset.id === id) ?? PEER_PRESETS[2]!
+}
+
+export interface AcpPreset {
+  id: AcpPresetId
+  /** Shown in the list of agents to add. */
+  label: string
+  /** The name a new agent starts with. */
+  name: string
+  /** The program it runs. */
+  command: string
+  /** What makes it speak the protocol. */
+  args: readonly string[]
+  /** One sentence for the list. */
+  description: string
+  /** The program is a package from npm, downloaded the first time it runs. */
+  npm?: true
+}
+
+/**
+ * The launch commands are the ones the ACP registry (agentclientprotocol.com) publishes for each agent. The two that run
+ * through npx pin the adapter's version, so a new release of the adapter is never started without Cubex being updated.
+ */
+export const ACP_PRESETS: readonly AcpPreset[] = [
+  { id: 'claude-direct', label: 'Claude Code', name: 'Claude Code', command: 'claude', args: [], description: 'Anthropic\'s coding agent, from its command line or the Claude desktop app. It uses the sign-in Claude Code already has.' },
+  { id: 'claude', label: 'Claude Code (adapter)', name: 'Claude Code', command: 'npx', args: ['--yes', '@agentclientprotocol/claude-agent-acp@0.89.0'], npm: true, description: 'Anthropic\'s coding agent, through its ACP adapter. It uses the sign-in Claude Code already has. The adapter is downloaded from npm the first time.' },
+  { id: 'codex', label: 'Codex', name: 'Codex', command: 'npx', args: ['--yes', '@agentclientprotocol/codex-acp@2.1.1'], npm: true, description: 'OpenAI\'s coding agent, through its ACP adapter. It uses the sign-in Codex already has. The adapter is downloaded from npm the first time.' },
+  { id: 'gemini', label: 'Gemini CLI', name: 'Gemini', command: 'gemini', args: ['--acp'], description: 'Google\'s coding agent.' },
+  { id: 'copilot', label: 'GitHub Copilot', name: 'Copilot', command: 'copilot', args: ['--acp'], description: 'GitHub\'s coding agent, from its command line.' },
+  { id: 'opencode', label: 'OpenCode', name: 'OpenCode', command: 'opencode', args: ['acp'], description: 'The open-source coding agent. It uses the providers you set up in it.' },
+  { id: 'cursor', label: 'Cursor', name: 'Cursor', command: 'cursor-agent', args: ['acp'], description: 'Cursor\'s agent, from its command line.' },
+  { id: 'goose', label: 'Goose', name: 'Goose', command: 'goose', args: ['acp'], description: 'The open-source agent from Block.' },
+  { id: 'qwen', label: 'Qwen Code', name: 'Qwen', command: 'qwen', args: ['--acp'], description: 'Qwen\'s coding agent, from its command line.' },
+  { id: 'agy-acp', label: 'Antigravity', name: 'Antigravity', command: 'agy_acp_server', args: [], description: 'Google\'s Antigravity agent, through the runtime Cubex installs from Google. It has its own Google sign-in, set up under "Found on this PC".' },
+  { id: 'custom', label: 'Another ACP agent', name: '', command: '', args: [], description: 'Any program that speaks the Agent Client Protocol on its standard input and output.' }
+]
+
+export function acpPreset(id: AcpPresetId): AcpPreset {
+  return ACP_PRESETS.find((preset) => preset.id === id) ?? ACP_PRESETS[ACP_PRESETS.length - 1]!
+}
+
+export function isAcpPresetId(value: unknown): value is AcpPresetId {
+  return typeof value === 'string' && ACP_PRESETS.some((preset) => preset.id === value)
 }
 
 /** What Claude Code is asked to do with the message it receives on standard input. */
@@ -174,6 +250,22 @@ function validateArguments(value: unknown): Validated<string[] | undefined> {
   return { ok: true, value: value as string[] }
 }
 
+function validateCommand(value: unknown): Validated<string> {
+  if (typeof value !== 'string' || !value.trim()) return { ok: false, error: 'Enter the program to run.' }
+  if (value.trim().length > PEER_LIMITS.command) return { ok: false, error: `The program must be ${PEER_LIMITS.command} characters or fewer.` }
+  if (CONTROL.test(value)) return { ok: false, error: 'The program contains a control character or line break.' }
+  return { ok: true, value: value.trim() }
+}
+
+function validateAuthMethod(value: unknown): Validated<string | undefined> {
+  if (value === undefined || value === null) return { ok: true, value: undefined }
+  if (typeof value !== 'string') return { ok: false, error: 'The sign-in method must be text.' }
+  const method = value.trim()
+  if (method.length > PEER_LIMITS.authMethod) return { ok: false, error: `The sign-in method must be ${PEER_LIMITS.authMethod} characters or fewer.` }
+  if (CONTROL.test(method)) return { ok: false, error: 'The sign-in method contains a control character or line break.' }
+  return { ok: true, value: method || undefined }
+}
+
 function validatePassEnv(value: unknown): Validated<string[] | undefined> {
   if (value === undefined) return { ok: true, value: undefined }
   if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) return { ok: false, error: 'Variables to pass must be a list of names.' }
@@ -209,16 +301,34 @@ export function validatePeer(value: unknown): Validated<PeerConfig> {
     return { ok: true, value: { ...base, kind: 'model', providerId, model: model.trim() } }
   }
 
-  if (value.kind !== 'cli') return { ok: false, error: 'The agent is neither a program nor a model.' }
-  const preset = value.preset
-  if (preset !== 'claude-code' && preset !== 'antigravity' && preset !== 'custom') return { ok: false, error: 'The kind of program is not known.' }
-  const command = value.command
-  if (typeof command !== 'string' || !command.trim()) return { ok: false, error: 'Enter the program to run.' }
-  if (command.trim().length > PEER_LIMITS.command) return { ok: false, error: `The program must be ${PEER_LIMITS.command} characters or fewer.` }
-  if (CONTROL.test(command)) return { ok: false, error: 'The program contains a control character or line break.' }
+  if (value.kind !== 'cli' && value.kind !== 'acp') return { ok: false, error: 'The kind of agent is not known.' }
+  const command = validateCommand(value.command)
+  if (!command.ok) return command
   const passEnv = validatePassEnv(value.passEnv)
   if (!passEnv.ok) return passEnv
-  const peer: CliPeer = { ...base, kind: 'cli', preset, command: command.trim(), ...(passEnv.value ? { passEnv: passEnv.value } : {}) }
+
+  if (value.kind === 'acp') {
+    if (!isAcpPresetId(value.preset)) return { ok: false, error: 'The kind of agent is not known.' }
+    const args = validateArguments(value.args)
+    if (!args.ok) return args
+    if (value.readProject !== undefined && typeof value.readProject !== 'boolean') return { ok: false, error: 'Reading the project must be either on or off.' }
+    if (value.canDelegate !== undefined && typeof value.canDelegate !== 'boolean') return { ok: false, error: 'Taking on tasks must be either on or off.' }
+    const authMethod = validateAuthMethod(value.authMethod)
+    if (!authMethod.ok) return authMethod
+    const acp: AcpPeer = {
+      ...base, kind: 'acp', preset: value.preset, command: command.value,
+      ...(args.value && args.value.length > 0 ? { args: args.value } : {}),
+      ...(value.readProject === true ? { readProject: true } : {}),
+      ...(value.canDelegate === true ? { canDelegate: true } : {}),
+      ...(passEnv.value ? { passEnv: passEnv.value } : {}),
+      ...(authMethod.value ? { authMethod: authMethod.value } : {})
+    }
+    return { ok: true, value: acp }
+  }
+
+  const preset = value.preset
+  if (preset !== 'claude-code' && preset !== 'antigravity' && preset !== 'custom') return { ok: false, error: 'The kind of program is not known.' }
+  const peer: CliPeer = { ...base, kind: 'cli', preset, command: command.value, ...(passEnv.value ? { passEnv: passEnv.value } : {}) }
 
   if (preset === 'claude-code') {
     if (value.readProject !== undefined && typeof value.readProject !== 'boolean') return { ok: false, error: 'Reading the project must be either on or off.' }
@@ -268,6 +378,11 @@ export function enabledPeers(settings: PeerSettings | undefined, ids: readonly s
   return out
 }
 
+/** The agents among these that may be handed whole tasks. Only an agent that speaks ACP can be held to a policy while it works. */
+export function delegatePeers(peers: readonly PeerConfig[]): AcpPeer[] {
+  return peers.filter((peer): peer is AcpPeer => peer.kind === 'acp' && peer.canDelegate === true)
+}
+
 /** A list of peer ids from a request or stored choice: bounded, valid, no repeats. Whether they exist is checked where they are used. */
 export function cleanPeerIds(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined
@@ -306,6 +421,16 @@ export function newCliPeer(preset: PeerPresetId, existing: readonly PeerConfig[]
   for (let n = 2; name && names.has(name.toLowerCase()); n++) name = `${entry.name} ${n}`
   const id = uniquePeerId(preset === 'custom' ? 'custom' : preset, ids)
   return { kind: 'cli', id, name, enabled: true, preset, command: entry.command, ...(preset === 'custom' ? { input: 'stdin' as const } : {}) }
+}
+
+/** A new ACP agent from a preset: on, with the preset's name, command and arguments. A second of the same preset gets a numbered name. */
+export function newAcpPeer(preset: AcpPresetId, existing: readonly PeerConfig[]): AcpPeer {
+  const entry = acpPreset(preset)
+  const names = new Set(existing.map((peer) => peer.name.toLowerCase()))
+  let name = entry.name
+  for (let n = 2; name && names.has(name.toLowerCase()); n++) name = `${entry.name} ${n}`
+  const id = uniquePeerId(preset === 'custom' ? 'acp' : preset, existing.map((peer) => peer.id))
+  return { kind: 'acp', id, name, enabled: true, preset, command: entry.command, ...(entry.args.length > 0 ? { args: [...entry.args] } : {}) }
 }
 
 export function newModelPeer(providerId: string, model: string, label: string, existing: readonly PeerConfig[]): ModelPeer {
@@ -351,6 +476,90 @@ export function sanitizePeerActivity(value: unknown): PeerActivity | undefined {
   return { name, round, of, ...(seconds !== undefined ? { seconds } : {}), ...(verdict ? { verdict } : {}), ...(asked ? { asked } : {}) }
 }
 
+// --- Delegated tasks ----------------------------------------------------------
+
+/** What a delegated task is for. Research and review only read: the agent may look at the project and report. */
+export const DELEGATE_ROLES = ['implement', 'research', 'review', 'test'] as const
+export type DelegateRole = (typeof DELEGATE_ROLES)[number]
+
+export const DELEGATE_ROLE_LABEL: Record<DelegateRole, string> = { implement: 'Implement', research: 'Research', review: 'Review', test: 'Run tests' }
+
+export function isDelegateRole(value: unknown): value is DelegateRole {
+  return typeof value === 'string' && (DELEGATE_ROLES as readonly string[]).includes(value)
+}
+
+/** Roles that never change anything: every request to edit, delete, move or run something is refused. */
+export function roleIsReadOnly(role: DelegateRole): boolean {
+  return role === 'research' || role === 'review'
+}
+
+/** How long one task may run before it is stopped. A task is a whole piece of work, not a message. */
+export const DELEGATE_TIMEOUT_MS = 30 * 60_000
+
+export type DelegateStatus = 'working' | 'waiting' | 'done' | 'failed' | 'cancelled'
+
+/** One thing the agent did, as it reported it: "Edit src/app.ts", "Run npm test". */
+export interface DelegateStep {
+  title: string
+  /** The agent's own word for the kind of step: read, edit, delete, move, search, execute, think, fetch, other. */
+  kind: string
+  state: 'running' | 'done' | 'failed'
+}
+
+/** A file the task changed. `tracked`: Cubex saved what was there before, so Changes can show it and Rewind can undo it. */
+export interface DelegateFile {
+  path: string
+  change: 'edited' | 'created' | 'deleted'
+  tracked: boolean
+}
+
+/** A delegated task as the thread's card shows it, while it works and afterwards. Kept in saved history. */
+export interface DelegateActivity {
+  /** The agent's name. */
+  name: string
+  role: DelegateRole
+  status: DelegateStatus
+  seconds?: number
+  steps: DelegateStep[]
+  files: DelegateFile[]
+  /** The task the model handed over, as far as the card shows it: the person approved this text. */
+  asked?: string
+}
+
+export const DELEGATE_LIMITS = { steps: 60, files: 200, title: 200, path: 500 } as const
+
+const DELEGATE_STATUSES: readonly DelegateStatus[] = ['working', 'waiting', 'done', 'failed', 'cancelled']
+
+/** Only the fields of a delegated task, each checked, from anything a saved file or an event holds. */
+export function sanitizeDelegateActivity(value: unknown): DelegateActivity | undefined {
+  if (!isRecord(value)) return undefined
+  const name = typeof value.name === 'string' ? value.name.replace(CONTROL, ' ').trim().slice(0, PEER_LIMITS.name) : ''
+  if (!name || !isDelegateRole(value.role)) return undefined
+  const status = DELEGATE_STATUSES.find((entry) => entry === value.status)
+  if (!status) return undefined
+  const text = (input: unknown, max: number): string => (typeof input === 'string' ? input.replace(CONTROL, ' ').trim().slice(0, max) : '')
+  const steps: DelegateStep[] = []
+  for (const entry of Array.isArray(value.steps) ? value.steps : []) {
+    if (steps.length >= DELEGATE_LIMITS.steps) break
+    if (!isRecord(entry)) continue
+    const title = text(entry.title, DELEGATE_LIMITS.title)
+    const state = entry.state === 'running' || entry.state === 'done' || entry.state === 'failed' ? entry.state : undefined
+    if (title && state) steps.push({ title, kind: text(entry.kind, 20) || 'other', state })
+  }
+  const files: DelegateFile[] = []
+  for (const entry of Array.isArray(value.files) ? value.files : []) {
+    if (files.length >= DELEGATE_LIMITS.files) break
+    if (!isRecord(entry)) continue
+    const path = text(entry.path, DELEGATE_LIMITS.path)
+    const change = entry.change === 'edited' || entry.change === 'created' || entry.change === 'deleted' ? entry.change : undefined
+    if (path && change) files.push({ path, change, tracked: entry.tracked === true })
+  }
+  const seconds = typeof value.seconds === 'number' && Number.isFinite(value.seconds) && value.seconds >= 0 && value.seconds <= 86_400 ? Math.round(value.seconds) : undefined
+  // Line breaks and tabs stay in the task text; every other control character goes.
+  const asked = typeof value.asked === 'string' ? value.asked.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').slice(0, PEER_ASKED_CHARS).trim() : ''
+  return { name, role: value.role, status, ...(seconds !== undefined ? { seconds } : {}), steps, files, ...(asked ? { asked } : {}) }
+}
+
 // --- Messages between the window and the main process --------------------------
 
 /** Whether a program peer can be started from this computer. */
@@ -371,9 +580,17 @@ export interface PeerPresetStatus {
   path?: string
 }
 
+/** Whether each ACP agent the Add menu offers is installed here. */
+export interface AcpPresetStatus {
+  preset: AcpPresetId
+  found: boolean
+  path?: string
+}
+
 export interface PeersOverview {
   peers: PeerStatus[]
   presets: PeerPresetStatus[]
+  acpPresets: AcpPresetStatus[]
   /** Local-only mode is on: programs are not started, and models must be local. */
   localOnly: boolean
 }
@@ -389,14 +606,27 @@ export interface PeerTestResult {
   hint?: string
   /** The program's own error output, redacted and clipped. Present only when it printed something. */
   output?: string
+  /** What the test found out about the agent besides its reply: whether it can take tasks. Not an error. */
+  note?: string
 }
 
 /** The message a test sends. */
 export const PEER_TEST_MESSAGE = 'Reply with the single word OK.'
 
+/** A command as a person would type it: an argument with spaces or quotes is quoted. */
+export function commandLineText(command: string, args: readonly string[]): string {
+  const quote = (arg: string): string => (arg === '' || /[\s"]/.test(arg) ? JSON.stringify(arg) : arg)
+  return [command, ...args.map(quote)].join(' ')
+}
+
 /** How a peer is described in one line, for the list: what runs, or which model. */
 export function describePeer(peer: PeerConfig, providerName?: string): string {
   if (peer.kind === 'model') return providerName ? `${peer.model} on ${providerName}` : peer.model
+  if (peer.kind === 'acp') {
+    const line = commandLineText(peer.command, peer.args ?? [])
+    if (peer.canDelegate === true) return `${line}, takes on tasks in this project`
+    return peer.readProject === true ? `${line}, can read this project` : line
+  }
   const line = peerCommandLine(peer)
   return line.readsProject ? `${peer.command}, can read this project` : peer.command
 }

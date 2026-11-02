@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { CliPeer } from '@shared/peers'
+import { removeFolder } from '../testing/removeFolder'
 import { createScratch, peerEnvironment, removeScratch, runCliPeer, locatePeer, STDIN_PROMPT_LIMIT, ARGUMENT_PROMPT_LIMIT } from './peerRunner'
 import { PEER_STDOUT_CAP } from './output'
 
@@ -25,7 +26,7 @@ beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), 'cubex-peer-test-'))
   for (const [name, source] of Object.entries(scripts)) writeFileSync(join(dir, name), source)
 })
-afterAll(() => rmSync(dir, { recursive: true, force: true }))
+afterAll(() => removeFolder(dir))
 
 const script = (name: string): string => join(dir, name)
 const peer = (name: string, over: Partial<CliPeer> = {}): CliPeer => ({

@@ -7,28 +7,12 @@
 .app {
   position: relative;
   display: grid;
-  grid-template-rows: var(--titlebar-h) minmax(0, 1fr);
+  grid-template-rows: var(--titlebar-h) minmax(0, 1fr) 26px;
   height: 100vh;
   overflow: hidden;
   background: var(--mica);
   color: var(--color-foreground);
 }
-/* Mica picks up a little of the wallpaper behind the window. */
-.app::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(900px 560px at 4% -10%, rgba(79, 108, 255, 0.09), transparent 70%),
-    radial-gradient(700px 500px at 100% 110%, rgba(123, 77, 255, 0.06), transparent 70%);
-}
-:root[data-theme='light'] .app::before {
-  background:
-    radial-gradient(900px 560px at 4% -10%, rgba(79, 108, 255, 0.07), transparent 70%),
-    radial-gradient(700px 500px at 100% 110%, rgba(123, 77, 255, 0.05), transparent 70%);
-}
-
 /* ---------- Title bar ---------- */
 
 .tb {
@@ -119,7 +103,7 @@
   gap: var(--gap);
   min-height: 0;
   min-width: 0;
-  padding: 0 var(--gap) var(--gap) 0;
+  padding: 0 var(--gap) 0 0;
 }
 .body--bare { padding-left: var(--gap); }
 
@@ -130,8 +114,9 @@
   min-height: 0;
   overflow: hidden;
   background: var(--card);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-xl);
+  border: 1px solid var(--hairline);
+  border-bottom: 0;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
 }
 .panel--main { position: relative; }
 
@@ -165,7 +150,7 @@
   left: calc(50% - 1px);
   width: 2px;
   border-radius: 1px;
-  background: var(--color-brand);
+  background: var(--color-foreground-subtle);
   opacity: 0;
   transition: opacity 0.12s;
 }
@@ -303,7 +288,7 @@ body.is-resizing * { cursor: col-resize !important; user-select: none !important
 .sess .inline-rename { padding: 0 6px 0 8px; }
 
 .st { width: 14px; height: 14px; flex: none; display: grid; place-items: center; }
-.st .mark { color: var(--color-accent-foreground); }
+.st .mark { color: var(--color-foreground); }
 .st .wait { color: var(--color-warning); }
 .st .done { color: var(--color-success); }
 
@@ -311,7 +296,8 @@ body.is-resizing * { cursor: col-resize !important; user-select: none !important
 .usage { margin: 0 10px 10px; padding: 12px 0 0; border-top: 1px solid var(--color-border); }
 .bar { height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.07); margin-top: 8px; overflow: hidden; }
 :root[data-theme='light'] .bar { background: rgba(20, 20, 30, 0.08); }
-.bar i { display: block; height: 100%; border-radius: 2px; background: linear-gradient(90deg, #4f6cff, #7b4dff); }
+/* Progress reads in the text colour, like the context meter in the status strip: colour is kept for meaning. */
+.bar i { display: block; height: 100%; border-radius: 2px; background: var(--color-foreground-subtle); }
 .bar i.is-over { background: var(--color-warning); }
 
 .side-link {

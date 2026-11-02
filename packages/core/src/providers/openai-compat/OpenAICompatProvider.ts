@@ -8,10 +8,11 @@ import type { Usage } from '../../types/response'
 import type { MessageContentPart } from '../../types/content'
 import { normalizeHttpError, normalizeUnknownError } from '../../errors/normalize'
 import { parseSSEJson } from '../../streaming/sse'
+import { createThinkTagParser } from '../../streaming/thinkTagParser'
 import { chatFetchInit } from '../../util/chatFetch'
 import { withTimeout } from '../../util/timeout'
 import { BaseProvider, buildAuthHeaders, normalizeBaseUrl } from '../base'
-import { requestWithSupportedEffort, type EffortModel } from '../effort'
+import { infersReasoning, requestWithSupportedEffort, type EffortModel } from '../effort'
 import { ChatDialects, chatExtrasRejected, chatExtrasSent, type ChatDialect } from '../openai/dialect'
 import {
   mapChatUsage,
@@ -40,6 +41,7 @@ interface ChatChunk {
       content?: string | null
       reasoning_content?: string | null
       reasoning?: string | null
+      thought?: string | null
       tool_calls?: Array<ChatToolCall & { index?: number }>
     }
     finish_reason?: string | null
@@ -118,7 +120,7 @@ export class OpenAICompatProvider extends BaseProvider {
       modalities: { input: caps.includes('image_input') ? ['text', 'image'] : ['text'], output: ['text'] },
       supportsTools: caps.includes('tools'),
       supportsStructuredOutput: caps.includes('structured_output'),
-      supportsReasoning: caps.includes('reasoning')
+      supportsReasoning: caps.includes('reasoning') || infersReasoning(id)
     }
   }
 
@@ -222,6 +224,8 @@ export class OpenAICompatProvider extends BaseProvider {
       // and attach id-less continuation deltas to the last call seen.
       const indexById = new Map<string, number>()
       let lastIndex = 0
+      let sawNativeReasoning = false
+      const thinkParser = createThinkTagParser()
       for await (const { data } of parseSSEJson<ChatChunk>(res.body, { signal, onActivity: options?.onActivity })) {
         if (data.error) {
           // A 200 stream can still fail upstream. Never report the partial text as a finished answer.
@@ -231,10 +235,19 @@ export class OpenAICompatProvider extends BaseProvider {
         if (choice) {
           // DeepSeek and other compatible endpoints stream reasoning separately
           // from the answer. Forward it as it arrives, including before tools.
-          const primaryReasoning = choice.delta?.reasoning_content
-          const reasoning = typeof primaryReasoning === 'string' && primaryReasoning ? primaryReasoning : choice.delta?.reasoning
-          if (typeof reasoning === 'string' && reasoning) yield { type: 'reasoning_delta', text: reasoning }
-          if (choice.delta?.content) yield { type: 'text_delta', text: choice.delta.content }
+          const textReasoning = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined)
+          const reasoning = textReasoning(choice.delta?.reasoning_content) || textReasoning(choice.delta?.reasoning) || textReasoning(choice.delta?.thought)
+          if (reasoning) {
+            sawNativeReasoning = true
+            yield { type: 'reasoning_delta', text: reasoning }
+          }
+          if (choice.delta?.content) {
+            if (sawNativeReasoning) {
+              yield { type: 'text_delta', text: choice.delta.content }
+            } else {
+              for (const event of thinkParser.push(choice.delta.content)) yield event
+            }
+          }
           if (choice.delta?.tool_calls) {
             for (const tc of choice.delta.tool_calls) {
               let index: number
@@ -254,11 +267,15 @@ export class OpenAICompatProvider extends BaseProvider {
           if (choice.finish_reason === 'error') {
             throw normalizeHttpError({ provider: this.id, status: 502, body: { error: { message: 'The upstream model failed mid-response.' } } })
           }
-          if (choice.finish_reason) yield { type: 'stop', stopReason: mapFinishReason(choice.finish_reason) }
+          if (choice.finish_reason) {
+            for (const event of thinkParser.flush()) yield event
+            yield { type: 'stop', stopReason: mapFinishReason(choice.finish_reason) }
+          }
         }
         const u = mapChatUsage(data.usage ?? choice?.usage)
         if (u) usage = u
       }
+      for (const event of thinkParser.flush()) yield event
       if (usage) yield { type: 'usage', usage }
     } catch (err) {
       throw normalizeUnknownError(this.id, err)

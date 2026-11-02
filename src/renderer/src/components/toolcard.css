@@ -37,8 +37,11 @@
 /* Text for assistive technology sits between the two, so they are siblings but not neighbors. */
 .toolrow__peer ~ .toolrow__chev { margin-left: 8px; }
 .toolrow__phase { flex: none; margin-left: auto; font-size: 12.5px; color: var(--color-foreground-subtlest); }
+/* What a task handed to another agent is doing now. It takes the room that is left and is cut with an ellipsis. */
+.toolrow__step { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--color-foreground-subtlest); }
+.toolrow__peer + .toolrow__phase { margin-left: 8px; }
 .toolrow__phase--error { color: var(--color-destructive); }
-.toolrow__phase--waiting { color: var(--color-warning); }
+.toolrow__phase--waiting { color: var(--color-foreground-subtle); }
 .toolrow__diff + .toolrow__phase,
 .toolrow__phase + .toolrow__chev,
 .toolrow__diff + .toolrow__chev { margin-left: 8px; }
@@ -85,6 +88,30 @@
   background: var(--well);
   font-size: 13px;
 }
+
+/* A task handed to another agent: what was asked, the steps, the files it changed and its report. */
+.toolrow__task {
+  max-height: 480px;
+  margin: 2px 0 8px 24px;
+  padding: 4px 14px 12px;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--well);
+  font-size: 13px;
+}
+.dsteps { max-height: 180px; margin: 0 0 4px; padding: 0; overflow: auto; list-style: none; }
+.dstep { display: flex; align-items: flex-start; gap: 8px; padding: 2px 0; font-size: 12.5px; line-height: 1.5; color: var(--color-foreground-subtle); }
+.dstep__mark { display: inline-flex; flex: none; margin-top: 3px; color: var(--color-foreground-subtlest); }
+.dstep[data-state='failed'] .dstep__mark { color: var(--color-destructive); }
+.dstep[data-state='running'] { color: var(--color-foreground); }
+.dstep__title { min-width: 0; overflow-wrap: anywhere; }
+.dfiles { margin: 0; padding: 0; list-style: none; }
+.dfile { display: flex; align-items: baseline; gap: 10px; padding: 2px 0; font-size: 12.5px; line-height: 1.5; }
+.dfile__path { min-width: 0; font: 12px/1.5 var(--mono); font-variant-ligatures: none; color: var(--color-foreground); overflow-wrap: anywhere; }
+.dfile__change { flex: none; color: var(--color-foreground-subtlest); }
+.dfile__flag { flex: none; font-size: 11.5px; color: var(--color-warning); }
+.dfiles__note { max-width: 72ch; margin: 4px 0 0; font-size: 12px; line-height: 1.5; color: var(--color-foreground-subtle); }
 
 /* The two halves of a consultation: what was sent, quietly, and what came back. */
 .toolrow__label { margin: 8px 0 3px; font-size: 12px; color: var(--color-foreground-subtlest); }

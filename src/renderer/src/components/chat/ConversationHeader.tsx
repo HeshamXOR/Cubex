@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { ArrowDown, ArrowUp, Check, Copy, Folder, FolderPlus, GitBranch, PanelRight, Pencil, Share, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, Copy, Folder, FolderPlus, GitBranch, PanelRight, PanelRightOpen, Pencil, Share, X } from 'lucide-react'
 import { useStore } from '../../state/store'
 import { api } from '../../lib/api'
 import { basename } from '../../lib/format'
 import { useGitStatus } from '../../lib/useGitStatus'
 import { useMenuKeys } from '../../lib/useMenuKeys'
 import { useChanges } from '../../lib/useSessionChanges'
+import { setRailCollapsed, useRailAvailable, useRailCollapsed } from '../../lib/runRail'
 import { InlineRename } from '../InlineRename'
 import { TasksIndicator } from '../TasksIndicator'
 
@@ -19,6 +20,8 @@ export function ConversationHeader(): JSX.Element {
   const pickWorkspace = useStore((s) => s.pickWorkspace)
   const clearWorkspace = useStore((s) => s.clearWorkspace)
   const git = useGitStatus(conversation?.id)
+  const railHidden = useRailCollapsed()
+  const railAvailable = useRailAvailable(true, panelOpen)
   const { changes } = useChanges()
   const [editing, setEditing] = useState(false)
   const [placeMenu, setPlaceMenu] = useState(false)
@@ -104,6 +107,9 @@ export function ConversationHeader(): JSX.Element {
           </>
         )}
       </div>
+      {railAvailable && railHidden && (
+        <button className="ib" onClick={() => setRailCollapsed(false)} aria-label="Show run rail" title="Show run rail"><PanelRightOpen size={16} /></button>
+      )}
       <button className={`ib ${panelOpen ? 'on' : ''}`} onClick={togglePanel} aria-pressed={panelOpen} aria-label={count > 0 ? `Review panel, ${count} changed ${count === 1 ? 'file' : 'files'}` : 'Review panel'} title={panelOpen ? 'Hide review' : 'Show review'}>
         <PanelRight size={16} />
         {count > 0 && <span className="ib__badge">{count}</span>}

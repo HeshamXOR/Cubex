@@ -113,9 +113,9 @@ export function splitVerdict(reply: string): { body: string; verdict?: PeerVerdi
   return { body: lines.slice(0, index).join('\n').trim(), verdict }
 }
 
-/** Keeps another agent's words from closing the wrapper they are returned in. */
+/** Keeps another agent's words from closing the wrapper they are returned in: an opinion's, or a task's report. */
 export function escapeReply(reply: string): string {
-  return reply.replace(/<(\/?)agent_reply/gi, '<\u200b$1agent_reply')
+  return reply.replace(/<(\/?)agent_(reply|report)/gi, '<\u200b$1agent_$2')
 }
 
 /** What to try, from how a program failed. Matched on its own words, which differ between versions, so a miss is just no hint. */

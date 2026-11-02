@@ -72,7 +72,7 @@
 .menu__item--danger:hover:not(:disabled) .menu__t { color: var(--color-destructive); }
 .menu__t { font-size: var(--ui-font-size); color: var(--color-foreground); }
 .menu__s { display: block; font-size: 12px; line-height: 1.4; color: var(--color-foreground-subtlest); }
-.menu__check { margin-left: auto; color: var(--color-accent-foreground); flex-shrink: 0; }
+.menu__check { margin-left: auto; color: var(--color-foreground); flex-shrink: 0; }
 .menu__sep { height: 1px; background: var(--color-border); margin: 4px -4px; }
 .menu__label { font-size: 12px; color: var(--color-foreground-subtlest); padding: 6px 9px 3px; }
 .menu__path { font-size: 12px; color: var(--color-foreground-subtlest); padding: 0 9px 7px; word-break: break-all; border-bottom: 1px solid var(--color-border); margin-bottom: 4px; }
@@ -290,7 +290,7 @@
 }
 .progress__bar {
   height: 100%;
-  background: var(--color-brand);
+  background: var(--color-foreground-subtle);
   transition: width 0.15s ease;
 }
 
@@ -344,7 +344,7 @@
   margin: 10px 0 4px;
   border-radius: 999px;
   /* The part below the current value is filled, so the control reads as an amount. */
-  background: linear-gradient(to right, var(--color-brand) var(--p), var(--color-surface-hover) var(--p));
+  background: linear-gradient(to right, var(--color-foreground-subtle) var(--p), var(--color-surface-hover) var(--p));
   outline: none;
 }
 .slider::-webkit-slider-thumb {
@@ -354,7 +354,7 @@
   height: 14px;
   border: 0;
   border-radius: 50%;
-  background: var(--color-brand);
+  background: var(--color-foreground);
   box-shadow: 0 0 0 3px var(--slider-surface, var(--color-background)), 0 1px 3px rgba(0, 0, 0, 0.5);
   cursor: default;
 }

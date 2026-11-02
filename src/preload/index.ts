@@ -161,7 +161,18 @@ const api: CubexAPI = {
 
   // Other agents
   getPeersStatus: () => invoke(IPC.peersStatus),
+  detectAgents: (refresh) => invoke(IPC.peersDetect, refresh === true),
+  signInAgent: (id) => invoke(IPC.peersSignIn, id),
   testPeer: (peer) => invoke(IPC.peersTest, peer),
+  getAntigravityStatus: () => invoke(IPC.antigravityStatus),
+  installAntigravity: () => invoke(IPC.antigravityInstall),
+  cancelAntigravityInstall: (operationId) => invoke(IPC.antigravityCancelInstall, operationId),
+  removeAntigravity: () => invoke(IPC.antigravityRemove),
+  signInAntigravity: () => invoke(IPC.antigravitySignIn),
+  cancelAntigravitySignIn: (flowId) => invoke(IPC.antigravityCancelSignIn, flowId),
+  openAntigravitySignIn: () => invoke(IPC.antigravityOpenSignIn),
+  signOutAntigravity: () => invoke(IPC.antigravitySignOut),
+  onAntigravityState: (cb) => subscribe(IPC.antigravityState, cb),
 
   // Updates
   getUpdateState: () => invoke(IPC.updatesGet),
@@ -171,7 +182,13 @@ const api: CubexAPI = {
   installUpdate: (request) => invoke(IPC.updatesInstall, request),
   skipUpdate: (version) => invoke(IPC.updatesSkip, version),
   openUpdatePage: () => invoke(IPC.updatesOpenPage),
-  onUpdateState: (cb) => subscribe(IPC.updatesState, cb)
+  onUpdateState: (cb) => subscribe(IPC.updatesState, cb),
+
+  // Goals
+  evaluateGoal: (request) => invoke(IPC.goalEvaluate, request),
+  cancelGoalCheck: (conversationId) => invoke(IPC.goalCancel, conversationId),
+  getGoal: (conversationId) => invoke(IPC.goalGet, conversationId),
+  setGoal: (conversationId, goal) => invoke(IPC.goalSet, conversationId, goal)
 }
 
 contextBridge.exposeInMainWorld('cubex', api)

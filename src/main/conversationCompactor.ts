@@ -42,6 +42,8 @@ export interface CompactOptions {
   threshold?: number
   /** Called once a boundary is chosen and the summary is about to be requested; never when there is nothing to summarize. */
   onPlan?: (plan: { messagesSummarized: number }) => void
+  /** A system-side note (what the agent was doing) appended to the summary, so it survives later turns. */
+  note?: string
   signal?: AbortSignal
   headers?: Record<string, string>
 }
@@ -110,9 +112,10 @@ async function compact(deps: CompactorDeps, conversationId: string, options: Com
   if (options.signal?.aborted) return fail(CANCELLED)
   if (response.stopReason === 'content_filter') return fail('The model declined to summarize this conversation.')
 
-  const summary = cleanSummary(response.text, { cutOff: response.stopReason === 'length' })
-  if (!summary) return fail('The model returned an empty summary.')
-  if (summary.length < MIN_SUMMARY_CHARS) return fail('The model returned a summary that was too short to use.')
+  const cleaned = cleanSummary(response.text, { cutOff: response.stopReason === 'length' })
+  if (!cleaned) return fail('The model returned an empty summary.')
+  if (cleaned.length < MIN_SUMMARY_CHARS) return fail('The model returned a summary that was too short to use.')
+  const summary = options.note?.trim() ? `${cleaned}\n\n${options.note.trim()}` : cleaned
 
   // The call took a while; never write a boundary into a conversation that moved on meanwhile.
   const fresh = deps.repo.get(conversationId)
