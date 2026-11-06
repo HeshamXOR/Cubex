@@ -1,6 +1,7 @@
 import { useId, useState, type ReactNode } from 'react'
 import { Check, Plus, TriangleAlert, X } from 'lucide-react'
 import type { ModelInfo, ProviderConfig } from '@core/types'
+import { preferredEndpoints, type ModelEndpoint } from '@core/providers/endpoints'
 import type { ProviderPreset } from '../../../../shared/providerPresets'
 import { plainError } from '../../lib/localModels'
 import { declaredLongContextModels, normalizeLongContextModels } from '../../../../shared/longContext'
@@ -23,6 +24,22 @@ interface EditorProps {
   /** Persists the provider. Rejecting shows the reason in the form and keeps what was typed. */
   onSave: (config: ProviderConfig, secret: string | undefined) => Promise<void>
   onClose: () => void
+}
+
+const ENDPOINT_NAMES: Readonly<Record<ModelEndpoint, string>> = { anthropic: 'Anthropic Messages', responses: 'Responses', chat: 'Chat Completions' }
+
+/** What automatic mode does here, in numbers once the server's list says which formats each model has. */
+function endpointHint(models: readonly ModelInfo[]): string {
+  const counts = new Map<ModelEndpoint, number>()
+  for (const model of models) {
+    if (!model.endpoints) continue
+    const first = preferredEndpoints(model.id, model.endpoints)[0]
+    if (first) counts.set(first, (counts.get(first) ?? 0) + 1)
+  }
+  const base = 'Automatic uses each model\'s native format when the server offers it, and moves to another one when the server is busy or says so.'
+  if (counts.size === 0) return base
+  const detected = (['anthropic', 'responses', 'chat'] as const).filter((endpoint) => counts.has(endpoint)).map((endpoint) => `${counts.get(endpoint)} on ${ENDPOINT_NAMES[endpoint]}`).join(', ')
+  return `${base} Detected: ${detected}.`
 }
 
 /** The window a model must report before its listing is taken as the gated 1M one rather than the ordinary window. */
@@ -307,11 +324,13 @@ export function ProviderEditor({ initial, isNew, headingLevel, preset, focus, kn
           </Field>
         )}
         {draft.kind === 'openai-compat' && !azure && (
-          <Field label="API mode" hint="Cubex switches a model to the Responses API by itself when the server asks for it.">
+          <Field label="API mode" hint={endpointHint(models)}>
             {(aria) => (
-              <select {...aria} className="select" value={draft.apiMode === 'responses' ? 'responses' : 'chat_completions'} onChange={(e) => patch({ apiMode: e.target.value })}>
+              <select {...aria} className="select" value={draft.apiMode ?? ''} onChange={(e) => patch({ apiMode: e.target.value || undefined })}>
+                <option value="">Automatic, per model</option>
                 <option value="chat_completions">Chat Completions</option>
                 <option value="responses">Responses</option>
+                <option value="anthropic">Anthropic Messages</option>
               </select>
             )}
           </Field>

@@ -121,6 +121,11 @@ function isForeignSignature(signature: string): boolean {
   return signature.includes(':')
 }
 
+/** Tool call ids from other providers ("functions.read_file:0") use characters this API refuses. Both ends of a call map the same way. */
+function safeToolId(id: string): string {
+  return id.replace(/[^a-zA-Z0-9_-]/g, '_')
+}
+
 /** Map unified content parts to native Anthropic content blocks. */
 export function toAnthBlocks(parts: MessageContentPart[]): AnthBlock[] {
   const out: AnthBlock[] = []
@@ -135,7 +140,7 @@ export function toAnthBlocks(parts: MessageContentPart[]): AnthBlock[] {
         break
       }
       case 'tool_use':
-        out.push({ type: 'tool_use', id: part.id, name: part.name, input: part.input })
+        out.push({ type: 'tool_use', id: safeToolId(part.id), name: part.name, input: part.input })
         break
       case 'reasoning':
         // Only blocks Anthropic signed can be replayed; unsigned text is display-only.
@@ -153,7 +158,7 @@ export function toAnthBlocks(parts: MessageContentPart[]): AnthBlock[] {
         }
         out.push({
           type: 'tool_result',
-          tool_use_id: part.toolUseId,
+          tool_use_id: safeToolId(part.toolUseId),
           content,
           ...(part.isError ? { is_error: true } : {})
         })

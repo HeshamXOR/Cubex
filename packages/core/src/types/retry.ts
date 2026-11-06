@@ -35,7 +35,7 @@ export const DEFAULT_RETRY_POLICY: RetryPolicy = {
   retryOnConnectionError: true,
   retryOn408: true,
   retryOn429: true,
-  retryOn5xx: [500, 502, 503, 504],
+  retryOn5xx: [500, 502, 503, 504, 529],
   respectRetryAfter: true,
   unknownErrorBehavior: 'fail'
 }

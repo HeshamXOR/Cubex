@@ -16,7 +16,7 @@ export interface EffortOption {
 }
 
 /** The selected id is still available while its metadata is loading. */
-export type EffortModel = Pick<ModelInfo, 'id'> & Partial<Pick<ModelInfo, 'supportsReasoning' | 'reasoningEfforts'>>
+export type EffortModel = Pick<ModelInfo, 'id'> & Partial<Pick<ModelInfo, 'supportsReasoning' | 'reasoningEfforts' | 'endpoints'>>
 
 const DEFAULT_EFFORT: EffortOption = {
   value: undefined, label: 'Default', hint: 'Use the model default; send no effort parameter'

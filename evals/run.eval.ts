@@ -30,7 +30,9 @@ vi.mock('../src/main/config', async () => {
   return {
     getSettings: () => ({
       general: { workspacePath: [...state.workspaces.values()][0] ?? '' },
-      mcpServers: [], hooks: [], privacy: { localOnly: false }, shell: { preferred: 'auto' }
+      mcpServers: [], hooks: [], privacy: { localOnly: false }, shell: { preferred: 'auto' },
+      // CUBEX_EVAL_PROFILE compares the full and lean setups on one model.
+      ai: process.env.CUBEX_EVAL_PROFILE ? { harnessProfile: process.env.CUBEX_EVAL_PROFILE } : {}
     })
   }
 })

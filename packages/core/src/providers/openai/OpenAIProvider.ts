@@ -8,7 +8,7 @@ import { sdkTimeoutMs } from '../../types/timeout'
 import type { AIStreamEvent } from '../../types/stream'
 import type { Usage } from '../../types/response'
 import { normalizeHttpError, normalizeUnknownError } from '../../errors/normalize'
-import { BaseProvider, normalizeBaseUrl } from '../base'
+import { BaseProvider, normalizeBaseUrl, streamEndedEarly } from '../base'
 import { requestWithSupportedEffort } from '../effort'
 import { ChatDialects, chatExtrasRejected, chatExtrasSent, type ChatDialect } from './dialect'
 import {
@@ -245,6 +245,7 @@ export class OpenAIProvider extends BaseProvider {
     // Track function-call items by output_index to correlate deltas.
     const callIndex = new Map<number, number>()
     let nextToolIndex = 0
+    let finished = false
 
     for await (const event of stream as AsyncIterable<OpenAI.Responses.ResponseStreamEvent>) {
       const type = event.type
@@ -276,6 +277,7 @@ export class OpenAIProvider extends BaseProvider {
         const idx = callIndex.get(event.output_index) ?? 0
         yield { type: 'tool_call_delta', index: idx, argsDelta: event.delta }
       } else if (type === 'response.completed' || type === 'response.incomplete') {
+        finished = true
         const resp = event.response
         const usage = mapResponsesUsage(resp?.usage as Parameters<typeof mapResponsesUsage>[0])
         if (usage) yield { type: 'usage', usage }
@@ -295,8 +297,17 @@ export class OpenAIProvider extends BaseProvider {
           body: err ?? undefined,
           message: err?.message ?? 'Response failed'
         })
+      } else if (type === 'error') {
+        const failure = event as unknown as { message?: string; code?: string | null }
+        throw normalizeHttpError({
+          provider: this.id,
+          status: 502,
+          ...(failure.code ? { rawCode: failure.code } : {}),
+          message: failure.message ?? 'The response stream reported an error.'
+        })
       }
     }
+    if (!finished && !options?.signal?.aborted) throw streamEndedEarly(this.id)
   }
 
   async validateConfiguration(): Promise<ValidationResult> {
@@ -334,6 +345,8 @@ export class OpenAIProvider extends BaseProvider {
       if (status === undefined) {
         const name = (err as { name?: string }).name
         if (name === 'APIUserAbortError') return this.abort()
+        // An error frame inside a stream has no status of its own. The stream did not finish, so it counts as a failed upstream.
+        if (err.error) return normalizeHttpError({ provider: this.id, status: 502, body: { error: err.error }, cause: err })
         return normalizeUnknownError(this.id, err)
       }
       return normalizeHttpError({

@@ -45,7 +45,7 @@ export interface RunResult {
   interventions: number
   /** Failed provider attempts the gateway retried. */
   retries: number
-  tokens: { input: number; output: number; cacheRead: number }
+  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number }
   durationMs: number
   /** Everything the agent said in its last request: the answer, for a question. */
   finalText: string

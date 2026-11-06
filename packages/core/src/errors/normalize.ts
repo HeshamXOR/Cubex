@@ -171,9 +171,9 @@ export function normalizeHttpError(input: HttpErrorInput): NormalizedAIError {
 export function normalizeUnknownError(provider: string, err: unknown): NormalizedAIError {
   if (err instanceof NormalizedAIError) return err
 
-  const e = err as { name?: string; code?: string; message?: string } | undefined
+  const e = err as { name?: string; code?: string; message?: string; cause?: { code?: string } } | undefined
   const name = e?.name ?? ''
-  const code = e?.code ?? ''
+  const code = e?.code ?? e?.cause?.code ?? ''
   const msg = e?.message ?? String(err)
 
   let category: ErrorCategory = 'UNKNOWN'
@@ -184,7 +184,10 @@ export function normalizeUnknownError(provider: string, err: unknown): Normalize
     code === 'ENOTFOUND' ||
     code === 'ECONNRESET' ||
     code === 'EAI_AGAIN' ||
-    /fetch failed|network|socket hang up/i.test(msg)
+    code === 'EPIPE' ||
+    code.startsWith('UND_ERR_') ||
+    // How a stream dropped part way reads: undici says "terminated", the SDKs "Connection error." or "premature close".
+    /fetch failed|network|socket hang up|^terminated$|connection error|premature close|other side closed/i.test(msg)
   ) {
     category = 'NETWORK_ERROR'
   }

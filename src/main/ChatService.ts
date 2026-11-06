@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { join, resolve } from 'node:path'
 import { nanoid } from 'nanoid'
 import { AIGateway, createSubagentTool } from '@core/gateway'
-import { DEFAULT_RETRY_POLICY } from '@core/types'
+import { DEFAULT_RETRY_POLICY, isOutputEvent } from '@core/types'
 import type {
   AIMessage,
   AIRequest,
@@ -49,6 +49,8 @@ import { AcpSessions, type AcpRunOptions } from './peers/acp/sessions'
 import { PeerTranscripts } from './peers/transcript'
 import { runHooks, type HookPayload } from './hooks'
 import { RepeatGuard } from './repeatGuard'
+import { StallDetector } from './stallDetector'
+import { ToolResultAger } from './toolResultAging'
 import { WorkingSetTracker } from './workingSet'
 import { isContextOverflow } from '@core/errors/overflow'
 import { createGoalTool } from './tools/goalTool'
@@ -105,6 +107,13 @@ const MAX_TOOL_ITERATIONS = 50
 /** How many times Stop hooks may send the agent back to work in one turn. After that the turn ends, whatever they say. */
 const STOP_HOOK_MAX_CONTINUATIONS = 3
 const STOP_HOOK_CAP_NOTICE = `\n\n_A Stop hook asked for more work ${STOP_HOOK_MAX_CONTINUATIONS} times, so Cubex ended the turn here. Check what the hook's command does when it runs again._`
+/** A stream cut part way is picked up where it stopped this many times in a row before the turn gives up and says so. */
+const MAX_STREAM_RESUMES = 3
+const STREAM_RESUME_NOTE = 'Your last reply was cut off by a connection problem after the text above, and any tool call you were writing was not run. Continue from exactly where it stopped, without repeating what is already there.'
+/** Checking on something that is still running is not a repeat: the same call gets a new answer. */
+const POLLING_TOOLS: ReadonlySet<string> = new Set(['task_output', 'task_list'])
+/** The window assumed for a model nothing is known about, when deciding how full the context is. */
+const ASSUMED_WINDOW_TOKENS = 200_000
 /** How long the first request of a task waits for the project map before it goes without one. */
 const PROJECT_MAP_WAIT_MS = 1_500
 /** Added to a reply that ends with edits no check has run since, after the model was asked once to run one. */
@@ -362,6 +371,7 @@ export class ChatService {
     onError: (error) => logger.warn(`Project commands: ${String(error)}`)
   })
   private readonly projectContext = new Map<string, ProjectContext>()
+  private readonly toolResultAgers = new Map<string, ToolResultAger>()
   public readonly processManager: ProcessManager
 
   constructor(
@@ -686,7 +696,7 @@ export class ChatService {
         ...(tools.size ? { tools: [...tools.values()].map((t) => t.definition) } : {}),
         // The model's recommended temperature, unless the person set one for it.
         ...(profile.temperature !== undefined && policy.primary.params?.temperature === undefined && (!modelInfo || modelInfo.capabilities.includes('temperature'))
-          ? { params: { temperature: profile.temperature } } : {}),
+          ? { params: { temperature: profile.temperature, ...(profile.topP !== undefined ? { topP: profile.topP } : {}) } } : {}),
         stream: true
       }
       const headers = req.longContext ? { 'x-cubex-long-context': '1' } : undefined
@@ -998,6 +1008,11 @@ export class ChatService {
     /** The request that just failed with a context overflow is being retried once. */
     let overflowRetrying = false
     const repeatGuard = new RepeatGuard()
+    const stalls = new StallDetector()
+    // It outlives the turn: the next turn's first request then sends the same bytes this one did, and the cache still hits.
+    const toolResultAger = this.toolResultAgers.get(conversationId) ?? new ToolResultAger()
+    this.toolResultAgers.set(conversationId, toolResultAger)
+    let streamResumes = 0
     /** Notes for the result of a call that repeated an identical one, by call id. */
     const repeatNotes = new Map<string, string>()
     let iterationLimitReached = false
@@ -1047,8 +1062,9 @@ export class ChatService {
     // Fold a finished call into the repeat/failure bookkeeping and build the tool_result the model receives.
     const recordToolResult = (call: ToolCall, sig: string, result: { content: unknown; isError?: boolean }): MessageContentPart => {
       const rawText = typeof result.content === 'string' ? result.content : JSON.stringify(result.content)
-      const repeatNote = repeatNotes.get(call.id)
-      const text = repeatNote ? `${rawText}\n\n${repeatNote}` : rawText
+      const stallNote = stalls.record(call.name, call.input, rawText, !!result.isError, fileEdits)
+      const notes = [repeatNotes.get(call.id), stallNote].filter(Boolean).join('\n\n')
+      const text = notes ? `${rawText}\n\n${notes}` : rawText
       if (!result.isError) this.trackWorkingSet(conversationId, call)
       if (result.isError) failedCalls.set(sig, {
         revision: workspaceRevision,
@@ -1205,9 +1221,14 @@ export class ChatService {
         }
         if (controller.signal.aborted) break
         this.emit({ streamId, kind: 'iteration', iteration: ++requestIteration })
-        const req: AIRequest = { ...baseRequest, messages, ...(toolDefs ? { tools: toolDefs } : {}) }
-        currentRequest = req
+        const full: AIRequest = { ...baseRequest, messages, ...(toolDefs ? { tools: toolDefs } : {}) }
+        currentRequest = full
         currentTarget = policy.primary
+        // Older tool results go out shortened once the context has filled up. The turn's record keeps them whole.
+        const filling = contextFor(currentTarget)
+        const windowTokens = filling.contextWindow ?? ASSUMED_WINDOW_TOKENS
+        const req: AIRequest = { ...full, messages: toolResultAger.apply(messages, filling.estimatedTokens / windowTokens, windowTokens) }
+        currentRequest = req
         publishContext(currentTarget)
         let completed: import('@core/types').AIResponse | undefined
         let streamedText = ''
@@ -1218,6 +1239,9 @@ export class ChatService {
 
         /** The provider said the request does not fit: held back until the loop has tried to shrink it. */
         let overflow: Extract<AIStreamEvent, { type: 'error' }> | undefined
+        /** The connection dropped part way through the reply: held back so the loop can pick it up from there. */
+        let dropped = false
+        let producedOutput = false
         for await (const event of this.modelEvents(req, { read: () => policy, write: (next) => { policy = next } }, {
           signal: controller.signal,
           onEvent: onGateway,
@@ -1227,6 +1251,12 @@ export class ChatService {
           // Once per request, and only before any of the reply reached the thread.
           if (event.type === 'error' && !retrying && !streamedText && !controller.signal.aborted && isContextOverflow(event.error)) {
             overflow = event
+            continue
+          }
+          if (isOutputEvent(event)) producedOutput = true
+          // Before any output the gateway has already retried. After it, only the loop can recover, by asking for the rest.
+          if (event.type === 'error' && producedOutput && event.error.classification === 'transient' && streamResumes < MAX_STREAM_RESUMES && !controller.signal.aborted) {
+            dropped = true
             continue
           }
           if (event.type === 'text_delta') streamedText += event.text
@@ -1309,6 +1339,19 @@ export class ChatService {
                 : event
           })
         }
+
+        if (dropped) {
+          streamResumes++
+          logger.info(`A reply was cut off part way; resuming it (${streamResumes} of ${MAX_STREAM_RESUMES})`, { provider: finalProvider, model: finalModel })
+          this.emit({ streamId, kind: 'tool', tool: { id: `stream-resume-${requestIteration}`, name: 'stream_resume', phase: 'done', title: 'Connection dropped, carrying on', detail: `Attempt ${streamResumes} of ${MAX_STREAM_RESUMES}` } })
+          // The text the person already saw stays, and the model is asked for the rest. With none shown it just asks again.
+          if (streamedText.trim()) addToTurn(assistantMessage(streamedText), userMessage(STREAM_RESUME_NOTE))
+          await new Promise((resolve) => setTimeout(resolve, 1_000 * streamResumes))
+          iter--
+          continue
+        }
+        // This request came back whole, so the next cut starts a fresh count.
+        streamResumes = 0
 
         if (overflow) {
           // Stub old tool output, then summarize older turns, and send the same request once more.
@@ -1461,6 +1504,7 @@ export class ChatService {
                 failedCalls.clear()
                 nameCounts.clear()
                 repeatGuard.reset()
+                stalls.reset()
                 if (resolution.decision !== 'reject') this.workingSets.setPlan(conversationId, input.plan, input.title)
               }
             } catch (error) {
@@ -1486,7 +1530,7 @@ export class ChatService {
           const overlap = this.canOverlap(streamId, tools, call)
           if (!overlap || overlappedSigs.has(sig)) await settleOverlapped()
           // Repeat guard: the third identical call in a row gets a note; five of the last ten end the turn.
-          const repeat = repeatGuard.record(call.name, call.input, fileEdits)
+          const repeat = POLLING_TOOLS.has(call.name) ? {} : repeatGuard.record(call.name, call.input, fileEdits)
           if (repeat.stop) {
             repeatStop = repeat.stop
             await settleOverlapped()
@@ -1505,7 +1549,7 @@ export class ChatService {
           const countKey = `${sig}:${fileEdits}`
           const count = (callCounts.get(countKey) ?? 0) + 1
           callCounts.set(countKey, count)
-          if (count > 3) {
+          if (count > 3 && !POLLING_TOOLS.has(call.name)) {
             this.emit({ streamId, kind: 'tool', tool: { id: call.id, name: call.name, phase: 'error', title: describeToolCall(call), detail: 'Repeated identical call — skipped' } })
             resultParts.push({
               type: 'tool_result',
@@ -2342,6 +2386,7 @@ export class ChatService {
     this.checkpoints.clear(conversationId)
     this.compaction.forget(conversationId)
     this.projectContext.delete(conversationId)
+    this.toolResultAgers.delete(conversationId)
     this.workingSets.forget(conversationId)
     this.startedSessions.delete(conversationId)
     this.budget.forget(conversationId)

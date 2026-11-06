@@ -9,7 +9,7 @@ import type {
   RoutingPolicy,
   RoutingTarget
 } from '../types/routing'
-import { defaultSleep, isRetryable, nextDelay, withRetry, type RetryHooks } from '../retry/RetryEngine'
+import { attemptsFor, defaultSleep, isRetryable, nextDelay, withRetry, type RetryHooks } from '../retry/RetryEngine'
 import { normalizeUnknownError } from '../errors/normalize'
 import { StreamAccumulator } from '../streaming/accumulator'
 import { RequestWatchdog, isOverallTimeout, isWaitTimeout, timeoutError } from '../util/timeout'
@@ -264,11 +264,10 @@ export class AIGateway {
     call: CallLimits
   ): AsyncGenerator<AIStreamEvent, { ok: true } | { ok: false; error: NormalizedAIError; partial?: true }> {
     const emit = opts.onEvent
-    const maxAttempts = policy.retry.enabled ? policy.retry.maxAttempts : 1
     // A wait that already took minutes is retried once, whatever the retry policy allows.
     let waits = 0
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    for (let attempt = 1; ; attempt++) {
       if (opts.signal?.aborted) {
         return {
           ok: false,
@@ -348,7 +347,7 @@ export class AIGateway {
         }
 
         const canRetry =
-          attempt < maxAttempts && policy.retry.enabled && this.retryableStream(error, policy) && (!isWaitTimeout(error) || waits <= 1)
+          attempt < attemptsFor(error, policy.retry) && policy.retry.enabled && this.retryableStream(error, policy) && (!isWaitTimeout(error) || waits <= 1)
         emit?.({ type: 'attempt_error', target, attempt, error, willRetry: canRetry })
         if (!canRetry) {
           return { ok: false, error }
@@ -365,16 +364,6 @@ export class AIGateway {
       } finally {
         watchdog.dispose()
       }
-    }
-    return {
-      ok: false,
-      error: new NormalizedAIError({
-        provider: target.providerId,
-        category: 'UNKNOWN',
-        message: 'Stream retries exhausted',
-        classification: 'unknown',
-        retryable: false
-      })
     }
   }
 

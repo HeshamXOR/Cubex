@@ -19,6 +19,8 @@ export interface SSEOptions {
    * a message. A server that is queueing or thinking quietly often sends only those, and they prove it is alive.
    */
   onActivity?: (kind: ActivityKind) => void
+  /** Called when the server sends its `[DONE]`, which says the stream ended on purpose rather than by a dropped connection. */
+  onDone?: () => void
 }
 
 const DECODER_LABEL = 'utf-8'
@@ -109,7 +111,10 @@ export async function* parseSSEJson<T = unknown>(
   options: SSEOptions = {}
 ): AsyncGenerator<{ event?: string; data: T }> {
   for await (const msg of parseSSE(body, options)) {
-    if (msg.data === '[DONE]') return
+    if (msg.data === '[DONE]') {
+      options.onDone?.()
+      return
+    }
     try {
       yield { ...(msg.event ? { event: msg.event } : {}), data: JSON.parse(msg.data) as T }
     } catch {

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DEFAULT_RETRY_POLICY } from '@core/types'
+import { DEFAULT_RETRY_POLICY, NormalizedAIError } from '@core/types'
 import type { AIMessage, AIProvider, AIRequest, AIResponse, AIStreamEvent, ToolCall } from '@core/types'
 import type { ChatEvent, ChatStartRequest } from '@shared/ipc'
 import type { ProviderManager } from './ProviderManager'
@@ -156,6 +156,63 @@ describe('mending a tool call', () => {
     expect(badType!.text).toContain('path')
     expect(toolCards(events, 'read_file').at(-1)).toMatchObject({ phase: 'error' })
   })
+})
+
+describe('a reply cut off part way', () => {
+  it('reports a failure that is not about the connection, without trying again', async () => {
+    const events: ChatEvent[] = []
+    const requests: AIRequest[] = []
+    const provider = {
+      id: 'p', name: 'Provider',
+      async *streamMessage(request: AIRequest): AsyncGenerator<AIStreamEvent> {
+        requests.push(structuredClone(request))
+        if (requests.length === 1) {
+          yield { type: 'text_delta', text: 'The first half' }
+          throw new NormalizedAIError({ provider: 'p', category: 'CONTENT_POLICY', message: 'Refused.', classification: 'permanent', retryable: false })
+        }
+        yield { type: 'text_delta', text: ' and the rest.' }
+      }
+    } as unknown as AIProvider
+    const service = new ChatService({ resolve: () => provider, getModelInfo: () => undefined } as unknown as ProviderManager, (event) => { events.push(event) })
+    services.push(service)
+    await service.start({ streamId: 's1', conversationId: 'c1', messageId: 'u1', userText: 'Explain.', fileToolsEnabled: true, permissionMode: 'bypass', policy })
+    await vi.waitFor(() => expect(events.some((e) => e.kind === 'stream' && (e.event.type === 'completed' || e.event.type === 'error'))).toBe(true), { timeout: 10_000 })
+    expect(events.some((e) => e.kind === 'stream' && e.event.type === 'error')).toBe(true)
+    expect(requests).toHaveLength(1)
+  })
+
+  it('resumes a transient cut, up to a limit, then reports it', async () => {
+    const events: ChatEvent[] = []
+    const requests: AIRequest[] = []
+    const cut = new NormalizedAIError({ provider: 'p', category: 'STREAM_ERROR', message: 'The connection closed before the reply finished.', classification: 'transient', retryable: true })
+    let cuts = 1
+    const provider = {
+      id: 'p', name: 'Provider',
+      async *streamMessage(request: AIRequest): AsyncGenerator<AIStreamEvent> {
+        requests.push(structuredClone(request))
+        yield { type: 'text_delta', text: requests.length === 1 ? 'The first half' : ' and the rest.' }
+        if (requests.length <= cuts) throw cut
+      }
+    } as unknown as AIProvider
+    const service = new ChatService({ resolve: () => provider, getModelInfo: () => undefined } as unknown as ProviderManager, (event) => { events.push(event) })
+    services.push(service)
+    const finished = (): ChatEvent | undefined => events.find((e) => e.kind === 'stream' && (e.event.type === 'completed' || e.event.type === 'error'))
+    await service.start({ streamId: 's1', conversationId: 'c1', messageId: 'u1', userText: 'Explain.', fileToolsEnabled: true, permissionMode: 'bypass', policy })
+    await vi.waitFor(() => expect(finished()).toBeDefined(), { timeout: 10_000 })
+    expect(finished()).toMatchObject({ event: { type: 'completed' } })
+    expect(requests).toHaveLength(2)
+    expect(JSON.stringify(requests[1]!.messages)).toContain('The first half')
+    expect(lastUser(requests[1])).toContain('cut off by a connection problem')
+    expect(toolCards(events, 'stream_resume')).toHaveLength(1)
+
+    events.length = 0
+    requests.length = 0
+    cuts = 99
+    await service.start({ streamId: 's2', conversationId: 'c1', messageId: 'u2', userText: 'Explain again.', fileToolsEnabled: true, permissionMode: 'bypass', policy })
+    await vi.waitFor(() => expect(finished()).toBeDefined(), { timeout: 20_000 })
+    expect(finished()).toMatchObject({ event: { type: 'error' } })
+    expect(requests).toHaveLength(4)
+  }, 30_000)
 })
 
 describe('the done check', () => {

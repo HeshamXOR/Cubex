@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ChatDialects, chatDialect, chatExtrasRejected, chatExtrasSent, chatRefusedForResponses } from './dialect'
+import { ChatDialects, chatDialect, chatExtrasRejected, chatExtrasSent } from './dialect'
 import { toChatCompletionsBody, toChatMessages } from './translate'
 import { userMessage } from '../../builders'
 import type { AIMessage } from '../../types/message'
@@ -215,17 +215,3 @@ describe('reasoning_effort as a refusable extra', () => {
   })
 })
 
-describe('chatRefusedForResponses', () => {
-  it('reads a gateway sending the model to the Responses API', () => {
-    const message = '{"error":{"message":"/v1/chat/completions does not work for this model. Use POST /v1/responses instead."}}'
-    for (const status of [400, 404, 405]) expect(chatRefusedForResponses(status, message)).toBe(true)
-    expect(chatRefusedForResponses(400, 'This model is only available through the Responses API.')).toBe(true)
-  })
-
-  it('leaves other failures alone', () => {
-    expect(chatRefusedForResponses(400, 'max_tokens is too large')).toBe(false)
-    expect(chatRefusedForResponses(500, 'Use POST /v1/responses instead.')).toBe(false)
-    expect(chatRefusedForResponses(429, 'Use POST /v1/responses instead.')).toBe(false)
-    expect(chatRefusedForResponses(undefined, 'Use POST /v1/responses instead.')).toBe(false)
-  })
-})

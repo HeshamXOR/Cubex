@@ -1,5 +1,6 @@
 import { NormalizedAIError } from '../types/errors'
 import type { RetryPolicy } from '../types/retry'
+import { isBusyError } from '../providers/endpoints'
 import { computeBackoff } from './backoff'
 
 export interface RetryHooks {
@@ -61,7 +62,8 @@ export function isRetryable(error: NormalizedAIError, policy: RetryPolicy): bool
     case 'SERVER_ERROR': {
       if (policy.retryOn5xx === 'all') return true
       const code = error.statusCode ?? 500
-      return policy.retryOn5xx.includes(code)
+      // 529 is Anthropic's "overloaded". Settings saved before it was on the list still mean to retry it.
+      return code === 529 ? policy.retryOn5xx.includes(503) || policy.retryOn5xx.includes(529) : policy.retryOn5xx.includes(code)
     }
     case 'STREAM_ERROR':
       return true
@@ -70,6 +72,28 @@ export function isRetryable(error: NormalizedAIError, policy: RetryPolicy): bool
       if (error.statusCode === 408) return policy.retryOn408
       return error.retryable
   }
+}
+
+/** A server that is shedding load stays that way for a minute or more, so it gets more tries, further apart. */
+const WAITING_ATTEMPTS = 6
+const WAITING_FIRST_DELAY_MS = 2_000
+
+/** A spent balance or quota reads as a 429 as well, and no amount of waiting brings it back. */
+const SPENT = /quota|billing|credit|balance|insufficient|payment/i
+
+function isWaitingError(error: NormalizedAIError): boolean {
+  if (SPENT.test(error.message) || SPENT.test(error.rawCode ?? '')) return false
+  return error.category === 'RATE_LIMIT_ERROR' || isBusyError(error)
+}
+
+/**
+ * How many attempts a call gets, given the error it just saw. The setting is the budget for ordinary failures. An
+ * overloaded or rate-limited server gets more, one to two and a half minutes in all, because its turn would otherwise end after a few
+ * seconds of a busy spell. One attempt in the setting means no retries, and that stays true.
+ */
+export function attemptsFor(error: NormalizedAIError, policy: RetryPolicy): number {
+  const allowed = policy.enabled ? Math.max(1, policy.maxAttempts) : 1
+  return allowed > 1 && isWaitingError(error) ? Math.max(allowed, WAITING_ATTEMPTS) : allowed
 }
 
 /** The delay to use before the next retry, honoring Retry-After when present. */
@@ -82,6 +106,11 @@ export function nextDelay(
   if (policy.respectRetryAfter && typeof error.retryAfterMs === 'number') {
     // Never wait longer than maxDelay, but always respect a server ask up to it.
     return Math.min(error.retryAfterMs, policy.maxDelayMs)
+  }
+  if (isWaitingError(error)) {
+    // Full jitter can come out near zero, which only spends a try. Half of it is kept as a floor.
+    const ceiling = Math.min(WAITING_FIRST_DELAY_MS * 2 ** Math.max(0, retryIndex - 1), policy.maxDelayMs)
+    return Math.round(ceiling / 2 + (ceiling / 2) * rand())
   }
   return computeBackoff(policy, retryIndex, rand)
 }
@@ -97,7 +126,6 @@ export async function withRetry<T>(
 ): Promise<T> {
   const sleep = hooks.sleep ?? defaultSleep
   const rand = hooks.rand ?? Math.random
-  const maxAttempts = Math.max(1, policy.enabled ? policy.maxAttempts : 1)
 
   let attempt = 0
   // eslint-disable-next-line no-constant-condition
@@ -127,7 +155,7 @@ export async function withRetry<T>(
               cause: err
             })
 
-      const canRetry = attempt < maxAttempts && isRetryable(error, policy) && (hooks.allowRetry?.(error) ?? true)
+      const canRetry = attempt < attemptsFor(error, policy) && isRetryable(error, policy) && (hooks.allowRetry?.(error) ?? true)
       if (!canRetry) {
         hooks.onGiveUp?.({ attempt, error })
         throw error

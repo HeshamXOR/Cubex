@@ -6,7 +6,10 @@ const mocks = vi.hoisted(() => ({
   groups: vi.fn((_since: number) => [] as unknown[])
 }))
 vi.mock('../config', () => ({ getSettings: () => mocks.settings }))
-vi.mock('../db', () => ({ usageRepo: { breakdownSince: (since: number) => mocks.groups(since) } }))
+vi.mock('../db', () => ({
+  usageRepo: { breakdownSince: (since: number) => mocks.groups(since), unpriced: () => [], setCost: vi.fn() },
+  providerRepo: { get: () => undefined }
+}))
 
 import { register } from './usage'
 

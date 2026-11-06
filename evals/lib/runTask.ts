@@ -9,6 +9,7 @@ import type { ProviderManager } from '../../src/main/ProviderManager'
 import { removeFolder } from '../../src/main/testing/removeFolder'
 import { runCheck } from './check'
 import { state } from './harnessState'
+import { withFaults } from './faults'
 import { probed, type EvalTarget, type RequestProbe } from './provider'
 import type { RunResult, TaskSpec } from './types'
 import { changedFiles, copyFixture, snapshot } from './workspace'
@@ -31,7 +32,7 @@ export async function runTask(task: TaskSpec, repeat: number, target: EvalTarget
   const conversationId = `eval-${task.slug}-${repeat}-${Date.now().toString(36)}`
   const result: RunResult = {
     task: task.slug, repeat, passed: false, timedOut: false, rounds: 0, toolCalls: { total: 0, byName: {} }, toolErrors: 0,
-    interventions: 0, retries: 0, tokens: { input: 0, output: 0, cacheRead: 0 }, durationMs: 0, finalText: '', filesChanged: []
+    interventions: 0, retries: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, durationMs: 0, finalText: '', filesChanged: []
   }
   let service: ChatService | undefined
   try {
@@ -41,14 +42,17 @@ export async function runTask(task: TaskSpec, repeat: number, target: EvalTarget
     state.workspaces.set(conversationId, workspace)
 
     const probe: RequestProbe = {}
-    const provider: AIProvider = probed(target.providerFor(task, workspace), probe, workspace)
+    const provider: AIProvider = withFaults(probed(target.providerFor(task, workspace), probe, workspace))
     const events: ChatEvent[] = []
     const tools = new Map<string, { name: string; failed: boolean }>()
     let roundText = ''
     let lastCompletedText = ''
     const failures: string[] = []
 
-    service = new ChatService({ resolve: () => provider, getModelInfo: () => undefined } as unknown as ProviderManager, (event) => {
+    // Without this a run has no window to fill. CUBEX_EVAL_WINDOW sets one, to measure what happens as a small one fills up.
+    const windowTokens = Number(process.env.CUBEX_EVAL_WINDOW) || 0
+    const modelInfo = windowTokens ? { id: target.model, contextWindow: windowTokens, capabilities: ['temperature'], location: 'cloud' } : undefined
+    service = new ChatService({ resolve: () => provider, getModelInfo: () => modelInfo } as unknown as ProviderManager, (event) => {
       events.push(event)
       switch (event.kind) {
         case 'iteration':
@@ -114,6 +118,7 @@ export async function runTask(task: TaskSpec, repeat: number, target: EvalTarget
       result.tokens.input += row.usage.inputTokens ?? 0
       result.tokens.output += row.usage.outputTokens ?? 0
       result.tokens.cacheRead += row.usage.cachedInputTokens ?? 0
+      result.tokens.cacheWrite += row.usage.cacheWriteInputTokens ?? 0
     }
     if (probe.promptHash) result.promptHash = probe.promptHash
     if (probe.toolsOffered) result.toolsOffered = probe.toolsOffered

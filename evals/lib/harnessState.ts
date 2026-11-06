@@ -5,7 +5,7 @@
  */
 export interface UsageRow {
   conversationId?: string
-  usage: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }
+  usage: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number; cacheWriteInputTokens?: number }
 }
 
 export const state = {

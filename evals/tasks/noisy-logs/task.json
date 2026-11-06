@@ -1,0 +1,8 @@
+{
+  "title": "Fix a suite whose output floods the context",
+  "prompt": "The test suite fails. Run it with `node --test` and fix the source until it passes. Do not change the tests. The tests print a lot of log output.",
+  "timeoutSec": 420,
+  "stub": {
+    "command": "node --test"
+  }
+}

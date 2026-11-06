@@ -26,6 +26,33 @@ function response(status: number, body?: unknown, etag?: string): Response {
   } as unknown as Response
 }
 
+describe('finding a model whichever provider lists it', () => {
+  const entry = (extra: object) => ({ name: 'M', ...extra })
+  const catalogOf = (raw: object): ModelCatalog => {
+    const dir = mkdtempSync(join(tmpdir(), 'cubex-catalog-'))
+    const cachePath = join(dir, 'catalog.json')
+    writeFileSync(cachePath, JSON.stringify({ etag: 'x', updatedAt: Date.now(), raw }))
+    return new ModelCatalog({ cachePath })
+  }
+
+  it('prefers the company that makes the model over a reseller', () => {
+    const catalog = catalogOf({
+      reseller: { id: 'reseller', models: { 'claude-x-5': entry({ cost: { input: 9, output: 9 }, limit: { context: 1, output: 1 } }) } },
+      anthropic: { id: 'anthropic', models: { 'claude-x-5': entry({ cost: { input: 2, output: 10 } }) } }
+    })
+    expect(catalog.lookupAny('claude-x-5')?.pricing?.inputPerMTok).toBe(2)
+  })
+
+  it('otherwise takes whoever says the most, and ignores a vendor prefix on the name', () => {
+    const catalog = catalogOf({
+      thin: { id: 'thin', models: { 'some-model': entry({}) } },
+      rich: { id: 'rich', models: { 'vendor/some-model': entry({ cost: { input: 1, output: 2, cache_read: 0.1 }, limit: { context: 100_000, output: 1_000 } }) } }
+    })
+    expect(catalog.lookupAny('other/some-model')?.contextWindow).toBe(100_000)
+    expect(catalog.lookupAny('nothing-like-it')).toBeUndefined()
+  })
+})
+
 describe('ModelCatalog refresh', () => {
   let dir: string
   let cachePath: string

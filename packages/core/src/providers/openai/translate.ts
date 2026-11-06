@@ -197,11 +197,11 @@ export function toChatMessages(request: AIRequest, options: ChatMessageOptions =
         // An assistant turn with neither text nor tool calls still needs content.
         if (!entry.content && toolCalls.length === 0) entry.content = ''
         if (options.reasoningContent) {
-          // These servers 400 on a tool-call turn that lacks the field, so a turn
+          // These servers 400 on a turn that lacks the field while tools are in play, so a turn
           // with no reasoning to give back (written by another provider, or
           // loaded from text-only history) still carries it, empty.
           const reasoning = replayableReasoning(msg.content)
-          if (reasoning || toolCalls.length > 0) entry.reasoning_content = reasoning
+          if (reasoning || toolCalls.length > 0 || request.tools?.length) entry.reasoning_content = reasoning
         }
         messages.push(entry)
         break

@@ -69,6 +69,55 @@ describe('merging the catalog into a model list', () => {
   })
 })
 
+describe('a gateway the catalog has never heard of', () => {
+  const gateway = cfg({ baseUrl: 'https://gateway.example/v1' })
+  const anywhere = (entry: Partial<CatalogModel> | undefined): CatalogReader => ({
+    lookup: () => undefined,
+    providerForHost: () => undefined,
+    lookupAny: () => entry as CatalogModel | undefined
+  })
+
+  it('learns a model\'s window and price from whoever lists it', () => {
+    const [model] = enrichModels(gateway, [listed('some-model')], anywhere({ id: 'some-model', contextWindow: 400_000, supportsReasoning: true, pricing: { currency: 'USD', inputPerMTok: 1, outputPerMTok: 2, source: 'catalog' } }))
+    expect(model).toMatchObject({ contextWindow: 400_000, supportsReasoning: true, pricing: { inputPerMTok: 1 } })
+  })
+
+  it('keeps what the gateway itself said it charges', () => {
+    const own = { currency: 'USD', inputPerMTok: 0.3, outputPerMTok: 1.2, source: 'provider' as const }
+    const [model] = enrichModels(gateway, [{ ...listed('some-model'), pricing: own }], anywhere({ id: 'some-model', pricing: { currency: 'USD', inputPerMTok: 9, outputPerMTok: 9, source: 'catalog' } }))
+    expect(model?.pricing).toEqual(own)
+  })
+
+  it('falls back on the list price of a current model, and on nothing for an unknown one', () => {
+    const [known] = enrichModels(gateway, [listed('claude-haiku-5-5')], anywhere(undefined))
+    expect(known?.pricing).toMatchObject({ inputPerMTok: 0.1, cachedInputPerMTok: 0.01, source: 'builtin', longContext: { aboveInputTokens: 100_000 } })
+    const [unknown] = enrichModels(gateway, [listed('never-heard-of-it')], anywhere(undefined))
+    expect(unknown?.pricing).toBeUndefined()
+  })
+
+  it('fills in the cached rate a catalog entry left out, but only for the same list price', () => {
+    const entry = (input: number) => anywhere({ id: 'glm-5.3-flash', pricing: { currency: 'USD', inputPerMTok: input, outputPerMTok: 0.5, source: 'catalog' } })
+    expect(enrichModels(gateway, [listed('glm-5.3-flash')], entry(0.15))[0]?.pricing?.cachedInputPerMTok).toBe(0.03)
+    expect(enrichModels(gateway, [listed('glm-5.3-flash')], entry(0.2))[0]?.pricing?.cachedInputPerMTok).toBeUndefined()
+  })
+
+  it('does not take another seller\'s price for a host the catalog does know', () => {
+    const known: CatalogReader = {
+      lookup: () => undefined,
+      providerForHost: () => 'nvidia',
+      lookupAny: () => ({ id: 'x', contextWindow: 100_000, pricing: { currency: 'USD', inputPerMTok: 5, outputPerMTok: 5, source: 'catalog' } }) as CatalogModel
+    }
+    const [model] = enrichModels(cfg({ baseUrl: 'https://integrate.api.nvidia.com/v1' }), [listed('x')], known)
+    expect(model?.contextWindow).toBe(100_000)
+    expect(model?.pricing).toBeUndefined()
+  })
+
+  it('leaves a local server alone', () => {
+    const models = [listed('claude-haiku-5-5')]
+    expect(enrichModels(cfg({ baseUrl: 'http://127.0.0.1:1234/v1' }), models, anywhere({ id: 'x', contextWindow: 1 }))).toBe(models)
+  })
+})
+
 describe('what a request learns about a model that was never listed', () => {
   it('is the window, the output limit, the price and the effort levels, as a cloud model', () => {
     expect(catalogModelInfo(cfg({ id: 'nv', baseUrl: 'https://integrate.api.nvidia.com/v1' }), 'moonshotai/kimi-k3', catalog())).toMatchObject({

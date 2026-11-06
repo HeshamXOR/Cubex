@@ -12,7 +12,8 @@ import type {
   Preset,
   StoredMessage,
   UsageRecord,
-  UsageSummary
+  UsageSummary,
+  CostSource
 } from '@shared/ipc'
 import type { ProviderConfig } from '@core/types'
 
@@ -494,6 +495,16 @@ export const usageRepo = {
         cacheReadTokens: r.cacheReadTokens ?? null,
         cacheWriteTokens: r.cacheWriteTokens ?? null
       })
+  },
+  /** Cloud requests recorded with tokens and no cost, because no price was known then. */
+  unpriced(): UsageRecord[] {
+    return initDb()
+      .prepare("SELECT * FROM usage_records WHERE estimatedCost <= 0 AND execution != 'local' AND (inputTokens > 0 OR outputTokens > 0)")
+      .all() as UsageRecord[]
+  },
+  /** Give a past request the cost that is now known for it. */
+  setCost(id: string, cost: number, currency: string, source: CostSource): void {
+    initDb().prepare('UPDATE usage_records SET estimatedCost = ?, currency = ?, costSource = ? WHERE id = ?').run(cost, currency, source, id)
   },
   /** Money spent since a moment, for everything or for one task. Budget checks read this; `summary` still feeds the sidebar. */
   spendSince(since: number, conversationId?: string): number {

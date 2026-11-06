@@ -1,0 +1,8 @@
+{
+  "title": "Fix a crash at its cause, not where it shows",
+  "prompt": "`node --test` crashes with \"Cannot read properties of undefined (reading 'name')\" in src/report.mjs. Find the real cause and fix it there, not with a guard in report.mjs. Do not change the tests.",
+  "timeoutSec": 360,
+  "stub": {
+    "command": "node --test"
+  }
+}

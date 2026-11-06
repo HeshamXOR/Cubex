@@ -1,4 +1,5 @@
 import type { Capability } from '../types/capabilities'
+import { NormalizedAIError } from '../types/errors'
 import type { AIProvider, ProviderConfig, ProviderKind, ValidationResult } from '../types/provider'
 import type { AIRequest, RequestOptions } from '../types/request'
 import type { AIResponse } from '../types/response'
@@ -76,4 +77,15 @@ export function buildAuthHeaders(cfg: ProviderConfig, secret?: string): Record<s
       break
   }
   return headers
+}
+
+/** A stream that closed without saying it was done is a dropped connection, not a finished answer. */
+export function streamEndedEarly(provider: string): NormalizedAIError {
+  return new NormalizedAIError({
+    provider,
+    category: 'STREAM_ERROR',
+    message: 'The connection closed before the reply finished.',
+    classification: 'transient',
+    retryable: true
+  })
 }

@@ -45,7 +45,7 @@ const isMoonshotHost = (host: string): boolean =>
   ['moonshot.ai', 'moonshot.cn', 'kimi.com', 'kimi.ai'].some((domain) => onDomain(host, domain))
 
 /** Model ids of those families, for gateways and self-hosted servers that front them. */
-const THINKING_FAMILY = /deepseek|kimi|moonshot/i
+const THINKING_FAMILY = /deepseek|kimi|moonshot|glm|minimax/i
 
 /**
  * The extras to try for this host and model. Official OpenAI takes everything
@@ -102,18 +102,6 @@ export function chatExtrasRejected(
   if (status !== 400 && status !== 422) return []
   if (!REFUSAL.test(message) || WANTS.test(message)) return []
   return sent.filter((extra) => EXTRA_NAMES[extra].test(message))
-}
-
-/** A gateway names the endpoint the model needs: "Use POST /v1/responses instead", "this model requires the Responses API". */
-const RESPONSES_ENDPOINT = /\/responses\b|\bresponses[ _-]?api\b/i
-
-/**
- * Whether a failed Chat Completions request says the model is only served by the Responses API. Some gateways
- * (pizzarouter) route a model that way and answer chat/completions with a 400, 404 or 405 naming the other
- * endpoint. Any other status, or a message that never names it, is some other failure.
- */
-export function chatRefusedForResponses(status: number | undefined, message: string): boolean {
-  return (status === 400 || status === 404 || status === 405) && RESPONSES_ENDPOINT.test(message)
 }
 
 /**

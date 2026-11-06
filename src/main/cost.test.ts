@@ -4,7 +4,7 @@ import type { ModelInfo, ModelPricing, Usage } from '@core/types'
 const repo = vi.hoisted(() => ({ record: vi.fn() }))
 vi.mock('./db', () => ({ usageRepo: repo }))
 
-import { estimateCost, recordUsage } from './cost'
+import { estimateCost, recordUsage, repriceUnpriced } from './cost'
 
 function model(overrides: Partial<ModelInfo> = {}): ModelInfo {
   return {
@@ -14,6 +14,34 @@ function model(overrides: Partial<ModelInfo> = {}): ModelInfo {
   }
 }
 const pricing = (extra: Partial<ModelPricing> = {}): ModelPricing => ({ currency: 'USD', inputPerMTok: 3, outputPerMTok: 15, ...extra })
+
+describe('a model priced in tiers', () => {
+  const tiered = model({ id: 'claude-haiku-5-5', pricing: { currency: 'USD', source: 'provider', inputPerMTok: 0.1, outputPerMTok: 0.5, cachedInputPerMTok: 0.01, longContext: { aboveInputTokens: 100_000, inputPerMTok: 0.5, outputPerMTok: 2.5, cachedInputPerMTok: 0.05 } } })
+
+  it('bills a short prompt at the standard rates, and says the price is the provider\'s', () => {
+    const estimate = estimateCost({ inputTokens: 100_000, outputTokens: 1_000_000 }, tiered)
+    expect(estimate.cost).toBeCloseTo(0.01 + 0.5)
+    expect(estimate.source).toBe('provider')
+  })
+
+  it('bills a long prompt at the dearer rates, cache reads included', () => {
+    const estimate = estimateCost({ inputTokens: 200_000, cachedInputTokens: 100_000, outputTokens: 0 }, tiered)
+    expect(estimate.cost).toBeCloseTo(0.05 + 0.005)
+  })
+})
+
+describe('pricing past requests', () => {
+  const row = (id: string, modelId: string) => ({ id, ts: 1, providerId: 'p', model: modelId, execution: 'cloud' as const, inputTokens: 1_000_000, outputTokens: 0, totalTokens: 1_000_000, estimatedCost: 0, currency: 'USD' })
+
+  it('fills in what can now be priced and leaves the rest', () => {
+    const setCost = vi.fn()
+    const priced = repriceUnpriced({ unpriced: () => [row('a', 'known'), row('b', 'unknown')], setCost }, (_p, id) => (id === 'known' ? model({ id, pricing: pricing({ inputPerMTok: 2 }) }) : undefined))
+    expect(priced).toBe(1)
+    expect(setCost).toHaveBeenCalledTimes(1)
+    expect(setCost.mock.calls[0]![0]).toBe('a')
+    expect(setCost.mock.calls[0]![1]).toBeCloseTo(2)
+  })
+})
 
 describe('estimateCost, Anthropic multipliers', () => {
   // Input $3, output $15 per million tokens: reads cost 0.1x ($0.30), 5-minute writes 1.25x ($3.75), 1-hour writes 2x ($6).

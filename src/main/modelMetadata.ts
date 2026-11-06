@@ -1,5 +1,6 @@
 import type { Capability, ModelInfo, ProviderConfig } from '@core/types'
 import type { EffortModel } from '@core/providers'
+import { knownPrice, withKnownRates } from './knownPricing'
 import type { CatalogModel } from './modelCatalog'
 
 /**
@@ -15,6 +16,8 @@ import type { CatalogModel } from './modelCatalog'
 export interface CatalogReader {
   lookup(providerId: string, modelId: string): CatalogModel | undefined
   providerForHost(host: string): string | undefined
+  /** The model whichever provider lists it. */
+  lookupAny?(modelId: string): CatalogModel | undefined
 }
 
 /**
@@ -84,12 +87,49 @@ export function enrichModel(model: ModelInfo, known: CatalogModel | undefined): 
   }
 }
 
+/**
+ * A hosted endpoint serving models it did not make, such as a gateway, or a host the catalog does not know. Its list has
+ * bare ids, and without this a model served there has no context window (so nothing compacts) and no price. Local runtimes,
+ * the custom kinds and Azure are out for the same reason `catalogProviderId` leaves them out.
+ */
+function servesKnownModels(cfg: ProviderConfig): boolean {
+  if (cfg.kind === 'ollama' || cfg.kind === 'lmstudio' || cfg.kind === 'llamacpp' || cfg.kind === 'custom' || cfg.kind === 'mock' || cfg.kind === 'mock-local') return false
+  if (cfg.kind === 'openai-compat' && cfg.apiMode === 'azure') return false
+  const host = hostOf(cfg.baseUrl)
+  return !!host && !isLoopbackOrPrivate(host)
+}
+
+/**
+ * The catalog's entry for a model on this endpoint. A host the catalog knows answers for itself. When it does not list the
+ * model, another seller's entry still says how big the model is, but not what this host charges.
+ */
+function catalogEntry(cfg: ProviderConfig, modelId: string, catalog: CatalogReader | undefined): CatalogModel | undefined {
+  if (!catalog) return undefined
+  const providerId = catalogProviderId(cfg, catalog)
+  const exact = providerId ? catalog.lookup(providerId, modelId) : undefined
+  if (exact) return exact
+  const elsewhere = servesKnownModels(cfg) ? catalog.lookupAny?.(modelId) : undefined
+  if (!elsewhere || !providerId) return elsewhere
+  const { pricing: _sellersPrice, ...withoutPrice } = elsewhere
+  return withoutPrice
+}
+
+/** The price to show: what is already there with any rates it lacks filled in, or the list price on a host of unknown make. */
+function withKnownPrice(model: ModelInfo, cfg: ProviderConfig, catalog: CatalogReader | undefined): ModelInfo {
+  if (model.pricing) {
+    const pricing = withKnownRates(model.pricing, model.id)
+    return pricing === model.pricing ? model : { ...model, pricing }
+  }
+  // A host with its own name charges its own prices (NVIDIA's are free to try), so a list price says nothing about it.
+  if (!servesKnownModels(cfg) || catalogProviderId(cfg, catalog ?? { providerForHost: () => undefined })) return model
+  const listed = knownPrice(model.id)
+  return listed ? { ...model, pricing: listed } : model
+}
+
 /** A provider's model list with the catalog's entries merged in. The list comes back unchanged when nothing matches. */
 export function enrichModels(cfg: ProviderConfig, models: ModelInfo[], catalog: CatalogReader | undefined): ModelInfo[] {
-  if (!catalog) return models
-  const providerId = catalogProviderId(cfg, catalog)
-  if (!providerId) return models
-  return models.map((model) => enrichModel(model, catalog.lookup(providerId, model.id)))
+  const enriched = models.map((model) => withKnownPrice(enrichModel(model, catalogEntry(cfg, model.id, catalog)), cfg, catalog))
+  return enriched.every((model, index) => model === models[index]) ? models : enriched
 }
 
 /**
@@ -98,14 +138,14 @@ export function enrichModels(cfg: ProviderConfig, models: ModelInfo[], catalog: 
  * a local runtime or a private address is never matched.
  */
 export function catalogModelInfo(cfg: ProviderConfig, modelId: string, catalog: CatalogReader | undefined): ModelInfo | undefined {
-  if (!catalog) return undefined
-  const providerId = catalogProviderId(cfg, catalog)
-  const known = providerId ? catalog.lookup(providerId, modelId) : undefined
-  if (!known) return undefined
-  return enrichModel({
-    id: modelId, providerId: cfg.id, displayName: known.displayName || modelId, location: 'cloud', capabilities: ['text'],
-    modalities: { input: ['text'], output: ['text'] }, supportsTools: known.supportsTools, supportsStructuredOutput: false, supportsReasoning: false
-  }, known)
+  const known = catalogEntry(cfg, modelId, catalog)
+  const bare: ModelInfo = {
+    id: modelId, providerId: cfg.id, displayName: known?.displayName || modelId, location: 'cloud', capabilities: ['text'],
+    modalities: { input: ['text'], output: ['text'] }, supportsTools: known?.supportsTools ?? true, supportsStructuredOutput: false, supportsReasoning: false
+  }
+  const priced = withKnownPrice(enrichModel(bare, known), cfg, catalog)
+  // Nothing at all is known about it: it stays undescribed, rather than a model made up from its name.
+  return known || priced.pricing ? priced : undefined
 }
 
 /**
@@ -113,9 +153,7 @@ export function catalogModelInfo(cfg: ProviderConfig, modelId: string, catalog: 
  * answer `enrichModels` gives, for a model that was never listed.
  */
 export function catalogEffortModel(cfg: ProviderConfig, modelId: string, catalog: CatalogReader | undefined): EffortModel | undefined {
-  if (!catalog) return undefined
-  const providerId = catalogProviderId(cfg, catalog)
-  const known = providerId ? catalog.lookup(providerId, modelId) : undefined
+  const known = catalogEntry(cfg, modelId, catalog)
   if (!known) return undefined
   return { id: modelId, supportsReasoning: known.supportsReasoning, ...(known.reasoningEfforts !== undefined ? { reasoningEfforts: known.reasoningEfforts } : {}) }
 }

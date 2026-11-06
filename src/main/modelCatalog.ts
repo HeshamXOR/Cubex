@@ -118,6 +118,8 @@ export class ModelCatalog {
   private readonly url: string
 
   private models = new Map<string, CatalogModel>()
+  private readonly byBareId = new Map<string, CatalogModel[]>()
+  private indexedFor = -1
   /** Hostname of a provider's API to the catalog ids that use it, for endpoints the app was not told about. */
   private hosts = new Map<string, Set<string>>()
   private etag?: string
@@ -363,6 +365,33 @@ export class ModelCatalog {
     return this.models.get(this.key(providerId, modelId))
   }
 
+  /**
+   * What the catalog knows about a model whichever provider lists it, for a gateway the catalog has never heard of. The
+   * model's maker is preferred, since a reseller's entry can differ, and then whoever says the most about it.
+   */
+  lookupAny(modelId: string): CatalogModel | undefined {
+    this.initSync()
+    if (this.indexedFor !== this.models.size) {
+      this.byBareId.clear()
+      for (const model of this.models.values()) {
+        const bare = bareModelId(model.id)
+        const entries = this.byBareId.get(bare)
+        if (entries) entries.push(model)
+        else this.byBareId.set(bare, [model])
+      }
+      this.indexedFor = this.models.size
+    }
+    const bare = bareModelId(modelId)
+    const entries = this.byBareId.get(bare)
+    if (!entries) return undefined
+    const makers = MODEL_MAKERS.find(([pattern]) => pattern.test(bare))?.[1] ?? []
+    for (const maker of makers) {
+      const made = entries.find((entry) => entry.providerId === maker)
+      if (made) return made
+    }
+    return [...entries].sort((a, b) => informationIn(b) - informationIn(a))[0]
+  }
+
   /** The catalog provider whose API lives at this host, when exactly one does. */
   providerForHost(host: string): string | undefined {
     this.initSync()
@@ -370,6 +399,24 @@ export class ModelCatalog {
     return ids && ids.size === 1 ? [...ids][0] : undefined
   }
 }
+
+/** The catalog's name for the company that makes each family. */
+const MODEL_MAKERS: ReadonlyArray<readonly [RegExp, readonly string[]]> = [
+  [/^claude/, ['anthropic']],
+  [/^(?:gpt-|o[1-9]|codex)/, ['openai']],
+  [/^gemini/, ['google']],
+  [/^deepseek/, ['deepseek']],
+  [/^glm/, ['zai', 'zhipuai', 'z-ai']],
+  [/^kimi/, ['moonshotai', 'moonshot']],
+  [/^qwen/, ['alibaba', 'qwen']],
+  [/^grok/, ['xai']],
+  [/^minimax/, ['minimax']]
+]
+
+const bareModelId = (modelId: string): string => modelId.toLowerCase().split('/').pop()!
+
+const informationIn = (model: CatalogModel): number =>
+  (model.pricing ? 2 : 0) + (model.pricing?.cachedInputPerMTok !== undefined ? 1 : 0) + (model.contextWindow !== undefined ? 2 : 0) + (model.maxOutputTokens !== undefined ? 1 : 0)
 
 let shared: ModelCatalog | undefined
 

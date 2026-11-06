@@ -36,7 +36,7 @@ export function createProvider(cfg: ProviderConfig, secret?: string, options: Pr
       return new GeminiProvider(cfg, secret)
     case 'openai-compat':
       // Azure OpenAI is a mode of the compatible adapter: same wire format, routed by deployment.
-      return cfg.apiMode === 'azure' ? new AzureOpenAIProvider(cfg, secret) : new OpenAICompatProvider(cfg, secret, 'openai-compat', options.modelInfo)
+      return cfg.apiMode === 'azure' ? new AzureOpenAIProvider(cfg, secret) : new OpenAICompatProvider(cfg, secret, 'openai-compat', options.modelInfo, true)
     case 'custom':
       return new CustomProvider(cfg, secret)
     case 'ollama':

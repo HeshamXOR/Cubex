@@ -20,6 +20,8 @@ export interface HarnessProfile {
   parallelTools: boolean
   /** A sampling temperature for models that do badly at the API default. Never overrides a temperature the person set. */
   temperature?: number
+  /** The top-p their makers recommend alongside it. */
+  topP?: number
 }
 
 export interface ProfileInput {
@@ -58,13 +60,13 @@ const NOT_PATCH_TRAINED = /gpt-?oss/i
 const LOCAL_KINDS: readonly ProviderKind[] = ['ollama', 'llamacpp', 'lmstudio', 'mock-local']
 
 /**
- * Sampling defaults for models whose makers recommend less than the API default of 1.0 for agent work.
- * Reasoning ("thinking") variants are left alone: they ignore or reject a temperature.
+ * Sampling defaults from the makers' own model cards, for models that do badly at the API default of 1.0. Reasoning
+ * variants are left alone: Moonshot fixes Kimi K2.5 and later at 1.0 and rejects other values, DeepSeek ignores it in
+ * thinking mode, and OpenAI's reasoning models refuse it. So plain Kimi K2 is named here, and K2.5, K2.6, K3 are not.
  */
-const TEMPERATURES: ReadonlyArray<readonly [RegExp, number]> = [
-  [/kimi-k2(?!.*think)/i, 0.6],
-  [/qwen-?3.*coder|qwen2\.5.*coder/i, 0.7],
-  [/(?:^|[/:_\s-])llama/i, 0.6]
+const SAMPLING: ReadonlyArray<readonly [RegExp, { temperature: number; topP?: number }]> = [
+  [/kimi-k2(?![.\d])/i, { temperature: 0.6 }],
+  [/qwen-?3.*coder|qwen2\.5.*coder/i, { temperature: 0.7, topP: 0.8 }]
 ]
 
 const THINKING = /think|reason|-r1\b|\bo[1-9]\b/i
@@ -80,8 +82,8 @@ export function profileFor(input: ProfileInput): HarnessProfile {
   const name = `${input.modelId} ${input.displayName ?? ''}`.toLowerCase()
   const tier: HarnessTier = input.setting === 'full' || input.setting === 'lean' ? input.setting : isLean(input, name) ? 'lean' : 'full'
   const editTool: EditTool = PATCH_TRAINED.test(name) && !NOT_PATCH_TRAINED.test(name) ? 'apply_patch' : 'edit_file'
-  const temperature = THINKING.test(name) ? undefined : TEMPERATURES.find(([pattern]) => pattern.test(name))?.[1]
-  return { editTool, tier, parallelTools: tier === 'full', ...(temperature !== undefined ? { temperature } : {}) }
+  const sampling = THINKING.test(name) ? undefined : SAMPLING.find(([pattern]) => pattern.test(name))?.[1]
+  return { editTool, tier, parallelTools: tier === 'full', ...sampling }
 }
 
 /** Tools a lean profile does not offer: rarely needed, easy to pick by mistake, or reachable another way (git through run_command). */

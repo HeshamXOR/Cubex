@@ -8,7 +8,7 @@ import { sdkTimeoutMs } from '../../types/timeout'
 import type { AIStreamEvent } from '../../types/stream'
 import type { Usage } from '../../types/response'
 import { normalizeHttpError, normalizeUnknownError } from '../../errors/normalize'
-import { BaseProvider, normalizeBaseUrl } from '../base'
+import { BaseProvider, normalizeBaseUrl, streamEndedEarly } from '../base'
 import { requestWithSupportedEffort } from '../effort'
 import {
   isThinkingHistoryError,
@@ -63,6 +63,9 @@ const STATIC_MODELS: StaticModel[] = [
   { id: 'claude-sonnet-4-5-20250929', displayName: 'Claude Sonnet 4.5', family: 'claude-sonnet-4', contextWindow: 1_000_000, maxOutputTokens: 64_000, reasoning: true, longContext: true }
 ]
 
+/** What the error types the API sends mid-stream would have been as a response. */
+const STREAMED_ERROR_STATUS: Readonly<Record<string, number>> = { overloaded_error: 529, api_error: 500, rate_limit_error: 429, timeout_error: 504 }
+
 const positive = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined
 
@@ -86,10 +89,14 @@ export class AnthropicProvider extends BaseProvider {
   readonly name: string
 
   private readonly client: Anthropic
+  /** An Anthropic-compatible proxy turned the cache field away. */
+  private cachingRefused = false
 
   constructor(
     private readonly cfg: ProviderConfig,
-    secret?: string
+    secret?: string,
+    /** Headers for every request, for a gateway reached through another adapter's settings. */
+    options: { headers?: Record<string, string> } = {}
   ) {
     super()
     this.id = cfg.id
@@ -103,6 +110,7 @@ export class AnthropicProvider extends BaseProvider {
       // would send this provider's stored key somewhere the user never chose.
       baseURL: cfg.baseUrl ? normalizeBaseUrl(cfg.baseUrl, cfg.baseUrl) : 'https://api.anthropic.com',
       authToken: null,
+      ...(options.headers ? { defaultHeaders: options.headers } : {}),
       dangerouslyAllowBrowser: false,
       // The gateway's RetryEngine is the single retry layer; SDK retries would
       // multiply attempts and ignore the user's retry settings.
@@ -195,9 +203,9 @@ export class AnthropicProvider extends BaseProvider {
     const body = toAnthropicParams(request, true)
     // Automatic prompt caching: one top-level breakpoint that advances with the
     // conversation. An agent loop resends system + tools + history every
-    // iteration, so cache reads (≈0.1× input price) dominate. Skipped for custom
-    // base URLs, whose Anthropic-compatible proxies may reject unknown fields.
-    if (!this.cfg.baseUrl && this.cfg.promptCaching !== false) body.cache_control = { type: 'ephemeral' }
+    // iteration, so cache reads (≈0.1× input price) dominate. A proxy that rejects the
+    // field is asked again without it, once, and then left alone (see openStream).
+    if (this.cfg.promptCaching !== false && !this.cachingRefused) body.cache_control = { type: 'ephemeral' }
     try {
       const headers = this.betaHeaders(options?.headers)
       const stream = await this.openStream(
@@ -213,6 +221,8 @@ export class AnthropicProvider extends BaseProvider {
       // Map Anthropic content-block index -> our tool_call index.
       const toolBlockIndex = new Map<number, number>()
       let nextToolIndex = 0
+      // A stream that closes before it says it stopped was cut off, however quietly.
+      let finished = false
       // Thinking blocks carry a signature that must be replayed with tool results.
       const thinkingSignatures = new Map<number, string>()
 
@@ -259,6 +269,7 @@ export class AnthropicProvider extends BaseProvider {
             break
           }
           case 'message_delta': {
+            finished = true
             const evt = event as { usage?: Parameters<typeof mapAnthUsage>[0]; delta?: { stop_reason?: string | null } }
             usage = mapAnthUsage(evt.usage, usage)
             const stopReason = evt.delta?.stop_reason
@@ -266,6 +277,7 @@ export class AnthropicProvider extends BaseProvider {
             break
           }
           case 'message_stop': {
+            finished = true
             if (usage) yield { type: 'usage', usage }
             break
           }
@@ -273,6 +285,7 @@ export class AnthropicProvider extends BaseProvider {
             break
         }
       }
+      if (!finished && started && !signal?.aborted) throw streamEndedEarly(this.id)
       if (!started) {
         // Defensive: emit a start so downstream never sees an empty stream.
         yield { type: 'start', provider: this.id, model: request.model }
@@ -296,6 +309,11 @@ export class AnthropicProvider extends BaseProvider {
     try {
       return await create(body)
     } catch (err) {
+      if (err instanceof APIError && (err.status === 400 || err.status === 422) && body.cache_control && /cache_control/i.test(err.message)) {
+        this.cachingRefused = true
+        const { cache_control: _refused, ...withoutCaching } = body
+        return create(withoutCaching as AnthParams)
+      }
       const retry = err instanceof APIError && err.status === 400 && isThinkingHistoryError(err.message)
         ? withoutThinking(body)
         : undefined
@@ -340,12 +358,12 @@ export class AnthropicProvider extends BaseProvider {
   private wrap(err: unknown): NormalizedAIError {
     if (err instanceof NormalizedAIError) return err
     if (err instanceof APIError) {
-      const status = (err as APIError).status
-      if (status === undefined) {
-        const name = (err as { name?: string }).name
-        if (name === 'APIUserAbortError') return this.abort()
-        return normalizeUnknownError(this.id, err)
-      }
+      const name = (err as { name?: string }).name
+      if (err.status === undefined && name === 'APIUserAbortError') return this.abort()
+      const failure = (err.error as { error?: { type?: unknown; message?: unknown } } | undefined)?.error
+      // An error sent inside a stream carries no HTTP status, only its type.
+      const status = err.status ?? STREAMED_ERROR_STATUS[String(failure?.type)]
+      if (status === undefined) return normalizeUnknownError(this.id, err)
       const headers = err.headers as unknown as Record<string, string> | undefined
       return normalizeHttpError({
         provider: this.id,
@@ -353,7 +371,8 @@ export class AnthropicProvider extends BaseProvider {
         ...(headers ? { headers } : {}),
         body: err.error,
         ...(err.requestID ? { requestId: err.requestID } : {}),
-        message: err.message,
+        // The SDK's message is the status and the raw body, which is no use to a person.
+        message: typeof failure?.message === 'string' ? failure.message : err.message,
         cause: err
       })
     }

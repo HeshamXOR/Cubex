@@ -1,0 +1,8 @@
+{
+  "title": "Change a signature across a dozen files",
+  "prompt": "Change `money(amount, currency)` in src/money.mjs to take one options object: `money({ amount, currency })`, with currency defaulting to 'USD'. Update every caller in src/. Every module must keep returning the same text as before, and `node --test` must pass.",
+  "timeoutSec": 420,
+  "stub": {
+    "command": "node --test"
+  }
+}

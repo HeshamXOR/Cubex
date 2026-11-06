@@ -2,9 +2,19 @@ import type { Capability } from './capabilities'
 import type { ExecutionPath, Modality, Quantization } from './common'
 import type { MemoryEstimate } from './estimation'
 import type { ReasoningEffort } from './request'
+import type { ModelEndpoint } from '../providers/endpoints'
 
 /** Where a price came from; drives the cost source shown next to a figure. */
-export type PricingSource = 'builtin' | 'catalog' | 'user'
+export type PricingSource = 'builtin' | 'catalog' | 'user' | 'provider'
+
+/** The rates that apply once a request's input passes a size, for models priced in tiers. */
+export interface PricingTier {
+  aboveInputTokens: number
+  inputPerMTok: number
+  outputPerMTok: number
+  cachedInputPerMTok?: number
+  cacheWritePerMTok?: number
+}
 
 export interface ModelPricing {
   currency: string
@@ -13,6 +23,8 @@ export interface ModelPricing {
   cachedInputPerMTok?: number
   /** Writing a prompt-cache entry (Anthropic bills the 5-minute write at 1.25x input). */
   cacheWritePerMTok?: number
+  /** Dearer rates for a long prompt (Claude Haiku 5.5 above 100K tokens, GPT-6.1 Sol above 272K). */
+  longContext?: PricingTier
   /** Where these numbers came from. Absent means the built-in table. */
   source?: PricingSource
   /** Free-form for providers that price differently. */
@@ -43,6 +55,8 @@ export interface ModelInfo {
   maxOutputTokens?: number
   supportsTools: boolean
   supportsStructuredOutput: boolean
+  /** The chat endpoints the model's server says it offers. Absent when the server does not say. */
+  endpoints?: ModelEndpoint[]
   supportsReasoning: boolean
   /**
    * The effort levels this model accepts, lowest first, when its provider or the model catalog says so.

@@ -34,6 +34,7 @@ function isAnthropicModel(model: ModelInfo): boolean {
 function sourceOf(pricing: ModelPricing): CostSource {
   if (pricing.source === 'catalog') return 'catalog'
   if (pricing.source === 'user') return 'user'
+  if (pricing.source === 'provider') return 'provider'
   return 'estimated'
 }
 
@@ -46,12 +47,14 @@ export function estimateCost(usage: Usage | undefined, model: ModelInfo | undefi
   const pricing = model?.pricing
   if (!model || !pricing) return { cost: 0, currency, source: 'estimated' }
 
-  const inputRate = pricing.inputPerMTok ?? 0
-  const outputRate = pricing.outputPerMTok ?? 0
+  // A model priced in tiers bills the whole request at the dearer rates once its prompt passes the size.
+  const tier = pricing.longContext && count(usage.inputTokens) > pricing.longContext.aboveInputTokens ? pricing.longContext : pricing
+  const inputRate = tier.inputPerMTok ?? 0
+  const outputRate = tier.outputPerMTok ?? 0
   // Only Claude models get derived cache multipliers; a catalog or user price always wins.
   const anthropic = isAnthropicModel(model)
-  const readRate = pricing.cachedInputPerMTok ?? (anthropic ? inputRate * ANTHROPIC_READ_MULTIPLIER : inputRate)
-  const writeRate = pricing.cacheWritePerMTok ?? (anthropic ? inputRate * ANTHROPIC_WRITE_MULTIPLIER : inputRate)
+  const readRate = tier.cachedInputPerMTok ?? (anthropic ? inputRate * ANTHROPIC_READ_MULTIPLIER : inputRate)
+  const writeRate = tier.cacheWritePerMTok ?? (anthropic ? inputRate * ANTHROPIC_WRITE_MULTIPLIER : inputRate)
   const write1hRate = anthropic ? Math.max(writeRate, inputRate * ANTHROPIC_WRITE_1H_MULTIPLIER) : writeRate
 
   // inputTokens includes the cache reads and writes, so the plain input is what is left over.
@@ -63,6 +66,28 @@ export function estimateCost(usage: Usage | undefined, model: ModelInfo | undefi
     (plain * inputRate + read * readRate + (written - written1h) * writeRate + written1h * write1hRate +
       count(usage.outputTokens) * outputRate) / 1_000_000
   return { cost: Math.max(0, cost), currency, source: sourceOf(pricing) }
+}
+
+/**
+ * Prices the past requests that were recorded at no cost because no price was known for their model at the time, so the
+ * usage view counts them. A model that still has no price stays as it was, and is shown as unpriced.
+ */
+export function repriceUnpriced(repo: Pick<typeof usageRepo, 'unpriced' | 'setCost'>, modelOf: (providerId: string, modelId: string) => ModelInfo | undefined): number {
+  let priced = 0
+  for (const record of repo.unpriced()) {
+    const model = modelOf(record.providerId, record.model)
+    if (!model?.pricing) continue
+    const { cost, currency, source } = estimateCost({
+      inputTokens: record.inputTokens,
+      outputTokens: record.outputTokens,
+      ...(record.cacheReadTokens ? { cachedInputTokens: record.cacheReadTokens } : {}),
+      ...(record.cacheWriteTokens ? { cacheWriteInputTokens: record.cacheWriteTokens } : {})
+    }, model)
+    if (cost <= 0) continue
+    repo.setCost(record.id, cost, currency, source)
+    priced++
+  }
+  return priced
 }
 
 export function recordUsage(params: {

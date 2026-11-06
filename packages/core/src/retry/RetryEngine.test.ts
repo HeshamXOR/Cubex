@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { isRetryable, nextDelay, withRetry } from './RetryEngine'
+import { attemptsFor, isRetryable, nextDelay, withRetry } from './RetryEngine'
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from '../types/retry'
 import { NormalizedAIError } from '../types/errors'
 
@@ -15,6 +15,37 @@ function err(overrides: Partial<ConstructorParameters<typeof NormalizedAIError>[
 }
 
 const noSleep = () => Promise.resolve()
+
+describe('a busy server', () => {
+  const policy = { ...DEFAULT_RETRY_POLICY, maxAttempts: 3 }
+  const busy = (statusCode: number) => new NormalizedAIError({ provider: 'p', category: 'SERVER_ERROR', statusCode, message: 'The service is temporarily busy.', classification: 'transient', retryable: true })
+  const broken = new NormalizedAIError({ provider: 'p', category: 'SERVER_ERROR', statusCode: 500, message: 'boom', classification: 'transient', retryable: true })
+
+  it('gets more attempts than an ordinary failure', () => {
+    expect(attemptsFor(busy(503), policy)).toBe(6)
+    expect(attemptsFor(broken, policy)).toBe(3)
+  })
+
+  it('does not wait out a spent quota, which will not come back', () => {
+    const spent = new NormalizedAIError({ provider: 'p', category: 'RATE_LIMIT_ERROR', statusCode: 429, message: 'You exceeded your current quota.', classification: 'transient', retryable: true })
+    expect(attemptsFor(spent, policy)).toBe(3)
+  })
+
+  it('still gets no retries when the setting says none', () => {
+    expect(attemptsFor(busy(503), { ...policy, maxAttempts: 1 })).toBe(1)
+    expect(attemptsFor(busy(503), { ...policy, enabled: false })).toBe(1)
+  })
+
+  it('retries 529 even with settings saved before it was on the list', () => {
+    expect(isRetryable(busy(529), { ...policy, retryOn5xx: [500, 502, 503, 504] })).toBe(true)
+  })
+
+  it('waits longer each time, and never next to nothing', () => {
+    expect(nextDelay(busy(503), policy, 1, () => 0)).toBe(1_000)
+    expect(nextDelay(busy(503), policy, 3, () => 1)).toBe(8_000)
+    expect(nextDelay(busy(503), policy, 7, () => 1)).toBe(30_000)
+  })
+})
 
 describe('isRetryable', () => {
   const policy = DEFAULT_RETRY_POLICY

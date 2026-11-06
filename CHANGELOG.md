@@ -8,6 +8,37 @@ project can, and the format follows [Keep a Changelog](https://keepachangelog.co
 A version that is not released yet has the word Unreleased where its date goes. Releasing it means writing the date
 there. [docs/RELEASING.md](docs/RELEASING.md) has the whole checklist.
 
+## [0.4.0] - Unreleased
+
+### Fixed
+
+- A connection that drops part way through a reply no longer ends the turn. Cubex asks for the rest and carries on, up to
+  three times in a row, and shows that it did.
+- A reply cut off by a connection that closed quietly no longer passes for a finished answer.
+- A busy server (503 or 529) now gets up to six tries over one to two and a half minutes, instead of three over a few
+  seconds. A spent quota is not waited on.
+- A model an OpenAI-compatible gateway has moved between endpoints no longer stays stuck on the old one.
+- Past requests recorded at $0 because their model had no price are priced in the usage view, where a price is now known.
+- Kimi K2.5 and later no longer get a temperature they reject.
+
+### New
+
+- **Automatic endpoints.** On a gateway that reports them, each model uses its own format: Claude uses Anthropic Messages,
+  GPT uses Responses and the rest use Chat Completions. A busy endpoint moves to another one at once. You can still set a
+  format yourself on the provider.
+- **Your gateway's real prices.** Gateways that publish a price list (New-API and its relatives) are billed at those prices,
+  including tiers for long prompts.
+- **Context windows and prices on any gateway.** A model on a gateway Cubex does not know now gets its window and price
+  from the model catalog, so the meter fills and compaction works. Prices for current models are built in as a fallback.
+- **Prompt caching on Anthropic-compatible relays,** falling back without it for a relay that refuses it.
+
+### Changed
+
+- Older tool output is shortened by age once the context is half full, keeping the start and end of each result.
+- The agent is told when it goes in circles: the same error coming back, the same file read over and over, or two actions
+  taking turns. Checking on a running task no longer counts as repeating itself.
+- Image models no longer appear in a gateway's chat model list.
+
 ## [0.3.0] - 2026-11-02
 
 Cubex has a new look, and the agent can now keep working toward a goal on its own, a Stop hook can send it back to

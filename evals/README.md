@@ -50,7 +50,7 @@ answered automatically and counted as an intervention.
 ### Without a model
 
 `CUBEX_EVAL_KIND=stub npm run eval` runs the whole pipeline against a scripted provider that replays each task's
-reference solution through the real loop with the real tools. It makes no network calls and should score 16/16, which
+reference solution through the real loop with the real tools. It makes no network calls and should score every task, which
 proves the runner, the checks and the report work. `npm run eval:validate` goes further and checks every task alone:
 its check must fail on the untouched fixture and pass with the reference solution. Run it after adding a task.
 
@@ -72,7 +72,23 @@ the metrics below. A task that times out, errors or crashes is a failed run; it 
 | promptHash, toolsOffered | in the JSON: a fingerprint of the first request's system prompt (workspace path excluded) and the tool list, so a result can be tied to the prompt that produced it |
 
 Compare two result files only when the model, the tasks and the repeat count match. One run per task is noisy:
-use `CUBEX_EVAL_REPEAT=3` or more before drawing conclusions from a difference of a task or two.
+use `CUBEX_EVAL_REPEAT=3` or more before drawing conclusions from a difference of a task or two. To compare two versions,
+run both at the same moment, so they meet the same provider, and then:
+
+```sh
+node evals/compare.mjs <before.json> <after.json> --input 0.15 --output 0.5 --cached 0.03 --write 0.15
+```
+
+It prints pass rates, tokens, cost and time, with a sign test over the tasks. [BENCHMARKS.md](BENCHMARKS.md) is the latest
+comparison.
+
+Three more variables test particular conditions:
+
+| Variable | Meaning |
+| --- | --- |
+| `CUBEX_EVAL_FAULTS` | network trouble on demand: `busy:5:4` makes every 5th request meet four 503s, and `cut:7` drops the connection part way through every 7th |
+| `CUBEX_EVAL_WINDOW` | the model's context window in tokens, to see what happens as a small one fills up |
+| `CUBEX_EVAL_PROFILE` | `full` or `lean`, to compare the two setups on one model |
 
 ## Adding a task
 

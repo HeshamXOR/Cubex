@@ -121,7 +121,7 @@ export interface Preset {
  * Where a cost figure came from: the provider's own bill (`reported`), a price synced
  * from the model catalog, a price the user entered, or a built-in or missing price.
  */
-export type CostSource = 'reported' | 'catalog' | 'user' | 'estimated'
+export type CostSource = 'reported' | 'provider' | 'catalog' | 'user' | 'estimated'
 
 export interface UsageRecord {
   id: string

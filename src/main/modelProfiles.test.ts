@@ -60,7 +60,9 @@ describe('profileFor', () => {
   it('suggests a temperature only for models that do badly at the default, never for thinking ones', () => {
     expect(profileFor({ modelId: 'qwen3-coder' }).temperature).toBe(0.7)
     expect(profileFor({ modelId: 'moonshotai/kimi-k2' }).temperature).toBe(0.6)
-    expect(profileFor({ modelId: 'meta/llama-3.3-70b-instruct' }).temperature).toBe(0.6)
+    expect(profileFor({ modelId: 'qwen3-coder' }).topP).toBe(0.8)
+    // Moonshot fixes these at 1.0 and rejects anything else.
+    for (const modelId of ['kimi-k2.5', 'kimi-k2.6', 'moonshotai/kimi-k2.7-code', 'kimi-k3', 'kimi-k3.1-pro']) expect(profileFor({ modelId }).temperature).toBeUndefined()
     expect(profileFor({ modelId: 'moonshotai/kimi-k2-thinking' }).temperature).toBeUndefined()
     expect(profileFor({ modelId: 'claude-sonnet-4-5' }).temperature).toBeUndefined()
     expect(profileFor({ modelId: 'o3' }).temperature).toBeUndefined()
