@@ -8,7 +8,12 @@ project can, and the format follows [Keep a Changelog](https://keepachangelog.co
 A version that is not released yet has the word Unreleased where its date goes. Releasing it means writing the date
 there. [docs/RELEASING.md](docs/RELEASING.md) has the whole checklist.
 
-## [0.4.0] - Unreleased
+## [0.4.0] - 2026-11-06
+
+Cubex now sets itself up for each model. On a gateway it picks the right format for every model, knows its price and
+context window, and keeps working through busy servers and dropped connections, where you used to have to type
+"continue". Small and open models get fewer tools and a shorter prompt, and a turn that edited code does not end quietly
+without a check.
 
 ### Fixed
 
@@ -20,24 +25,46 @@ there. [docs/RELEASING.md](docs/RELEASING.md) has the whole checklist.
 - A model an OpenAI-compatible gateway has moved between endpoints no longer stays stuck on the old one.
 - Past requests recorded at $0 because their model had no price are priced in the usage view, where a price is now known.
 - Kimi K2.5 and later no longer get a temperature they reject.
+- The context meter counts what was really sent, plus the reply that joins the history. It ignores thinking that is never
+  sent again, uses the 1M window when that is on, and is kept for each conversation, so reopening a chat still shows it.
 
 ### New
 
 - **Automatic endpoints.** On a gateway that reports them, each model uses its own format: Claude uses Anthropic Messages,
   GPT uses Responses and the rest use Chat Completions. A busy endpoint moves to another one at once. You can still set a
   format yourself on the provider.
-- **Your gateway's real prices.** Gateways that publish a price list (New-API and its relatives) are billed at those prices,
-  including tiers for long prompts.
+- **Your gateway's real prices.** On gateways that publish a price list (New-API and its relatives), costs are worked out
+  from that list, including its higher rates for long prompts.
 - **Context windows and prices on any gateway.** A model on a gateway Cubex does not know now gets its window and price
   from the model catalog, so the meter fills and compaction works. Prices for current models are built in as a fallback.
 - **Prompt caching on Anthropic-compatible relays,** falling back without it for a relay that refuses it.
+- **Tools and instructions for each model.** Each model gets the edit tool it was trained on, and small and open models get
+  a shorter tool list and prompt. Choose it under **Models**, then **Agent tools**.
+- **A second opinion before finishing.** A second model you choose can read the diff and send fixes back, once per turn. It
+  is off until you turn it on under **Agent tools**, and its requests are billed.
+- **The agent starts out knowing your project.** A map of the project and its known check commands go in the prompt, and
+  checks that pass are remembered for that project.
 
 ### Changed
 
+- Malformed tool calls are mended where possible: bad JSON, the wrong style of name, or values of the wrong type. One that
+  cannot be mended gets a precise error back.
+- A turn that ends with an empty reply after tool work is sent back once. Code edits that were never checked are sent back
+  once too, and if they still are not checked, the reply says so.
+- Skills load only when you name them, or when the work is substantial and matches.
 - Older tool output is shortened by age once the context is half full, keeping the start and end of each result.
 - The agent is told when it goes in circles: the same error coming back, the same file read over and over, or two actions
   taking turns. Checking on a running task no longer counts as repeating itself.
 - Image models no longer appear in a gateway's chat model list.
+
+### Good to know
+
+- Your spending totals may go up when you first open the usage view, because past requests recorded at $0 now get a price.
+  Requests with no known price stay at $0, and requests on a host with its own prices, such as NVIDIA, are not given another
+  seller's price.
+- A cost is an estimate unless it comes from your gateway's own price list. The built-in prices are list prices, and your
+  gateway may charge differently.
+- Retries cannot rescue a model that stays busy for many minutes. If a model keeps failing as busy, switch to another one.
 
 ## [0.3.0] - 2026-11-02
 
