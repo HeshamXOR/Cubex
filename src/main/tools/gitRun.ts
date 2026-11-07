@@ -58,6 +58,8 @@ export interface GitRunOptions {
   input?: string
   /** A read: skips the optional index lock and is stopped once it has produced more output than is kept. */
   readOnly?: boolean
+  /** Work on this index file instead of the repository's, so that looking at a working tree does not change what is staged in it. */
+  indexFile?: string
 }
 
 export interface GitRun {
@@ -189,7 +191,7 @@ export function runGit(cwd: string, args: string[], options: GitRunOptions = {})
     try {
       child = spawn('git', args, {
         cwd,
-        env: gitEnvironment(options.readOnly),
+        env: { ...gitEnvironment(options.readOnly), ...(options.indexFile ? { GIT_INDEX_FILE: options.indexFile } : {}) },
         shell: false,
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],

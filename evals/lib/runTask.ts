@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DEFAULT_RETRY_POLICY } from '@core/types'
@@ -21,6 +21,32 @@ const STOP_GRACE_MS = 15_000
 
 const ANSWER_FOR_QUESTION = 'Use your best judgment and carry on; nobody is available to answer.'
 
+/** Plausible rules that say nothing about these tasks, to measure what notes cost when they do not help. */
+const NOISE_NOTES = [
+  'Prefer small commits that do one thing.', 'Keep functions under about 40 lines.', 'Use descriptive names over comments.',
+  'Do not add a dependency without saying why.', 'Keep error messages specific about what failed.', 'Avoid global state.',
+  'Dates are stored in UTC.', 'Log at info level only for what an operator acts on.', 'New public functions get a short doc comment.',
+  'Feature flags live in one place and are removed after launch.'
+]
+
+/**
+ * The project memory a run starts with: the task's own memory.md, unless CUBEX_EVAL_MEMORY=off takes it away to measure what
+ * the note does. CUBEX_EVAL_MEMORY=noise gives every task notes that have nothing to do with it, to measure what they cost.
+ */
+function seedMemory(task: TaskSpec, workspace: string): void {
+  const setting = process.env.CUBEX_EVAL_MEMORY
+  const target = join(workspace, '.cubex', 'memory.md')
+  if (setting === 'noise') {
+    mkdirSync(join(workspace, '.cubex'), { recursive: true })
+    writeFileSync(target, `# Project memory\n\n${NOISE_NOTES.map((note) => `- ${note}`).join('\n')}\n`)
+    return
+  }
+  const own = join(task.dir, 'memory.md')
+  if (setting === 'off' || !existsSync(own)) return
+  mkdirSync(join(workspace, '.cubex'), { recursive: true })
+  copyFileSync(own, target)
+}
+
 /**
  * One run of one task: a fresh workspace from the fixture, a real ChatService over the provider under test, the
  * prompt sent as a turn, and the check run on what is left. Never throws: whatever goes wrong is a failed result.
@@ -38,6 +64,7 @@ export async function runTask(task: TaskSpec, repeat: number, target: EvalTarget
   try {
     mkdirSync(workspace)
     copyFixture(task, workspace)
+    seedMemory(task, workspace)
     const before = snapshot(workspace)
     state.workspaces.set(conversationId, workspace)
 

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { namesSkill, profileFor, readProfileSetting, toolsToDrop, type HarnessProfile } from './modelProfiles'
+import { namesBrowser } from './modelProfiles'
+import { knownToSeeImages } from '@core/providers/vision'
 
 describe('profileFor', () => {
   // [model id, tier, edit tool]
@@ -151,5 +153,19 @@ describe('namesSkill', () => {
     expect(namesSkill('open src/review/index.ts', skills)).toBe(false)
     expect(namesSkill('use $unknown-skill', skills)).toBe(false)
     expect(namesSkill('', skills)).toBe(false)
+  })
+})
+
+describe('who is offered what for looking at pages', () => {
+  it('offers a lean model the browser only when the message is about a page', () => {
+    expect(namesBrowser('The button on the web page does nothing')).toBe(true)
+    expect(namesBrowser('check localhost:3000 for me')).toBe(true)
+    expect(namesBrowser('Fix the off by one in the pager')).toBe(false)
+    expect(namesBrowser('building a build tool')).toBe(false)
+  })
+
+  it('knows which families take images, and assumes nothing about the rest', () => {
+    for (const id of ['claude-sonnet-5-5', 'anthropic/claude-fable-5-1', 'gpt-6.1-sol', 'gpt-4o', 'gemini-3-flash-preview', 'grok-4.7']) expect(knownToSeeImages(id)).toBe(true)
+    for (const id of ['glm-5.3-flash', 'deepseek-v4.1-flash', 'kimi-k3', 'gpt-3.5-turbo', 'qwen3-coder', 'grok-build-0.1', 'gemini-embedding-001']) expect(knownToSeeImages(id)).toBe(false)
   })
 })

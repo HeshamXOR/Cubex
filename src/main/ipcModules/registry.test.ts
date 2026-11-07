@@ -11,7 +11,7 @@ describe('IPC module registry', () => {
       send: () => undefined,
       onChatEvent: () => () => undefined,
       getWindow: () => null,
-      chat: {},
+      chat: { setBrowser: () => undefined },
       local: {},
       providers: {},
       taskIdArg: (value: unknown) => String(value),

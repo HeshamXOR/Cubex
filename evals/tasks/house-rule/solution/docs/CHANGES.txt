@@ -1,0 +1,3 @@
+FIX: no late fee on the due date itself
+FEATURE: invoices can be split
+FIX: rounding of totals

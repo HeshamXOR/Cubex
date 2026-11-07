@@ -37,6 +37,7 @@ vi.mock('./exporter', () => ({ exportConversation: vi.fn(), importConversation: 
 vi.mock('./skills', () => ({ loadSkills: () => [], readSkill: () => '' }))
 vi.mock('./ChatService', () => ({
   ChatService: class {
+    setBrowser(): void {}
     getSessionChanges = mocks.getSessionChanges
     cancelAll(): void {}
     dispose(): void {}

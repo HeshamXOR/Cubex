@@ -32,7 +32,11 @@ vi.mock('../src/main/config', async () => {
       general: { workspacePath: [...state.workspaces.values()][0] ?? '' },
       mcpServers: [], hooks: [], privacy: { localOnly: false }, shell: { preferred: 'auto' },
       // CUBEX_EVAL_PROFILE compares the full and lean setups on one model.
-      ai: process.env.CUBEX_EVAL_PROFILE ? { harnessProfile: process.env.CUBEX_EVAL_PROFILE } : {}
+      ai: {
+        ...(process.env.CUBEX_EVAL_PROFILE ? { harnessProfile: process.env.CUBEX_EVAL_PROFILE } : {}),
+        // CUBEX_EVAL_PROJECT_MAP=off compares a task with and without the project map in its prompt.
+        ...(process.env.CUBEX_EVAL_PROJECT_MAP === 'off' ? { projectMap: false } : {})
+      }
     })
   }
 })

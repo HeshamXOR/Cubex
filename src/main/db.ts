@@ -13,7 +13,8 @@ import type {
   StoredMessage,
   UsageRecord,
   UsageSummary,
-  CostSource
+  CostSource,
+  ConversationWorktree
 } from '@shared/ipc'
 import type { ProviderConfig } from '@core/types'
 
@@ -141,6 +142,9 @@ function migrate(d: Database.Database): void {
     // The meter's last snapshot, so a task that is opened again shows its context before the next request.
     d.exec('ALTER TABLE conversations ADD COLUMN contextJson TEXT')
   }
+  if (!cols.some((c) => c.name === 'worktreeJson')) {
+    d.exec('ALTER TABLE conversations ADD COLUMN worktreeJson TEXT')
+  }
   const messageCols = d.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>
   if (!messageCols.some((column) => column.name === 'uiTranscriptJson')) {
     d.exec('ALTER TABLE messages ADD COLUMN uiTranscriptJson TEXT')
@@ -181,6 +185,17 @@ export const providerRepo = {
   get(id: string): ProviderConfig | undefined {
     const r = initDb().prepare('SELECT json FROM providers WHERE id = ?').get(id) as { json: string } | undefined
     return r ? (JSON.parse(r.json) as ProviderConfig) : undefined
+  }
+}
+
+function parseWorktree(value: unknown): ConversationWorktree | undefined {
+  if (typeof value !== 'string' || !value) return undefined
+  try {
+    const parsed = JSON.parse(value) as Partial<ConversationWorktree> | null
+    return parsed && typeof parsed.path === 'string' && typeof parsed.repoRoot === 'string' && typeof parsed.branch === 'string' && typeof parsed.baseCommit === 'string'
+      ? parsed as ConversationWorktree : undefined
+  } catch {
+    return undefined
   }
 }
 
@@ -227,6 +242,7 @@ export const conversationRepo = {
       execution: (c.execution as Conversation['execution']) ?? 'cloud',
       presetId: (c.presetId as string) ?? undefined,
       workspacePath: (c.workspacePath as string) ?? undefined,
+      ...(parseWorktree(c.worktreeJson) ? { worktree: parseWorktree(c.worktreeJson)! } : {}),
       pinned: !!c.pinned,
       archived: !!c.archived,
       contextStartMessageId: (c.contextStartMessageId as string) ?? undefined,
@@ -284,7 +300,7 @@ export const conversationRepo = {
     const merged = { ...existing, ...patch, ...(resetsContext ? { lastContext: undefined } : {}), updatedAt: activity ? Date.now() : existing.updatedAt }
     d.prepare(
       `UPDATE conversations SET title=@title, updatedAt=@updatedAt, providerId=@providerId,
-        model=@model, execution=@execution, presetId=@presetId, composerJson=@composerJson, workspacePath=@workspacePath,
+        model=@model, execution=@execution, presetId=@presetId, composerJson=@composerJson, workspacePath=@workspacePath, worktreeJson=@worktreeJson,
         pinned=@pinned, archived=@archived, totalUsageJson=@totalUsageJson,
         contextStartMessageId=@contextStartMessageId, contextSummary=@contextSummary,
         contextSummaryAt=@contextSummaryAt, contextJson=@contextJson WHERE id=@id`
@@ -298,6 +314,7 @@ export const conversationRepo = {
       presetId: merged.presetId ?? null,
       composerJson: composerJson(merged.composer),
       workspacePath: merged.workspacePath ?? null,
+      worktreeJson: merged.worktree ? JSON.stringify(merged.worktree) : null,
       pinned: merged.pinned ? 1 : 0,
       archived: merged.archived ? 1 : 0,
       contextStartMessageId: merged.contextStartMessageId ?? null,
@@ -431,6 +448,7 @@ function toSummary(c: Record<string, unknown>): ConversationSummary {
     model: (c.model as string) ?? undefined,
     execution: (c.execution as ConversationSummary['execution']) ?? 'cloud',
     workspacePath: (c.workspacePath as string) ?? undefined,
+    ...(parseWorktree(c.worktreeJson) ? { worktree: parseWorktree(c.worktreeJson)! } : {}),
     pinned: !!c.pinned,
     archived: !!c.archived,
     messageCount: Number(c.messageCount ?? 0)
@@ -482,6 +500,12 @@ export interface UsageGroup {
 }
 
 export const usageRepo = {
+  /** What a task's requests have cost; undefined until one has a known price. */
+  costOfConversation(conversationId: string): number | undefined {
+    const row = initDb().prepare('SELECT SUM(estimatedCost) AS total FROM usage_records WHERE conversationId = ?').get(conversationId) as { total: number | null }
+    return row.total ? row.total : undefined
+  },
+
   record(r: UsageRecord): void {
     initDb()
       .prepare(

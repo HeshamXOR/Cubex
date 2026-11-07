@@ -5,6 +5,7 @@ import type { ToolCall } from '@core/types'
 import type { PermissionDecision, PermissionMode, PermissionRule } from '@shared/ipc'
 import { argumentsStayInWorkspace, isReadOnlyShellCommand, repositoryConfigIsInert, shadowedByWorkspace } from './tools/shellReadOnly'
 import { fetchHost } from './tools/webFetchTool'
+import { browserApprovalHost } from './browser/urls'
 
 /**
  * "Always allow" rules: project-scoped pre-approvals for a class of tool call.
@@ -25,6 +26,8 @@ type RuleCall = Pick<ToolCall, 'name' | 'input'>
 export interface RuleEnvironment {
   platform?: NodeJS.Platform
   repositoryIsInert?: (workspace: string) => boolean
+  /** The project a worktree belongs to, whose rules apply in it. The command itself is still judged in the worktree. */
+  scope?: string
 }
 
 export interface SuggestContext extends RuleEnvironment {
@@ -199,10 +202,14 @@ function ruleKey(call: RuleCall, workspace: string, env: RuleEnvironment): CallR
     case 'edit_file':
     case 'write_file':
       // One rule covers file edits and file creation; deletions are never generalized.
-      return { tools: EDIT_TOOLS, pattern: '*', label: `Edits in ${folderName(workspace)}` }
+      return { tools: EDIT_TOOLS, pattern: '*', label: `Edits in ${folderName(env.scope ?? workspace)}` }
     case 'web_fetch': {
       const host = fetchHost(call.input)
       return host ? { tools: ['web_fetch'], pattern: host, label: host } : undefined
+    }
+    case 'browser': {
+      const host = browserApprovalHost(call.input)
+      return host ? { tools: ['browser'], pattern: host, label: `Browser on ${host}` } : undefined
     }
     case 'delegate_to_subagent':
       return { tools: [call.name], pattern: '*', label: 'Subagents' }
@@ -329,13 +336,13 @@ export class PermissionRuleStore {
     return true
   }
 
-  /** The saved rule of this project that approves the call, if any. */
-  find(workspace: string, call: RuleCall): PermissionRule | undefined {
-    const key = workspaceKey(workspace, this.platform)
+  /** The saved rule of this project that approves the call, if any. A worktree passes the project it came from as `scope`. */
+  find(workspace: string, call: RuleCall, scope?: string): PermissionRule | undefined {
+    const key = workspaceKey(scope ?? workspace, this.platform)
     if (key === undefined) return undefined
     const candidates = this.load().filter((rule) => this.sameWorkspace(rule, key))
     if (!candidates.length) return undefined
-    const wanted = ruleKey(call, workspace, this.options)
+    const wanted = ruleKey(call, workspace, { ...this.options, ...(scope ? { scope } : {}) })
     const match = wanted && candidates.find((rule) => ruleCovers(rule, wanted))
     return match ? { ...match } : undefined
   }

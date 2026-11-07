@@ -47,7 +47,7 @@ vi.mock('./ProviderManager', () => ({
 vi.mock('./LocalService', () => ({ LocalService: class {} }))
 vi.mock('./exporter', () => ({ exportConversation: vi.fn(), importConversation: vi.fn() }))
 vi.mock('./skills', () => ({ loadSkills: () => [], readSkill: () => '' }))
-vi.mock('./ChatService', () => ({ ChatService: class { cancelAll(): void {} dispose(): void {} } }))
+vi.mock('./ChatService', () => ({ ChatService: class { setBrowser(): void {} cancelAll(): void {} dispose(): void {} } }))
 
 import { registerIpc } from './ipc'
 

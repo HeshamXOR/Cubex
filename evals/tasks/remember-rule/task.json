@@ -1,0 +1,7 @@
+{
+  "title": "Save a rule the person asks to keep",
+  "prompt": "`discountedTotal` in src/price.mjs gives the wrong answer: the discount is added instead of taken off. Fix it. Also, please keep this for later sessions in this project: the tests here must always be run with `node --test --test-concurrency=1`, because they share one port.",
+  "mode": "acceptEdits",
+  "timeoutSec": 240,
+  "stub": { "command": "node --test --test-concurrency=1" }
+}

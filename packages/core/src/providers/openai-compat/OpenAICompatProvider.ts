@@ -1,3 +1,4 @@
+import { knownToSeeImages } from '../vision'
 import type { Capability } from '../../types/capabilities'
 import { NormalizedAIError } from '../../types/errors'
 import type { ModelInfo } from '../../types/model'
@@ -302,7 +303,7 @@ export class OpenAICompatProvider extends BaseProvider {
       displayName: id,
       location: 'cloud',
       capabilities: caps,
-      modalities: { input: caps.includes('image_input') ? ['text', 'image'] : ['text'], output: ['text'] },
+      modalities: { input: caps.includes('image_input') || this.mayTakeImages(id) ? ['text', 'image'] : ['text'], output: ['text'] },
       supportsTools: caps.includes('tools'),
       supportsStructuredOutput: caps.includes('structured_output'),
       supportsReasoning: caps.includes('reasoning') || gateway?.reasoning === true || infersReasoning(id),
@@ -311,10 +312,15 @@ export class OpenAICompatProvider extends BaseProvider {
     }
   }
 
+  /** Capabilities set on the provider are the person's word. Without them a gateway's list says nothing, so the model's family decides. */
+  private mayTakeImages(model: string): boolean {
+    return !this.cfg.capabilities && knownToSeeImages(model)
+  }
+
   /** Reject unsupported content BEFORE sending, per declared capabilities. */
   private assertContentSupported(request: AIRequest): void {
     const hasImage = request.messages.some((m) => m.content.some((p: MessageContentPart) => p.type === 'image'))
-    if (hasImage && !this.supports('image_input') && !this.supports('vision')) {
+    if (hasImage && !this.supports('image_input') && !this.supports('vision') && !this.mayTakeImages(request.model)) {
       throw new NormalizedAIError({
         provider: this.id,
         category: 'INVALID_REQUEST',

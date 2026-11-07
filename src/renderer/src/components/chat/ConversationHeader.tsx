@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowDown, ArrowUp, Check, Copy, Folder, FolderPlus, GitBranch, PanelRight, PanelRightOpen, Pencil, Share, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, Columns3, Copy, Folder, FolderPlus, GitBranch, GitFork, PanelRight, PanelRightOpen, Pencil, Share, Trash2, Undo2, Users, X } from 'lucide-react'
 import { useStore } from '../../state/store'
 import { api } from '../../lib/api'
 import { basename } from '../../lib/format'
@@ -7,6 +7,7 @@ import { useGitStatus } from '../../lib/useGitStatus'
 import { useMenuKeys } from '../../lib/useMenuKeys'
 import { useChanges } from '../../lib/useSessionChanges'
 import { setRailCollapsed, useRailAvailable, useRailCollapsed } from '../../lib/runRail'
+import { useWorktreeUi } from '../../lib/worktreeTasks'
 import { InlineRename } from '../InlineRename'
 import { TasksIndicator } from '../TasksIndicator'
 
@@ -27,6 +28,30 @@ export function ConversationHeader(): JSX.Element {
   const [placeMenu, setPlaceMenu] = useState(false)
   const [exportMenu, setExportMenu] = useState(false)
   const [copied, setCopied] = useState<string>()
+  const worktree = conversation?.worktree && !conversation.worktree.removedAt ? conversation.worktree : undefined
+  const openWorktreeDialog = useWorktreeUi((s) => s.openDialog)
+  const showRace = useWorktreeUi((s) => s.showRace)
+  const loadConversations = useStore((s) => s.loadConversations)
+  const openConversation = useStore((s) => s.openConversation)
+  const [worktreeNote, setWorktreeNote] = useState<string>()
+  const [confirmDiscard, setConfirmDiscard] = useState(false)
+
+  const applyToProject = async (): Promise<void> => {
+    if (!conversation) return
+    setPlaceMenu(false)
+    const result = await api.worktreeApply(conversation.id)
+    setWorktreeNote(result.ok ? `${result.files === 1 ? '1 file is' : `${result.files} files are`} now uncommitted in ${worktree?.repoRoot ?? 'your project folder'}.` : result.reason)
+  }
+  const discardWorktree = async (): Promise<void> => {
+    if (!conversation) return
+    setPlaceMenu(false)
+    setConfirmDiscard(false)
+    const result = await api.worktreeDiscard(conversation.id).catch((failure: unknown) => ({ ok: false as const, reason: failure instanceof Error ? failure.message : String(failure) }))
+    if (!result.ok) { setWorktreeNote(result.reason); return }
+    setWorktreeNote(undefined)
+    await loadConversations()
+    await openConversation(conversation.id)
+  }
   const placeKeys = useMenuKeys(placeMenu, () => setPlaceMenu(false))
   const exportKeys = useMenuKeys(exportMenu, () => setExportMenu(false))
 
@@ -75,14 +100,43 @@ export function ConversationHeader(): JSX.Element {
           <>
             <div className="backdrop" onClick={() => setPlaceMenu(false)} />
             <div ref={placeKeys.menuRef} className="menu" style={{ top: 'calc(100% + 6px)', left: 0, minWidth: 260 }} role="menu" tabIndex={-1} onKeyDown={placeKeys.onKeyDown}>
-              <div className="menu__label">Project folder</div>
+              <div className="menu__label">{worktree ? `Worktree from ${worktree.baseBranch}` : 'Project folder'}</div>
               <div className="menu__path">{workspace}</div>
-              <button className="menu__item" role="menuitem" onClick={() => { void pickWorkspace(); setPlaceMenu(false) }}>
-                <FolderPlus size={15} /><span className="menu__t">Change folder…</span>
-              </button>
-              <button className="menu__item" role="menuitem" onClick={() => { void clearWorkspace(); setPlaceMenu(false) }}>
-                <X size={15} /><span className="menu__t">Close project</span>
-              </button>
+              {worktree ? (
+                <>
+                  <button className="menu__item" role="menuitem" onClick={() => void applyToProject()}>
+                    <Undo2 size={15} /><span className="menu__t">Bring changes to the project folder</span>
+                  </button>
+                  {worktree.raceId && (
+                    <button className="menu__item" role="menuitem" onClick={() => { setPlaceMenu(false); showRace(worktree.raceId!) }}>
+                      <Columns3 size={15} /><span className="menu__t">Compare runs</span>
+                    </button>
+                  )}
+                  <button className="menu__item" role="menuitem" onClick={() => { if (confirmDiscard) void discardWorktree(); else setConfirmDiscard(true) }}>
+                    <Trash2 size={15} /><span className="menu__t">{confirmDiscard ? 'Delete the worktree and its branch' : 'Discard this worktree'}</span>
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button className="menu__item" role="menuitem" onClick={() => { void pickWorkspace(); setPlaceMenu(false) }}>
+                    <FolderPlus size={15} /><span className="menu__t">Change folder…</span>
+                  </button>
+                  <button className="menu__item" role="menuitem" onClick={() => { void clearWorkspace(); setPlaceMenu(false) }}>
+                    <X size={15} /><span className="menu__t">Close project</span>
+                  </button>
+                </>
+              )}
+              {git?.isRepo && (
+                <>
+                  <div className="menu__sep" />
+                  <button className="menu__item" role="menuitem" onClick={() => { setPlaceMenu(false); openWorktreeDialog('worktree') }}>
+                    <GitFork size={15} /><span className="menu__t">New task in a worktree…</span>
+                  </button>
+                  <button className="menu__item" role="menuitem" onClick={() => { setPlaceMenu(false); openWorktreeDialog('race') }}>
+                    <Users size={15} /><span className="menu__t">Try on several models…</span>
+                  </button>
+                </>
+              )}
             </div>
           </>
         )}
@@ -92,6 +146,12 @@ export function ConversationHeader(): JSX.Element {
 
       <span className="grow" />
       {copied && <span className="conv-h__note" role="status"><Check size={13} />{copied}</span>}
+      {worktreeNote && (
+        <span className="conv-h__note" role="status" title={worktreeNote} style={{ maxWidth: 360, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {worktreeNote}
+          <button className="ib" onClick={() => setWorktreeNote(undefined)} aria-label="Dismiss" title="Dismiss"><X size={12} /></button>
+        </span>
+      )}
 
       <div className="pos-rel">
         <button ref={exportKeys.triggerRef} className={`ib ${exportMenu ? 'on' : ''}`} onClick={() => setExportMenu((v) => !v)} disabled={!conversation} aria-label="Export session" aria-haspopup="menu" aria-expanded={exportMenu} title="Export">

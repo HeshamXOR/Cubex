@@ -31,6 +31,26 @@ const api: CubexAPI = {
   testProvider: (id) => invoke(IPC.testProvider, id),
   listModels: (providerId) => invoke(IPC.listModels, providerId),
 
+  // Worktrees and races
+  worktreePlan: (workspace) => invoke(IPC.worktreePlan, workspace),
+  worktreeAttach: (conversationId, request) => invoke(IPC.worktreeAttach, conversationId, request),
+  worktreeSetup: (conversationId, commands) => invoke(IPC.worktreeSetup, conversationId, commands),
+  worktreeRun: (conversationId, commands) => invoke(IPC.worktreeRun, conversationId, commands),
+  worktreeDiff: (conversationId) => invoke(IPC.worktreeDiff, conversationId),
+  worktreeApply: (conversationId) => invoke(IPC.worktreeApply, conversationId),
+  worktreeDiscard: (conversationId) => invoke(IPC.worktreeDiscard, conversationId),
+  raceRuns: (raceId) => invoke(IPC.raceRuns, raceId),
+  worktreeChecks: (conversationId) => invoke(IPC.worktreeChecks, conversationId),
+
+  // The browser pane
+  browserState: (conversationId) => invoke(IPC.browserState, conversationId),
+  browserAttach: (conversationId, bounds) => invoke(IPC.browserAttach, conversationId, bounds),
+  browserDetach: () => invoke(IPC.browserDetach),
+  browserOpen: (conversationId, url) => invoke(IPC.browserOpen, conversationId, url),
+  browserBack: (conversationId) => invoke(IPC.browserBack, conversationId),
+  browserReload: (conversationId) => invoke(IPC.browserReload, conversationId),
+  onBrowserState: (cb) => subscribe(IPC.browserStateChanged, cb),
+
   // Chat
   startChat: (req) => invoke(IPC.startChat, req),
   cancelChat: (streamId) => invoke(IPC.cancelChat, streamId),

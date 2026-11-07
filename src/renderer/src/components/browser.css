@@ -1,0 +1,23 @@
+.browser-wrap { display: flex; min-width: 0; min-height: 0; }
+.browser-wrap > .panel { flex: 1; min-width: 0; }
+
+.browser { flex: 1; min-width: 0; min-height: 0; height: 100%; display: flex; flex-direction: column; }
+.browser__bar { flex: none; display: flex; align-items: center; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--color-border); }
+.browser__btn { flex: none; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 6px; color: var(--color-foreground-subtle); }
+.browser__btn:hover:not(:disabled) { background: var(--color-hover); color: var(--color-foreground); }
+.browser__btn:disabled { opacity: .4; }
+.browser__address { flex: 1; min-width: 0; display: flex; }
+.browser__address .input { flex: 1; min-width: 0; height: 26px; font-size: 12px; }
+.browser__error { flex: none; margin: 0; padding: 6px 12px; font-size: 12.5px; color: var(--color-foreground-subtle); border-bottom: 1px solid var(--color-border); }
+.browser__slot { flex: 1; min-height: 0; position: relative; display: flex; }
+.browser__empty { margin: auto; max-width: 320px; padding: 24px; display: grid; justify-items: center; gap: 8px; text-align: center; color: var(--color-foreground-subtle); font-size: 13px; line-height: 1.5; }
+.browser__empty p { margin: 0; }
+.browser__note { font-size: 12px; color: var(--color-foreground-subtlest); }
+.browser__spin { animation: browser-spin 900ms linear infinite; }
+@keyframes browser-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .browser__spin { animation: none; } }
+
+.tb-browser { flex: none; width: 28px; height: 28px; display: grid; place-items: center; position: relative; border-radius: 6px; color: var(--color-foreground-subtle); -webkit-app-region: no-drag; }
+.tb-browser:hover { background: var(--color-hover); color: var(--color-foreground); }
+.tb-browser[aria-pressed="true"] { color: var(--color-foreground); background: var(--color-hover); }
+.tb-browser__dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--color-foreground-subtle); }

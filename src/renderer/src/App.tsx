@@ -11,6 +11,10 @@ import { Sidebar } from './components/Sidebar'
 import { TitleBar } from './components/TitleBar'
 import { ReviewPanel } from './components/ReviewPanel'
 import { RunRail } from './components/RunRail'
+import { BrowserPane } from './components/BrowserPane'
+import { RaceView } from './components/RaceView'
+import { WorktreeDialog } from './components/WorktreeDialog'
+import { useBrowserPaneOpen } from './lib/browserPane'
 import { StatusStrip } from './components/StatusStrip'
 import { RAIL_WIDTH, useRailAvailable, useRailCollapsed } from './lib/runRail'
 import { ChangesProvider } from './lib/useSessionChanges'
@@ -216,8 +220,10 @@ export function App(): JSX.Element {
   const hasMessages = useStore((s) => s.liveMessages.length > 0)
   const railAvailable = useRailAvailable(view === 'chat', panelOpen)
   const railCollapsed = useRailCollapsed()
-  const railVisible = railAvailable && !railCollapsed && hasMessages
-  const columns = [sideOpen ? `${SIDE_WIDTH}px` : '', 'minmax(0, 1fr)', reviewVisible && docked ? `${clamped}px` : '', railVisible ? `${RAIL_WIDTH}px` : ''].filter(Boolean).join(' ')
+  const browserVisible = useBrowserPaneOpen() && view === 'chat'
+  // The browser needs the room, and the rail says little more than the conversation beside it.
+  const railVisible = railAvailable && !railCollapsed && hasMessages && !browserVisible
+  const columns = [sideOpen ? `${SIDE_WIDTH}px` : '', 'minmax(0, 1fr)', browserVisible ? 'minmax(360px, 1fr)' : '', reviewVisible && docked ? `${clamped}px` : '', railVisible ? `${RAIL_WIDTH}px` : ''].filter(Boolean).join(' ')
   const bodyStyle = { gridTemplateColumns: columns, '--side-w': `${SIDE_WIDTH}px` } as CSSProperties
 
   return (
@@ -233,7 +239,13 @@ export function App(): JSX.Element {
           {view === 'hardware' && <HardwareView />}
           {view === 'presets' && <PresetsView />}
           {view === 'settings' && <SettingsView />}
+          {view === 'race' && <RaceView />}
         </main>
+        {browserVisible && (
+          <aside className="browser-wrap" aria-label="Browser">
+            <div className="panel"><BrowserPane /></div>
+          </aside>
+        )}
         {railVisible && (
           <aside className="rail-wrap" aria-label="Run">
             <div className="panel"><RunRail /></div>
@@ -261,6 +273,7 @@ export function App(): JSX.Element {
       <StatusStrip />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <ShortcutSheet />
+      <WorktreeDialog />
       <UpdateDialog />
       <UpdateAnnouncer />
     </div>

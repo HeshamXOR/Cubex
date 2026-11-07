@@ -20,6 +20,20 @@ function HarnessProfile(): JSX.Element | null {
   )
 }
 
+function BrowserTool(): JSX.Element | null {
+  const editor = useSettingsEditor()
+  if (!editor) return null
+  const { settings, patch } = editor
+  return (
+    <ToggleRow
+      label="Browser"
+      hint="The agent can open pages on this computer to check its work. Another site asks you first. Small models are only offered it when your message is about a web page."
+      on={settings.ai.browserTool !== false}
+      onChange={(on) => patch('ai', { browserTool: on })}
+    />
+  )
+}
+
 /** Which model reads the diff. Only shown while the reviewer is on. */
 function ReviewerModel({ reviewer, onChange }: { reviewer: ReviewerSettings; onChange: (next: ReviewerSettings) => void }): JSX.Element {
   const settings = useStore((state) => state.settings)
@@ -65,6 +79,19 @@ function HarnessControls(): JSX.Element | null {
   return (
     <>
       <HarnessProfile />
+      <BrowserTool />
+      <ToggleRow
+        label="Project memory"
+        hint="Reads short rules from .cubex/memory.md in the project. The agent can propose new ones, and you approve each one."
+        on={editor.settings.ai.projectMemory !== false}
+        onChange={(on) => editor.patch('ai', { projectMemory: on })}
+      />
+      <ToggleRow
+        label="Project map"
+        hint="Starts each task with a list of the project's main files and symbols. It costs tokens on every request."
+        on={editor.settings.ai.projectMap !== false}
+        onChange={(on) => editor.patch('ai', { projectMap: on })}
+      />
       <ToggleRow
         label="Review changes before finishing"
         hint="A second model reads the diff and can send fixes back once per turn. Its requests are billed."

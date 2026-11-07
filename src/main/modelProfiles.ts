@@ -89,7 +89,7 @@ export function profileFor(input: ProfileInput): HarnessProfile {
 /** Tools a lean profile does not offer: rarely needed, easy to pick by mistake, or reachable another way (git through run_command). */
 const LEAN_DROPPED = [
   'multi_edit', 'apply_patch', 'git_commit', 'git_branch', 'git_log', 'git_show', 'git_blame',
-  'delegate_to_subagent', 'consult_agent', 'delegate_task', 'task_input'
+  'delegate_to_subagent', 'consult_agent', 'delegate_task', 'task_input', 'remember'
 ]
 
 export interface ToolFilterContext {
@@ -97,6 +97,8 @@ export interface ToolFilterContext {
   planMode?: boolean
   /** The user's message names a skill, or the composer applied one. */
   skillNamed?: boolean
+  /** The user's message is about a web page. */
+  browserNamed?: boolean
 }
 
 /**
@@ -117,6 +119,7 @@ export function toolsToDrop(names: Iterable<string>, profile: HarnessProfile, co
     if (profile.editTool === 'apply_patch') drop.delete('apply_patch')
     if (!context.planMode) drop.add('read_plan')
     if (!context.skillNamed) drop.add('skill')
+    if (!context.browserNamed) drop.add('browser')
   }
   return new Set([...drop].filter((name) => present.has(name)))
 }
@@ -135,6 +138,11 @@ export function namesSkill(text: string, skillNames: readonly string[]): boolean
     if (mentionsSkill && new RegExp(`(?:^|[^\\w$/-])${escaped}(?![\\w-])`).test(lower)) return true
   }
   return false
+}
+
+/** Whether a message is about something seen in a browser, so that a lean model is offered one too. */
+export function namesBrowser(text: string): boolean {
+  return /\b(?:browser|localhost|web ?page|web ?app|website|screenshot|front-?end|ui|css|html|react|vue|svelte|dev server)\b/i.test(text)
 }
 
 /** The Settings value as a known choice; anything else reads as `auto`. */

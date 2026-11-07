@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { join, resolve } from 'node:path'
 import { nanoid } from 'nanoid'
 import { AIGateway, createSubagentTool } from '@core/gateway'
+import { knownToSeeImages } from '@core/providers/vision'
 import { DEFAULT_RETRY_POLICY, isOutputEvent } from '@core/types'
 import type {
   AIMessage,
@@ -35,6 +36,10 @@ import { createShellTool, isReadOnlyShellCommand } from './tools/shellTool'
 import { createAskUserTool } from './tools/askUserTool'
 import { createPlanTool, createReadPlanTool } from './tools/planTool'
 import { createWebFetchTool, fetchHost, PREAPPROVED_FETCH_HOSTS } from './tools/webFetchTool'
+import { isRunnableFile, runnableFileName } from './tools/runnableFiles'
+import { createRememberTool, loadProjectMemory, REMEMBER_TOOL } from './projectMemory'
+import { BROWSER_TOOL, createBrowserTool, screenshotOf, type BrowserDriver } from './browser/browserTool'
+import { browserApprovalHost, browserCallActs } from './browser/urls'
 import { createWebSearchTool } from './tools/webSearchTool'
 import { loadSkills, skillsCatalog, createSkillTool } from './skills'
 import { invokeSkill } from './skillInvocation'
@@ -66,7 +71,7 @@ import { logger } from './logger'
 import { dataDir } from './paths'
 import { PlanStore, PlanReviews, planResolutionResult, validatePlanInput } from './plans'
 import { buildHarnessSystemPrompt } from './systemPrompt'
-import { namesSkill, profileFor, readProfileSetting, toolsToDrop, type HarnessTier } from './modelProfiles'
+import { namesBrowser, namesSkill, profileFor, readProfileSetting, toolsToDrop, type HarnessTier } from './modelProfiles'
 import { repairToolCall } from './toolCallRepair'
 import { repoMaps } from './repoMap'
 import { reviewTurn, reviewerTarget } from './turnReviewer'
@@ -111,7 +116,7 @@ const STOP_HOOK_CAP_NOTICE = `\n\n_A Stop hook asked for more work ${STOP_HOOK_M
 const MAX_STREAM_RESUMES = 3
 const STREAM_RESUME_NOTE = 'Your last reply was cut off by a connection problem after the text above, and any tool call you were writing was not run. Continue from exactly where it stopped, without repeating what is already there.'
 /** Checking on something that is still running is not a repeat: the same call gets a new answer. */
-const POLLING_TOOLS: ReadonlySet<string> = new Set(['task_output', 'task_list'])
+const POLLING_TOOLS: ReadonlySet<string> = new Set(['task_output', 'task_list', BROWSER_TOOL])
 /** The window assumed for a model nothing is known about, when deciding how full the context is. */
 const ASSUMED_WINDOW_TOKENS = 200_000
 /** How long the first request of a task waits for the project map before it goes without one. */
@@ -123,6 +128,24 @@ const NO_RUN_REQUEST = /\b(?:don['\u2019]?t|do not)\s+run\b/i
 const ITERATION_LIMIT_NOTICE = `\n\n_Cubex paused this turn at the ${MAX_TOOL_ITERATIONS}-request tool-iteration limit. Reply "continue" to keep going._`
 /** Writes here can change how git, Cubex or other agents execute: never auto-approved. */
 const PROTECTED_PATH = /(?:^|[\\/])(?:\.git|\.cubex|\.claude|\.agents|\.codex|\.vscode|\.husky)(?:[\\/]|$)/i
+/** The host a call reaches that the person has to approve: a fetch, or the browser going somewhere off this machine. */
+function hostToApprove(call: Pick<ToolCall, 'name' | 'input'>): string | undefined {
+  if (call.name === 'web_fetch') return fetchHost(call.input)
+  return call.name === BROWSER_TOOL ? browserApprovalHost(call.input) : undefined
+}
+
+/** Opens the message that carries a screenshot, which tells it from an image the person attached. */
+const SCREENSHOT_INTRO = 'The screenshot you asked for:'
+const SCREENSHOT_REFUSED = 'The provider refused the screenshot, so images cannot be used with this model here. Use the browser\'s "read" action to see the page as text.'
+function carriesScreenshot(message: AIMessage): boolean {
+  const first = Array.isArray(message.content) ? message.content[0] : undefined
+  return first?.type === 'text' && first.text === SCREENSHOT_INTRO
+}
+
+/** Stands in for a screenshot the model has moved on from: only the latest one stays in the request. */
+const OLD_SCREENSHOT = '(An earlier screenshot of the page was here.)'
+/** Why a change to a runnable file (see runnableFiles.ts) stops for the person. */
+const RUNNABLE_FILE_RISK = 'can run code: a later build, test, install or CI run executes what it says.'
 /** Tool calls recovered from model text (not native tool_use) carry this id prefix. */
 const XML_CALL_PREFIX = 'xmlcall_'
 /** The tool that hands a subtask to a subagent (see createSubagentTool). */
@@ -280,6 +303,7 @@ interface ProjectContext {
   settled: boolean
   map?: string
   commands?: string
+  memory?: string
 }
 
 /** What a turn knows about the project's checks and its own edits, for the loop's end-of-turn work. */
@@ -313,6 +337,10 @@ export class ChatService {
   private readonly pendingQuestions = new Map<string, (answers: string[]) => void>()
   /** Set by `dispose`; the quit path runs it more than once. */
   private disposed = false
+  /** Drives the agent's browser, in the app. There is none in a plain test run, and the tool is not offered then. */
+  private browser: BrowserDriver | undefined
+  /** Names of runnable files changed in each task since a person last approved a command a saved rule covers. */
+  private readonly runnableChanges = new Map<string, Set<string>>()
   /** Hosts the user approved for web_fetch, per stream (turn). */
   private readonly approvedFetchHosts = new Map<string, Set<string>>()
   /** Other agents the user approved the model talking to, per stream (turn): the first message asks, the rest of the talk does not. */
@@ -549,6 +577,7 @@ export class ChatService {
           // Review tracking never throws, so it goes first: the edit stays reviewable even if the checkpoint fails.
           this.sessionChanges.record(req.conversationId, p, before, existed, after)
           this.checkpoints.record(req.conversationId, turnSeq, p, before, existed, after)
+          this.noteRunnableChange(req.conversationId, p)
         }, afterEditDiagnoseHook(workspace, () => getSettings().diagnostics?.afterEdit === 'errors')))
           tools.set(t.definition.name, t)
         // A shell tool turns Cubex into a real coding agent (build/test/git). It
@@ -591,12 +620,38 @@ export class ChatService {
               turnDiff.note(path, before, existed)
               this.sessionChanges.record(req.conversationId, path, before, existed)
               this.checkpoints.record(req.conversationId, turnSeq, path, before, existed)
+              this.noteRunnableChange(req.conversationId, path)
             },
-            isProtected: (path) => PROTECTED_PATH.test(path.replace(/^\.[\\/]/, '')),
+            isProtected: (path) => PROTECTED_PATH.test(path.replace(/^\.[\\/]/, '')) || isRunnableFile(path),
             isReadOnlyCommand: (command) => isReadOnlyShellCommand(command, workspace)
           })
           tools.set(delegate.definition.name, delegate)
         }
+      }
+      // Notes for later tasks belong to the project, which for a worktree is the folder it came from: they outlive the worktree.
+      const worktreeRoot = conversationRepo.get(req.conversationId)?.worktree?.repoRoot
+      const memoryRoot = worktreeRoot ?? workspace
+      if (req.fileToolsEnabled && memoryRoot && getSettings().ai?.projectMemory !== false) {
+        const remember = createRememberTool({
+          root: memoryRoot,
+          // A note saved from a worktree lands outside it, where the task's review cannot follow it.
+          ...(worktreeRoot ? {} : { onWrite: (path, before, existed, after) => {
+            const earlier = before ?? Buffer.alloc(0)
+            turnDiff.note(path, earlier, existed)
+            this.sessionChanges.record(req.conversationId, path, earlier, existed, after)
+          } })
+        })
+        tools.set(remember.definition.name, remember)
+      }
+      // A browser for checking work on web pages. Only where something drives one: the app, and not a plain test run.
+      if (req.fileToolsEnabled && this.browser && getSettings().ai?.browserTool !== false) {
+        const seen = this.providers.getModelInfo(policy.primary.providerId, policy.primary.model)
+        const browser = createBrowserTool({
+          conversationId: req.conversationId,
+          driver: this.browser,
+          canSeeImages: seen?.modalities?.input?.includes('image') === true || knownToSeeImages(policy.primary.model)
+        })
+        tools.set(browser.definition.name, browser)
       }
       // Web fetch is available in any agentic posture (no workspace needed) so the
       // model can consult live docs. Read-only + SSRF-guarded → no prompt.
@@ -649,14 +704,15 @@ export class ChatService {
       })
       for (const name of toolsToDrop(tools.keys(), profile, {
         planMode: (req.permissionMode ?? 'default') === 'plan',
-        skillNamed: req.skill !== undefined || namesSkill(req.userText, skills.map((skill) => skill.name))
+        skillNamed: req.skill !== undefined || namesSkill(req.userText, skills.map((skill) => skill.name)),
+        browserNamed: namesBrowser(req.userText)
       })) tools.delete(name)
 
       // The project's map and check commands go in the prompt only for a task that may read its files. Both are settled on the
       // task's first turn (see ProjectContext), so a slow map costs that turn at most a moment and the prompt then stays put.
       const detectedChecks = workspace && tools.has('run_command') ? detectCheckCommands(workspace) : []
       const project = req.fileToolsEnabled && workspace
-        ? await this.projectContextFor(req.conversationId, workspace, profile.tier, detectedChecks, controller.signal) : undefined
+        ? await this.projectContextFor(req.conversationId, workspace, memoryRoot ?? workspace, profile.tier, detectedChecks, controller.signal) : undefined
 
       // Build a fresh permission section after plan approval; never leave stale
       // read-only instructions in the implementation request.
@@ -677,6 +733,7 @@ export class ChatService {
         userInstructions: req.systemPrompt,
         projectInstructions,
         ...(project?.map ? { projectMap: project.map } : {}),
+        ...(project?.memory ? { projectMemory: project.memory } : {}),
         ...(project?.commands ? { projectCommands: project.commands } : {}),
         skillsCatalog: skillInstructions,
         planContext,
@@ -726,21 +783,24 @@ export class ChatService {
    * background when it loses, so a big folder delays the first turn by a moment and has its map from the next one. Whatever is
    * settled is kept for the task until a summary or a new folder resets it.
    */
-  private async projectContextFor(conversationId: string, workspace: string, tier: HarnessTier, detected: CheckCommand[], signal: AbortSignal): Promise<ProjectContext> {
+  private async projectContextFor(conversationId: string, workspace: string, memoryRoot: string, tier: HarnessTier, detected: CheckCommand[], signal: AbortSignal): Promise<ProjectContext> {
     const held = this.projectContext.get(conversationId)
     if (held?.settled && held.workspace === workspace && held.tier === tier) return held
     const late = Symbol('late')
     let timer: ReturnType<typeof setTimeout> | undefined
-    const map = await Promise.race([
+    const settings = getSettings().ai
+    const map = settings?.projectMap === false ? undefined : await Promise.race([
       repoMaps.get(workspace, { maxChars: tier === 'lean' ? 3_000 : 6_000, signal }),
       new Promise<typeof late>((resolveLate) => { timer = setTimeout(() => resolveLate(late), PROJECT_MAP_WAIT_MS) })
     ])
     clearTimeout(timer)
     const commands = renderProjectCommands(this.projectCommands.list(workspace), detected)
+    const memory = settings?.projectMemory === false ? undefined : loadProjectMemory(memoryRoot)
     const context: ProjectContext = {
       workspace, tier, settled: map !== late,
       ...(typeof map === 'string' ? { map } : {}),
-      ...(commands ? { commands } : {})
+      ...(commands ? { commands } : {}),
+      ...(memory ? { memory } : {})
     }
     if (map === late) logger.info('The project map was not ready in time; this turn goes without it')
     this.projectContext.set(conversationId, context)
@@ -796,7 +856,7 @@ export class ChatService {
   }
 
   /** True while any stream of this task is generating. */
-  private hasRunningTurn(conversationId: string): boolean {
+  hasRunningTurn(conversationId: string): boolean {
     for (const [streamId, owner] of this.eventStreams) {
       if (owner.conversationId === conversationId && this.active.has(streamId)) return true
     }
@@ -1060,7 +1120,18 @@ export class ChatService {
     const RESEARCH_TOOLS = new Set(['web_search', 'web_fetch', 'search_files'])
     const RESEARCH_CAP = 6
     // Fold a finished call into the repeat/failure bookkeeping and build the tool_result the model receives.
-    const recordToolResult = (call: ToolCall, sig: string, result: { content: unknown; isError?: boolean }): MessageContentPart => {
+    let screenshot: { mediaType: string; data: string } | undefined
+    let imagesRefused = false
+    const recordToolResult = (call: ToolCall, sig: string, result: { content: unknown; isError?: boolean; metadata?: unknown }): MessageContentPart => {
+      if (call.name === BROWSER_TOOL) {
+        screenshot = screenshotOf(result.metadata) ?? screenshot
+        // Looking at the page after an edit is a check, and for a page often the only one there is.
+        if (!result.isError && fileEdits > 0 && unchecked.size > 0) {
+          checkTried = true
+          unchecked.clear()
+          lastCheck = { command: 'Looked at the result in the browser', passed: true, output: typeof result.content === 'string' ? result.content.slice(0, 2_000) : '' }
+        }
+      }
       const rawText = typeof result.content === 'string' ? result.content : JSON.stringify(result.content)
       const stallNote = stalls.record(call.name, call.input, rawText, !!result.isError, fileEdits)
       const notes = [repeatNotes.get(call.id), stallNote].filter(Boolean).join('\n\n')
@@ -1239,6 +1310,7 @@ export class ChatService {
 
         /** The provider said the request does not fit: held back until the loop has tried to shrink it. */
         let overflow: Extract<AIStreamEvent, { type: 'error' }> | undefined
+        let imageRefused = false
         /** The connection dropped part way through the reply: held back so the loop can pick it up from there. */
         let dropped = false
         let producedOutput = false
@@ -1251,6 +1323,11 @@ export class ChatService {
           // Once per request, and only before any of the reply reached the thread.
           if (event.type === 'error' && !retrying && !streamedText && !controller.signal.aborted && isContextOverflow(event.error)) {
             overflow = event
+            continue
+          }
+          // A guess about what the model can see was wrong. That should cost a screenshot, not the turn.
+          if (event.type === 'error' && !streamedText && !controller.signal.aborted && event.error.category === 'INVALID_REQUEST' && messages.some(carriesScreenshot)) {
+            imageRefused = true
             continue
           }
           if (isOutputEvent(event)) producedOutput = true
@@ -1338,6 +1415,13 @@ export class ChatService {
               : event.type === 'completed' && cutNotice ? { ...event, response: { ...event.response, text: `${event.response.text}${cutNotice}` } }
                 : event
           })
+        }
+
+        if (imageRefused) {
+          imagesRefused = true
+          for (const message of messages) if (carriesScreenshot(message)) message.content = [{ type: 'text', text: SCREENSHOT_REFUSED }]
+          iter--
+          continue
         }
 
         if (dropped) {
@@ -1597,6 +1681,15 @@ export class ChatService {
         }
         await settleOverlapped()
         addToTurn({ role: 'tool', content: resultParts })
+        if (screenshot) {
+          // Few providers take an image inside a tool result, so it follows as a message. An image is costly to send again.
+          const shot = screenshot
+          screenshot = undefined
+          for (const message of messages) if (carriesScreenshot(message)) message.content = [{ type: 'text', text: OLD_SCREENSHOT }]
+          addToTurn(imagesRefused
+            ? userMessage(SCREENSHOT_REFUSED)
+            : { role: 'user', content: [{ type: 'text', text: SCREENSHOT_INTRO }, { type: 'image', source: { kind: 'base64', mediaType: shot.mediaType, data: shot.data } }] })
+        }
         if (repeatStop) {
           stoppedNotice = `\n\n${repeatStop}`
           break
@@ -1686,9 +1779,22 @@ export class ChatService {
     return { id: `${XML_CALL_PREFIX}${nanoid()}`, name: mapped.name, input: mapped.input as ToolCall['input'] }
   }
 
+  /** Give the agent a browser to use from the next turn. */
+  setBrowser(driver: BrowserDriver | undefined): void {
+    this.browser = driver
+  }
+
+  /** Remember that a file deciding what commands run has changed in this task (see the ask gate). */
+  private noteRunnableChange(conversationId: string, path: string): void {
+    if (!isRunnableFile(path)) return
+    const changed = this.runnableChanges.get(conversationId) ?? new Set<string>()
+    changed.add(runnableFileName(path))
+    this.runnableChanges.set(conversationId, changed)
+  }
+
   /** A web_fetch to a host that is neither pre-approved nor already approved earlier in this turn stops for the user. */
   private fetchNeedsApproval(streamId: string, call: ToolCall): boolean {
-    const host = call.name === 'web_fetch' ? fetchHost(call.input) : undefined
+    const host = hostToApprove(call)
     return !!host && !PREAPPROVED_FETCH_HOSTS.includes(host) && !this.approvedFetchHosts.get(streamId)?.has(host)
   }
 
@@ -1829,7 +1935,7 @@ export class ChatService {
     conversationId?: string,
     /** The PreToolUse hooks already ran and replaced the input: the call goes through the gate again, without them. */
     hooksRan = false
-  ): Promise<{ content: unknown; isError?: boolean }> {
+  ): Promise<{ content: unknown; isError?: boolean; metadata?: unknown }> {
     const tool = tools.get(call.name)
     const title = describeToolCall(call)
     this.emit({ streamId, kind: 'tool', tool: { id: call.id, name: call.name, phase: 'running', title } })
@@ -1848,13 +1954,15 @@ export class ChatService {
     const readOnlyExec = call.name === 'run_command' && isReadOnlyShellCommand(command, workspace)
     // apply_patch names its files inside the patch text: every one of them is checked, not just a `path` argument.
     const protectedTarget = isFileMutation && fileMutationPaths(call.name, call.input).some((target) => PROTECTED_PATH.test(target.replace(/^\.[\\/]/, '')))
+    const runnableTargets = isFileMutation ? fileMutationPaths(call.name, call.input).filter(isRunnableFile) : []
     const fromText = call.id.startsWith(XML_CALL_PREFIX)
-    const host = call.name === 'web_fetch' ? fetchHost(call.input) : undefined
+    const host = hostToApprove(call)
     const fetchNeedsApproval = this.fetchNeedsApproval(streamId, call)
     const consultNeedsApproval = this.consultNeedsApproval(streamId, tools, call)
     // A task that only reads (research, review) changes nothing, so plan mode lets it through, after the person has been asked.
     const readOnlyDelegation = call.name === DELEGATE_TOOL && roleIsReadOnly(delegateRoleOf(call.input))
-    const mutating = tool.defaultPermission === 'ask' && !readOnlyExec && !readOnlyDelegation
+    const browserActs = call.name === BROWSER_TOOL && browserCallActs(call.input)
+    const mutating = (tool.defaultPermission === 'ask' && !readOnlyExec && !readOnlyDelegation) || browserActs
 
     // Plan mode: reads/searches/read-only probes are fine, but nothing may mutate.
     if (mode === 'plan' && mutating) {
@@ -1863,6 +1971,12 @@ export class ChatService {
         content: `Plan mode is active — "${call.name}" is disabled. Do not modify anything; present a numbered plan for the user to approve instead.`,
         isError: true
       }
+    }
+
+    // Nobody is there to read a note in bypass mode, and a note steers every later task, so one is never saved unread.
+    if (call.name === REMEMBER_TOOL && mode === 'bypass') {
+      this.emit({ streamId, kind: 'tool', tool: { id: call.id, name: call.name, phase: 'error', title, detail: 'Needs approval, which this mode skips' } })
+      return { content: 'Notes are only saved when the person approves them, and nothing asks in this permission mode. Tell the person what you would have saved instead.', isError: true }
     }
 
     // Hard policy deny stands in every mode (even bypass).
@@ -1876,29 +1990,39 @@ export class ChatService {
     // from free text are never auto-approved: quoted examples are not intent.
     const askable = (tool.defaultPermission === 'ask' && !readOnlyExec) || fetchNeedsApproval || consultNeedsApproval
     if (askable) {
-      const auto = !fromText && !(protectedTarget && mode !== 'bypass') &&
+      const auto = !fromText && !((protectedTarget || runnableTargets.length > 0) && mode !== 'bypass') &&
         (mode === 'bypass' || (isEdit && mode === 'acceptEdits'))
       if (!auto) {
         // Every applicable reason is shown; one must not mask another.
         const hostRisk = host && fetchNeedsApproval ? `Network request to ${host}. Data in the URL leaves this machine.` : undefined
         const risks = [
           protectedTarget && 'Protected path: changes here can alter how git, Cubex or other tools execute.',
+          runnableTargets.length > 0 && `${runnableTargets.map(runnableFileName).join(', ')} ${RUNNABLE_FILE_RISK}`,
           fromText && 'This call was parsed from model text, not a native tool call.',
           hostRisk,
+          call.name === REMEMBER_TOOL && 'Every later task in this project will read this note and follow it.',
           consultNeedsApproval && consultRisk(call.input, getSettings().peers?.list ?? [], workspace),
           call.name === DELEGATE_TOOL && delegateRisk(call.input, getSettings().peers?.list ?? [], workspace)
         ].filter((risk): risk is string => typeof risk === 'string')
         // A saved "Always allow" rule approves silently, but never a call that carries risks. The
         // outbound-host notice is the thing a host rule approves, so it alone does not block one.
         const ruleRisks = risks.filter((risk) => risk !== hostRisk)
-        const ruled = ruleRisks.length === 0 && !!workspace && !!this.permissionRules.find(workspace, call)
+        // A worktree works under the rules of the project it came from.
+        const ruleScope = conversationId ? conversationRepo.get(conversationId)?.worktree?.repoRoot : undefined
+        const saved = ruleRisks.length === 0 && !!workspace && !!this.permissionRules.find(workspace, call, ruleScope)
+        // A rule was saved for what a command did then. Once a file that decides what it runs has changed, the person looks again.
+        const changedFiles = call.name === 'run_command' && conversationId ? this.runnableChanges.get(conversationId) : undefined
+        const ruled = saved && !changedFiles?.size
+        if (saved && !ruled) risks.push(`A saved rule covers this command, but ${[...changedFiles!].join(', ')} changed in this task, so it may do something else now.`)
         if (!ruled) {
-          const rule = suggestRule(call, { workspace, mode, risks: ruleRisks })
-          const decision = await this.requestPermission(streamId, call, title, controller, { risks, rule, workspace })
+          const rule = suggestRule(call, { workspace, mode, risks: ruleRisks, ...(ruleScope ? { scope: ruleScope } : {}) })
+          const decision = await this.requestPermission(streamId, call, title, controller, { risks, rule, workspace: ruleScope ?? workspace })
           if (decision.decision !== 'allow') {
             this.emit({ streamId, kind: 'tool', tool: { id: call.id, name: call.name, phase: 'error', title, detail: 'Denied by user' } })
             return { content: `Permission denied for "${call.name}".`, isError: true }
           }
+          // The person has seen a command run since the change, so saved rules apply again.
+          if (saved && conversationId) this.runnableChanges.delete(conversationId)
         }
         if (host && !ruled) {
           const approved = this.approvedFetchHosts.get(streamId) ?? new Set<string>()
@@ -1984,7 +2108,12 @@ export class ChatService {
       if (call.name === SUBAGENT_TOOL) {
         this.fireHooks({ event: 'SubagentStop', tool_name: call.name, tool_input: call.input, tool_result: text.slice(0, 2000), cwd: hookCwd }, hookCwd)
       }
-      return { content: text.replace(/«diff[^»]*»/g, '').trim(), ...(result.isError ? { isError: true } : {}) }
+      return {
+        content: text.replace(/«diff[^»]*»/g, '').trim(),
+        ...(result.isError ? { isError: true } : {}),
+        // An image for the chat loop to show the model; everything else in the metadata is for this window.
+        ...(call.name === BROWSER_TOOL && result.metadata ? { metadata: result.metadata } : {})
+      }
     } catch (e) {
       const detail = (e as Error).message
       this.emit({ streamId, kind: 'tool', tool: { id: call.id, name: call.name, phase: 'error', title, detail } })
@@ -2380,6 +2509,8 @@ export class ChatService {
 
   /** Cascade for conversation delete: stop its streams and drop its plans, outputs and checkpoints. */
   forgetConversation(conversationId: string): void {
+    this.browser?.close(conversationId)
+    this.runnableChanges.delete(conversationId)
     for (const [streamId, owner] of this.eventStreams) {
       if (owner.conversationId === conversationId) this.cancel(streamId)
     }
@@ -2443,6 +2574,17 @@ function describeToolCall(call: ToolCall): string {
     case 'run_command': {
       const cmd = typeof input.command === 'string' ? input.command : ''
       return `Run ${cmd.length > 60 ? cmd.slice(0, 60) + '…' : cmd}`.trim()
+    }
+    case REMEMBER_TOOL:
+      return 'Save a note for later tasks'
+    case BROWSER_TOOL: {
+      const action = typeof input.action === 'string' ? input.action : ''
+      if (action === 'navigate') return `Open ${typeof input.url === 'string' ? input.url.slice(0, 80) : 'a page'}`
+      if (action === 'click') return 'Click in the page'
+      if (action === 'type') return 'Type in the page'
+      if (action === 'console') return 'Read the page console'
+      if (action === 'screenshot') return 'Look at the page'
+      return 'Read the page'
     }
     case 'web_fetch': {
       const url = typeof input.url === 'string' ? input.url : ''

@@ -1,0 +1,6 @@
+{
+  "title": "Follow a house rule that only the project memory holds",
+  "prompt": "`lateFee` in src/fees.mjs charges a fee on the day an invoice is due, and it should only charge once the invoice is overdue. Fix it.",
+  "timeoutSec": 240,
+  "stub": { "command": "node --test" }
+}

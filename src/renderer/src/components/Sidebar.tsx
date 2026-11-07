@@ -45,7 +45,8 @@ interface FolderGroup {
 function groupByFolder(items: ConversationSummary[], active?: string): FolderGroup[] {
   const map = new Map<string, ConversationSummary[]>()
   for (const conversation of items) {
-    const key = conversation.workspacePath ?? ''
+    // A worktree's task belongs with the project it came from.
+    const key = conversation.worktree?.repoRoot ?? conversation.workspacePath ?? ''
     const bucket = map.get(key)
     if (bucket) bucket.push(conversation)
     else map.set(key, [conversation])
@@ -114,7 +115,8 @@ export function Sidebar(): JSX.Element {
   const archived = conversations.filter((c) => c.archived)
   const recents = (recentWorkspaces ?? []).filter((path) => path !== workspace)
   const connected = providers.filter((provider) => selectableProvider(provider, settings)).length
-  const activeGroup = conversations.find((c) => c.id === activeId)?.workspacePath ?? ''
+  const activeSummary = conversations.find((c) => c.id === activeId)
+  const activeGroup = activeSummary?.worktree?.repoRoot ?? activeSummary?.workspacePath ?? ''
 
   const isOpen = (group: FolderGroup): boolean => open[group.key] ?? (group.key === activeGroup || group.key === (workspace ?? '') || groups.length <= 3)
   const toggle = (group: FolderGroup): void => setOpen((current) => ({ ...current, [group.key]: !isOpen(group) }))

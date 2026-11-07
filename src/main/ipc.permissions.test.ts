@@ -31,6 +31,7 @@ vi.mock('./exporter', () => ({ exportConversation: vi.fn(), importConversation: 
 vi.mock('./skills', () => ({ loadSkills: () => [], readSkill: () => '' }))
 vi.mock('./ChatService', () => ({
   ChatService: class {
+    setBrowser(): void {}
     resolvePermission = mocks.resolvePermission
     listPermissionRules = mocks.listPermissionRules
     removePermissionRule = mocks.removePermissionRule

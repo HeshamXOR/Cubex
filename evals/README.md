@@ -89,6 +89,8 @@ Three more variables test particular conditions:
 | `CUBEX_EVAL_FAULTS` | network trouble on demand: `busy:5:4` makes every 5th request meet four 503s, and `cut:7` drops the connection part way through every 7th |
 | `CUBEX_EVAL_WINDOW` | the model's context window in tokens, to see what happens as a small one fills up |
 | `CUBEX_EVAL_PROFILE` | `full` or `lean`, to compare the two setups on one model |
+| `CUBEX_EVAL_PROJECT_MAP` | `off` leaves the project map out of the prompt |
+| `CUBEX_EVAL_MEMORY` | `off` leaves out a task's own `memory.md`, and `noise` gives every task notes that have nothing to do with it |
 
 ## Adding a task
 

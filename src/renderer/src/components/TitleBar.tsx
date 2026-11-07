@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
-import { PanelLeft, Search } from 'lucide-react'
+import { Globe, PanelLeft, Search } from 'lucide-react'
 import { api } from '../lib/api'
+import { setBrowserPaneOpen, useBrowserPaneOpen, useBrowserState } from '../lib/browserPane'
+import { useStore } from '../state/store'
 import { CubexMark } from '../theme/Logo'
 import { UpdateTitleButton } from './UpdateNotice'
+import './browser.css'
 
 interface TitleBarProps {
   onSearch: () => void
@@ -26,6 +29,20 @@ function Caption({ maximized, onToggle }: { maximized: boolean; onToggle: () => 
         <svg viewBox="0 0 10 10"><path d="M0.5 0.5l9 9M9.5 0.5l-9 9" /></svg>
       </button>
     </div>
+  )
+}
+
+/** Opens the agent's browser. A dot says this task has a page open while the pane is closed. */
+function BrowserButton(): JSX.Element {
+  const open = useBrowserPaneOpen()
+  const conversationId = useStore((s) => s.activeConversation?.id)
+  const state = useBrowserState(conversationId)
+  const label = open ? 'Hide the browser' : state?.open ? 'Show the browser, which has a page open' : 'Show the browser'
+  return (
+    <button className="tb-browser" onClick={() => setBrowserPaneOpen(!open)} aria-label={label} aria-pressed={open} title={label}>
+      <Globe size={15} strokeWidth={1.75} aria-hidden="true" />
+      {!open && state?.open && <span className="tb-browser__dot" />}
+    </button>
   )
 }
 
@@ -55,6 +72,7 @@ export function TitleBar({ onSearch, sideOpen, onToggleSide }: TitleBarProps): J
         <kbd>Ctrl K</kbd>
       </button>
       {!sideOpen && <UpdateTitleButton />}
+      <BrowserButton />
       <Caption maximized={maximized} onToggle={() => void api.windowToggleMaximize().then(setMaximized)} />
     </header>
   )

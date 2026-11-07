@@ -123,6 +123,14 @@ Cubex ships 17 provider presets:
   commit. Web search and page fetch, a to-do list, questions back to you, and any MCP tools you add.
 - **Safe file edits.** An edit is rejected when the file changed since Cubex last read it. Paths outside the
   project folder, including through symlinks, are refused.
+- **A browser for its own work.** The agent can start your dev server, open the page, click through it, read the
+  console and fix what it finds. You can watch and use the same page in a pane beside the conversation. It keeps none
+  of your sign-ins, and any site that is not on this computer asks you first.
+- **Worktrees and racing models.** A task can work in a git worktree of its own, so several can change the same files
+  at once. Give the same work to up to four models from any of your providers, compare their diffs and checks side by
+  side, and bring the best one back. See [Worktrees](docs/WORKTREES.md).
+- **Project memory.** The agent can propose short rules for later tasks, such as how the tests must be run. You approve
+  each one, and they live in `.cubex/memory.md`, where you can edit them.
 - **Research subagents.** Cubex can hand a bounded, read-only subtask to a subagent and show what it did.
 - **Other agents.** Settings finds the coding agents installed on this PC (Claude Code, Codex, Gemini CLI, OpenCode,
   Cursor, GitHub Copilot, Goose, Qwen Code and Antigravity) and shows who is signed in to each. An agent is the
@@ -354,7 +362,6 @@ what you saw.
 
 Ideas that are being considered, with no dates attached:
 
-- Git worktrees per session, so sessions can run side by side on one project.
 - Restore points that survive a restart.
 - MCP over HTTP and SSE.
 - A benchmark page for local models, and signed installers.
@@ -366,6 +373,7 @@ Ideas that are being considered, with no dates attached:
 | [Architecture](docs/ARCHITECTURE.md) | Layers, data flow and extension points |
 | [Providers](docs/PROVIDERS.md) | Adding a provider or an OpenAI-compatible endpoint |
 | [Harness workflow](docs/HARNESS_WORKFLOW.md) | Plans, permissions, review, goals and workspace tools |
+| [Worktrees](docs/WORKTREES.md) | Tasks in checkouts of their own, and racing models against each other |
 | [Skills](docs/SKILLS.md) | The bundled skills, on-demand loading and project overrides |
 | [Local models](docs/LOCAL_MODELS.md) | Runtimes, downloads and the model catalog |
 | [Hardware analyzer](docs/HARDWARE_ANALYZER.md) | How hardware is detected and estimates are made |

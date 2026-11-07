@@ -68,6 +68,8 @@ export interface Conversation {
   composer?: ConversationComposer
   /** Project folder this conversation belongs to (sidebar grouping). */
   workspacePath?: string
+  /** The checkout of its own this task works in. */
+  worktree?: ConversationWorktree
   /** Pinned to the top of the sidebar. */
   pinned?: boolean
   /** Archived — hidden from the main list, kept in the Archived section. */
@@ -90,6 +92,86 @@ export interface Conversation {
   totalUsage?: Usage
 }
 
+/** The checkout of its own a task works in. Only the main process writes this. */
+export interface ConversationWorktree {
+  /** The project it came from. */
+  repoRoot: string
+  path: string
+  branch: string
+  /** The commit it started from, which its changes are measured against. */
+  baseCommit: string
+  /** The folder after its setup: what the task's own changes are measured against. Falls back to the base commit. */
+  baseTree?: string
+  /** The branch the project was on, for showing. */
+  baseBranch: string
+  createdAt: number
+  /** The tasks given the same work on different models share this. */
+  raceId?: string
+  /** It has been deleted: the task's transcript stays, and it has no folder any more. */
+  removedAt?: number
+}
+
+export type WorktreePlan =
+  | { ok: false; reason: string }
+  | {
+    ok: true
+    repoRoot: string
+    branch: string
+    /** Changes in the project folder that a new worktree will not have. */
+    uncommitted: number
+    setup: string[]
+    copy: string[]
+    /** The commands come from the project's own .cubex/worktrees.json rather than a guess. */
+    setupFromProject: boolean
+  }
+
+export interface WorktreeSummary {
+  exists: boolean
+  files: number
+  additions: number
+  deletions: number
+  commits: number
+}
+
+export interface WorktreeCommandResult {
+  command: string
+  ok: boolean
+  exitCode: number | null
+  /** The end of what it printed. */
+  output: string
+}
+
+/** One task's place in a race. */
+export interface RaceRun {
+  conversationId: string
+  title: string
+  providerId?: string
+  model?: string
+  worktree: ConversationWorktree
+  summary: WorktreeSummary
+  /** What its requests have cost so far, in dollars; undefined when no price is known. */
+  costUsd?: number
+}
+
+/** A task's browser page, as the pane shows it. */
+export interface BrowserState {
+  conversationId: string
+  /** A page has been opened in this task. */
+  open: boolean
+  url: string
+  title: string
+  loading: boolean
+  canGoBack: boolean
+}
+
+/** Where the pane wants the page drawn, in the window's pixels. */
+export interface BrowserBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 export interface ConversationSummary {
   id: string
   title: string
@@ -99,6 +181,7 @@ export interface ConversationSummary {
   model?: string
   execution: 'cloud' | 'local' | 'hybrid'
   workspacePath?: string
+  worktree?: ConversationWorktree
   pinned?: boolean
   archived?: boolean
   messageCount: number
@@ -969,6 +1052,25 @@ export interface CubexAPI {
   // Conversations
   listConversations(): Promise<ConversationSummary[]>
   getConversation(id: string): Promise<Conversation | null>
+  worktreePlan(workspace: string): Promise<WorktreePlan>
+  /** Give a new task a worktree. */
+  worktreeAttach(conversationId: string, request: { workspace: string; copy: string[]; raceId?: string; title?: string }): Promise<Conversation>
+  /** Run the setup the person agreed to; whatever it writes is not counted as the task's own change. */
+  worktreeSetup(conversationId: string, commands: string[]): Promise<WorktreeCommandResult[]>
+  worktreeRun(conversationId: string, commands: string[]): Promise<WorktreeCommandResult[]>
+  worktreeDiff(conversationId: string): Promise<string>
+  worktreeApply(conversationId: string): Promise<{ ok: true; files: number } | { ok: false; reason: string }>
+  worktreeDiscard(conversationId: string): Promise<{ ok: true } | { ok: false; reason: string }>
+  raceRuns(raceId: string): Promise<RaceRun[]>
+  /** The check commands a project is known to have, for offering to run them on every run of a race. */
+  worktreeChecks(conversationId: string): Promise<string[]>
+  browserState(conversationId: string): Promise<BrowserState>
+  browserAttach(conversationId: string, bounds: BrowserBounds): Promise<void>
+  browserDetach(): Promise<void>
+  browserOpen(conversationId: string, url: string): Promise<BrowserState>
+  browserBack(conversationId: string): Promise<void>
+  browserReload(conversationId: string): Promise<void>
+  onBrowserState(cb: (state: BrowserState) => void): () => void
   createConversation(partial: Partial<Conversation>): Promise<Conversation>
   updateConversation(id: string, patch: Partial<Conversation>): Promise<void>
   /**
@@ -1226,6 +1328,22 @@ export const IPC = {
   revealCommandOutput: 'command-output:reveal',
   listConversations: 'conv:list',
   getConversation: 'conv:get',
+  worktreePlan: 'worktree:plan',
+  worktreeAttach: 'worktree:attach',
+  worktreeSetup: 'worktree:setup',
+  worktreeRun: 'worktree:run',
+  worktreeDiff: 'worktree:diff',
+  worktreeApply: 'worktree:apply',
+  worktreeDiscard: 'worktree:discard',
+  raceRuns: 'worktree:race-runs',
+  worktreeChecks: 'worktree:checks',
+  browserState: 'browser:state',
+  browserAttach: 'browser:attach',
+  browserDetach: 'browser:detach',
+  browserOpen: 'browser:open',
+  browserBack: 'browser:back',
+  browserReload: 'browser:reload',
+  browserStateChanged: 'browser:state-changed',
   createConversation: 'conv:create',
   updateConversation: 'conv:update',
   compactConversation: 'conv:compact',

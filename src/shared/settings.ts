@@ -78,6 +78,12 @@ export interface AppSettings {
     budget?: BudgetSettings
     /** How many tools and how much instruction a model is shown. `auto` picks by model (see main/modelProfiles.ts); the others apply to every model. */
     harnessProfile?: HarnessProfileSetting
+    /** Put a map of the project in the prompt. On unless turned off. */
+    projectMap?: boolean
+    /** Read .cubex/memory.md into the prompt, and let the agent propose notes for it. On unless turned off. */
+    projectMemory?: boolean
+    /** Offer the agent a browser for checking its work on web pages. On unless turned off. */
+    browserTool?: boolean
     /** A second model that reads the diff before a turn that changed files ends (see main/turnReviewer.ts). */
     reviewer?: ReviewerSettings
   }

@@ -36,6 +36,22 @@ function browserStub(): CubexAPI {
     localOnly: false
   }
   return {
+    worktreePlan: async () => ({ ok: false, reason: unavailable.message }),
+    worktreeAttach: async () => { throw new Error(unavailable.message) },
+    worktreeSetup: async () => [],
+    worktreeRun: async () => [],
+    worktreeDiff: async () => '',
+    worktreeApply: async () => ({ ok: false, reason: unavailable.message }),
+    worktreeDiscard: async () => ({ ok: false, reason: unavailable.message }),
+    raceRuns: async () => [],
+    worktreeChecks: async () => [],
+    browserState: async (conversationId) => ({ conversationId, open: false, url: '', title: '', loading: false, canGoBack: false }),
+    browserAttach: noop,
+    browserDetach: noop,
+    browserOpen: async () => { throw new Error(unavailable.message) },
+    browserBack: noop,
+    browserReload: noop,
+    onBrowserState: () => () => undefined,
     listProviders: empty,
     saveProvider: async (cfg) => cfg,
     deleteProvider: noop,

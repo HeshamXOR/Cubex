@@ -8,6 +8,41 @@ project can, and the format follows [Keep a Changelog](https://keepachangelog.co
 A version that is not released yet has the word Unreleased where its date goes. Releasing it means writing the date
 there. [docs/RELEASING.md](docs/RELEASING.md) has the whole checklist.
 
+## [0.5.0] - 2026-11-07
+
+The agent can now look at its own work in a browser, several tasks can change the same project at once in worktrees of
+their own, and the same work can go to several models so that you keep the best result.
+
+### New
+
+- **A browser the agent can use.** It can start your dev server, open the page, click, type, read the console and see
+  failed requests, then fix what it found. Open the pane with the globe in the title bar to watch or use the same page.
+  Pages on this computer open freely, and any other site asks you first. It keeps none of your sign-ins and forgets
+  everything when Cubex closes. A model that can take images can also ask for a screenshot.
+- **Images on gateways.** Claude, GPT, Gemini and Grok models on an OpenAI-compatible gateway now take images, including
+  ones you attach. Cubex used to refuse them before sending.
+- **Worktrees.** From the branch chip above a conversation, start a task in a checkout of its own, on its own branch, and
+  bring the result back to your project folder when you want it. You see the setup commands before they run, and a
+  project can set them in `.cubex/worktrees.json`.
+- **Try on several models.** Give the same work to up to four models from any of your providers. A page compares what
+  each changed and what it cost, runs one check on all of them, shows the diffs, and brings back the one you choose.
+- **Project memory.** The agent can propose short rules for later tasks, such as how the tests must be run. You approve
+  each note, and they live in `.cubex/memory.md`. Turn it off under **Models**, then **Agent tools**.
+
+### Changed
+
+- Editing a file that runs code when you build, test, install or push, such as `package.json`, a test runner's config or a
+  CI workflow, now asks you in every mode except Bypass.
+- Once such a file has changed in a task, a saved rule like "npm test" no longer runs without asking until you have approved
+  a command again, because it may do something else now.
+- Looking at the page in the browser now counts as checking an edit.
+- The project map can be turned off under **Models**, then **Agent tools**.
+
+### Good to know
+
+- A worktree separates files, not programs. Commands still run on your computer with your permissions.
+- Racing four models costs about four times as much, and each one asks for its own approvals.
+
 ## [0.4.0] - 2026-11-06
 
 Cubex now sets itself up for each model. On a gateway it picks the right format for every model, knows its price and

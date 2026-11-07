@@ -1,3 +1,4 @@
+import { removeWorktree, summarizeWorktree } from './worktrees'
 import { dialog, ipcMain, shell, type BrowserWindow } from 'electron'
 import { nanoid } from 'nanoid'
 import {
@@ -182,9 +183,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null): { dispose: (
     conversationRepo.create(conv)
     return conv
   })
-  handle(IPC.updateConversation, (id: string, patch: Partial<Conversation>) =>
-    conversationRepo.update(id, patch)
-  )
+  handle(IPC.updateConversation, (id: string, patch: Partial<Conversation>) => {
+    // What a worktree is, and where, comes only from the code that made it: discarding one deletes a folder.
+    const { worktree: _ignored, ...allowed } = patch
+    conversationRepo.update(id, allowed)
+  })
   // Never rejects: a refusal (turn running, nothing to compact, summary failed) is an error result the UI can show.
   handle(IPC.compactConversation, async (conversationId: string): Promise<CompactionResult> => {
     try {
@@ -193,9 +196,16 @@ export function registerIpc(getWindow: () => BrowserWindow | null): { dispose: (
       return { ok: false, error: error instanceof Error ? error.message : String(error) }
     }
   })
-  handle(IPC.deleteConversation, (id: string) => {
+  handle(IPC.deleteConversation, async (id: string) => {
+    const worktree = conversationRepo.get(id)?.worktree
     conversationRepo.delete(id)
     chat.forgetConversation(id)
+    // A worktree with nothing in it goes with its task. One holding work stays, on its branch, for git to show: deleting a
+    // conversation should not delete what it produced.
+    if (worktree && !worktree.removedAt) {
+      const summary = await summarizeWorktree(worktree).catch(() => undefined)
+      if (summary?.exists && summary.files === 0 && summary.commits === 0) await removeWorktree(worktree).catch(() => undefined)
+    }
   })
   handle(IPC.searchConversations, (query: string) => conversationRepo.search(query))
   handle(IPC.exportConversation, (id: string, format: 'json' | 'markdown' | 'txt') =>

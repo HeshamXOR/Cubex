@@ -51,6 +51,7 @@ export type ViewId =
   | 'hardware'
   | 'presets'
   | 'settings'
+  | 'race'
 
 export interface ChatTab {
   id: string
@@ -630,7 +631,7 @@ export const useStore = create<CubexState>((set, get) => ({
       activeConversation: run?.activeConversation
         ? {
             ...run.activeConversation,
-            title: conv.title, pinned: conv.pinned, archived: conv.archived, workspacePath: conv.workspacePath,
+            title: conv.title, pinned: conv.pinned, archived: conv.archived, workspacePath: conv.workspacePath, worktree: conv.worktree,
             contextStartMessageId: conv.contextStartMessageId, contextSummary: conv.contextSummary, contextSummaryAt: conv.contextSummaryAt
           }
         : conv,

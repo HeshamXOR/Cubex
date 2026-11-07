@@ -1,0 +1,2 @@
+FEATURE: invoices can be split
+FIX: rounding of totals
